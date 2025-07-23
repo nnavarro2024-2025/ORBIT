@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -15,11 +15,12 @@ export default function BookingDashboard() {
   const [showBookingModal, setShowBookingModal] = useState(false);
   const [selectedView, setSelectedView] = useState("dashboard");
 
-  const { data: facilities } = useQuery({
+  // ✅ Default to empty arrays to avoid undefined errors
+  const { data: facilities = [] } = useQuery<any[]>({
     queryKey: ["/api/facilities"],
   });
 
-  const { data: userBookings } = useQuery({
+  const { data: userBookings = [] } = useQuery<any[]>({
     queryKey: ["/api/bookings"],
   });
 
@@ -40,19 +41,12 @@ export default function BookingDashboard() {
   };
 
   const getStats = () => {
-    if (!userBookings) return { active: 0, approved: 0, pending: 0 };
-    
-    const active = userBookings.filter((booking: any) => 
-      booking.status === 'approved' && new Date(booking.startTime) >= new Date()
+    const active = userBookings.filter(
+      (b) => b.status === "approved" && new Date(b.startTime) >= new Date()
     ).length;
-    
-    const approved = userBookings.filter((booking: any) => 
-      booking.status === 'approved'
-    ).length;
-    
-    const pending = userBookings.filter((booking: any) => 
-      booking.status === 'pending'
-    ).length;
+
+    const approved = userBookings.filter((b) => b.status === "approved").length;
+    const pending = userBookings.filter((b) => b.status === "pending").length;
 
     return { active, approved, pending };
   };
@@ -65,7 +59,7 @@ export default function BookingDashboard() {
   };
 
   const getFacilityName = (facilityId: number) => {
-    const facility = facilities?.find((f: any) => f.id === facilityId);
+    const facility = facilities.find((f) => f.id === facilityId);
     return facility?.name || `Facility ${facilityId}`;
   };
 
@@ -86,11 +80,12 @@ export default function BookingDashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {userBookings?.map((booking: any) => (
+                  {userBookings.map((booking) => (
                     <tr key={booking.id} className="border-b hover:bg-accent/50">
                       <td className="py-3 px-4">{getFacilityName(booking.facilityId)}</td>
                       <td className="py-3 px-4">
-                        {formatDateTime(booking.startTime)} - {new Date(booking.endTime).toLocaleTimeString()}
+                        {formatDateTime(booking.startTime)} –{" "}
+                        {new Date(booking.endTime).toLocaleTimeString()}
                       </td>
                       <td className="py-3 px-4">{booking.purpose}</td>
                       <td className="py-3 px-4">
@@ -109,7 +104,7 @@ export default function BookingDashboard() {
       case "available-rooms":
         return (
           <div className="material-card p-6">
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-semibold">Available Facilities</h2>
               <button
                 onClick={() => setShowBookingModal(true)}
@@ -119,12 +114,17 @@ export default function BookingDashboard() {
                 New Booking
               </button>
             </div>
-            
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {facilities?.map((facility: any) => (
-                <div key={facility.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer">
-                  <img 
-                    src={facility.imageUrl || "https://images.unsplash.com/photo-1497486751825-1233686d5d80?w=400&h=250&fit=crop"} 
+              {facilities.map((facility) => (
+                <div
+                  key={facility.id}
+                  className="border rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer"
+                >
+                  <img
+                    src={
+                      facility.imageUrl ||
+                      "https://images.unsplash.com/photo-1497486751825-1233686d5d80?w=400&h=250&fit=crop"
+                    }
                     alt={facility.name}
                     className="w-full h-32 object-cover rounded-lg mb-3"
                   />
@@ -132,7 +132,7 @@ export default function BookingDashboard() {
                   <p className="text-sm text-muted-foreground mb-2">
                     {facility.description || `Capacity: ${facility.capacity} people`}
                   </p>
-                  <div className="flex items-center justify-between">
+                  <div className="flex justify-between items-center">
                     <span className="text-sm text-secondary">Available</span>
                     <button
                       onClick={() => setShowBookingModal(true)}
@@ -158,7 +158,9 @@ export default function BookingDashboard() {
                 <span className="ml-2 text-sm">Receive booking confirmations</span>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-2">Default Booking Duration</label>
+                <label className="block text-sm font-medium mb-2">
+                  Default Booking Duration
+                </label>
                 <select className="material-input max-w-xs">
                   <option value="1">1 hour</option>
                   <option value="2">2 hours</option>
@@ -172,7 +174,6 @@ export default function BookingDashboard() {
       default:
         return (
           <>
-            {/* Quick Stats */}
             <div className="grid md:grid-cols-3 gap-6 mb-8">
               <div className="material-card p-6 text-center">
                 <div className="text-3xl font-bold text-primary mb-2">{stats.active}</div>
@@ -188,9 +189,8 @@ export default function BookingDashboard() {
               </div>
             </div>
 
-            {/* Available Facilities */}
             <div className="material-card p-6 mb-8">
-              <div className="flex items-center justify-between mb-6">
+              <div className="flex justify-between items-center mb-6">
                 <h2 className="text-xl font-semibold">Available Facilities</h2>
                 <button
                   onClick={() => setShowBookingModal(true)}
@@ -200,12 +200,17 @@ export default function BookingDashboard() {
                   New Booking
                 </button>
               </div>
-              
               <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {facilities?.slice(0, 3).map((facility: any) => (
-                  <div key={facility.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer">
-                    <img 
-                      src={facility.imageUrl || "https://images.unsplash.com/photo-1497486751825-1233686d5d80?w=400&h=250&fit=crop"} 
+                {facilities.slice(0, 3).map((facility) => (
+                  <div
+                    key={facility.id}
+                    className="border rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer"
+                  >
+                    <img
+                      src={
+                        facility.imageUrl ||
+                        "https://images.unsplash.com/photo-1497486751825-1233686d5d80?w=400&h=250&fit=crop"
+                      }
                       alt={facility.name}
                       className="w-full h-32 object-cover rounded-lg mb-3"
                     />
@@ -213,7 +218,7 @@ export default function BookingDashboard() {
                     <p className="text-sm text-muted-foreground mb-2">
                       {facility.description || `Capacity: ${facility.capacity} people`}
                     </p>
-                    <div className="flex items-center justify-between">
+                    <div className="flex justify-between items-center">
                       <span className="text-sm text-secondary">Available</span>
                       <button
                         onClick={() => setShowBookingModal(true)}
@@ -227,7 +232,6 @@ export default function BookingDashboard() {
               </div>
             </div>
 
-            {/* Recent Bookings */}
             <div className="material-card p-6">
               <h3 className="text-lg font-semibold mb-4">Recent Bookings</h3>
               <div className="overflow-x-auto">
@@ -241,11 +245,12 @@ export default function BookingDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {userBookings?.slice(0, 5).map((booking: any) => (
+                    {userBookings.slice(0, 5).map((booking) => (
                       <tr key={booking.id} className="border-b hover:bg-accent/50">
                         <td className="py-3 px-4">{getFacilityName(booking.facilityId)}</td>
                         <td className="py-3 px-4">
-                          {formatDateTime(booking.startTime)} - {new Date(booking.endTime).toLocaleTimeString()}
+                          {formatDateTime(booking.startTime)} –{" "}
+                          {new Date(booking.endTime).toLocaleTimeString()}
                         </td>
                         <td className="py-3 px-4">{booking.purpose}</td>
                         <td className="py-3 px-4">
@@ -267,10 +272,8 @@ export default function BookingDashboard() {
   return (
     <div className="min-h-screen bg-background">
       <Header />
-      
       <div className="container mx-auto px-6 py-8">
         <div className="grid lg:grid-cols-4 gap-8">
-          {/* Sidebar Navigation */}
           <div className="lg:col-span-1">
             <Sidebar
               items={sidebarItems}
@@ -278,18 +281,13 @@ export default function BookingDashboard() {
               onItemClick={handleSidebarClick}
             />
           </div>
-          
-          {/* Main Content */}
-          <div className="lg:col-span-3">
-            {renderContent()}
-          </div>
+          <div className="lg:col-span-3">{renderContent()}</div>
         </div>
       </div>
-
       <BookingModal
         isOpen={showBookingModal}
         onClose={() => setShowBookingModal(false)}
-        facilities={facilities || []}
+        facilities={facilities}
       />
     </div>
   );

@@ -4,6 +4,9 @@ import { Bell, LogOut, BookOpen } from "lucide-react";
 export default function Header() {
   const { user } = useAuth();
 
+  // 👇 Add this to check what's inside user
+ 
+
   return (
     <header className="bg-card shadow-sm border-b">
       <div className="px-6 py-4">
@@ -24,7 +27,7 @@ export default function Header() {
               </div>
             )}
             <span className="text-sm text-muted-foreground">
-              Welcome, {user?.firstName} {user?.lastName}
+              Welcome, {user?.user_metadata.first_name} {user?.user_metadata.last_name}
             </span>
             <a href="/api/logout" className="material-button outlined">
               <LogOut className="h-4 w-4 mr-2" />

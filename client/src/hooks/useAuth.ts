@@ -1,42 +1,40 @@
-import { useQuery } from "@tanstack/react-query";
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase"; // adjust path if needed
 
 export function useAuth() {
-  const [checkAuth, setCheckAuth] = useState(false);
-  
-  const { data: user, isLoading, error } = useQuery({
-    queryKey: ["/api/auth/user"],
-    queryFn: async () => {
-      const response = await fetch("/api/auth/user", {
-        credentials: "include",
-      });
-      if (response.status === 401) {
-        return null;
-      }
-      if (!response.ok) {
-        throw new Error(`${response.status}: ${response.statusText}`);
-      }
-      return response.json();
-    },
-    enabled: checkAuth,
-    retry: false,
-    refetchOnWindowFocus: false,
-    refetchOnMount: false,
-    refetchOnReconnect: false,
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    gcTime: 10 * 60 * 1000, // 10 minutes
-  });
+  const [user, setUser] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
 
   useEffect(() => {
-    // Only check authentication once on mount
-    if (!checkAuth) {
-      setCheckAuth(true);
-    }
-  }, [checkAuth]);
+    const fetchUser = async () => {
+      try {
+        setIsLoading(true);
+        const { data, error } = await supabase.auth.getUser();
+        if (error) throw error;
+        setUser(data.user);
+      } catch (err: any) {
+        setUser(null);
+        setError(err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchUser();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange(() => {
+      fetchUser(); // refetch user on login/logout
+    });
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
 
   return {
     user,
-    isLoading: checkAuth && isLoading,
+    isLoading,
     isAuthenticated: !!user,
     error,
   };

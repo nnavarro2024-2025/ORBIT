@@ -1,5 +1,6 @@
 import { storage } from '../storage';
 import { OrzSession } from '@shared/schema';
+import crypto from 'crypto'; // Required for crypto.randomUUID()
 
 class SessionService {
   private inactivityTimer: Map<string, NodeJS.Timeout> = new Map();
@@ -22,17 +23,22 @@ class SessionService {
     });
 
     // Set up inactivity timer
-    this.setupInactivityTimer(session.id);
+    this.setupInactivityTimer(session.id, userId);
 
     return session;
   }
 
   async updateActivity(sessionId: string): Promise<void> {
     await storage.updateOrzSession(sessionId, { lastActivity: new Date() });
-    
+
     // Reset inactivity timer
     this.clearInactivityTimer(sessionId);
-    this.setupInactivityTimer(sessionId);
+    
+    // Retrieve session to get userId for reset
+    const session = await storage.getActiveOrzSession(sessionId);
+    if (session) {
+      this.setupInactivityTimer(sessionId, session.userId);
+    }
   }
 
   async extendSession(sessionId: string, minutes: number): Promise<void> {
@@ -50,10 +56,13 @@ class SessionService {
     this.clearInactivityTimer(sessionId);
   }
 
-  private setupInactivityTimer(sessionId: string): void {
+  private setupInactivityTimer(sessionId: string, userId: string | null): void {
     const timer = setTimeout(async () => {
       await this.endSession(sessionId);
       await storage.createSystemAlert({
+        id: crypto.randomUUID(),
+        createdAt: new Date(),
+        userId: userId ?? null,
         type: 'system',
         severity: 'medium',
         title: 'Session Auto-Logout',
