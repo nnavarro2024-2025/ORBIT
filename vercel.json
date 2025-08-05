@@ -1,25 +1,19 @@
 {
   "buildCommand": "npm run build",
-  "outputDirectory": "dist",
+  "outputDirectory": "dist/public",
   "functions": {
-    "api/*.ts": {
-      "runtime": "nodejs@18"
+    "api/index.js": {
+      "runtime": "@vercel/node@5.3.6"
     }
   },
-  "routes": [
+  "rewrites": [
     {
-      "src": "/api/(.*)",
-      "dest": "/api/$1"
+      "source": "/api/(.*)",
+      "destination": "/api/index.js"
     },
     {
-      "src": "/(.*)",
-      "dest": "/index.html"
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
-  ],
-  "env": {
-    "DATABASE_URL": "postgresql://postgres:Jameslemuel21%40123@db.unbekwpigyumnihfwsio.supabase.co:5432/postgres",
-    "SESSION_SECRET": "Pcyjz1EYaGW/KH23bJ+FXiCUOLP9EGrXtE1ehGpdycs=",
-    "NEXT_PUBLIC_SUPABASE_URL": "https://unbekwpigyumnihfwsio.supabase.co",
-    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVuYmVrd3BpZ3l1bW5paGZ3c2lvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI3NzAyMDQsImV4cCI6MjA2ODM0NjIwNH0.-5e6izMQCUDGHELnWUj_ewund4kk0y1ymQJcYANVJps"
-  }
+  ]
 }

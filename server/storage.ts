@@ -53,6 +53,7 @@ export interface IStorage {
   // Facility operations
   getAllFacilities(): Promise<Facility[]>;
   getFacility(id: number): Promise<Facility | undefined>;
+  createFacility(facility: { name: string; description?: string; capacity: number }): Promise<Facility>;
   
   // Facility booking operations
   createFacilityBooking(booking: InsertFacilityBooking): Promise<FacilityBooking>;
@@ -185,6 +186,17 @@ export class DatabaseStorage implements IStorage {
 
   async getFacility(id: number): Promise<Facility | undefined> {
     const [facility] = await db.select().from(facilities).where(eq(facilities.id, id));
+    return facility;
+  }
+
+  async createFacility(facilityData: { name: string; description?: string; capacity: number }): Promise<Facility> {
+    const [facility] = await db.insert(facilities).values({
+      name: facilityData.name,
+      description: facilityData.description || "",
+      capacity: facilityData.capacity,
+      isActive: true,
+      createdAt: new Date(),
+    }).returning();
     return facility;
   }
 

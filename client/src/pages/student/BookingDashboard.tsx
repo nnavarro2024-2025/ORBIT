@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, getQueryFn } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
@@ -20,9 +20,13 @@ export default function BookingDashboard() {
     queryKey: ["/api/facilities"],
   });
 
-  const { data: userBookings = [] } = useQuery<any[]>({
+  const { data: userBookingsData = [] } = useQuery<any[]>({
     queryKey: ["/api/bookings"],
+    queryFn: getQueryFn<any[]>({ on401: "returnNull" }),
   });
+
+  // ✅ Ensure userBookings is always an array
+  const userBookings = Array.isArray(userBookingsData) ? userBookingsData : [];
 
   const sidebarItems = [
     { id: "dashboard", label: "Dashboard", icon: Home },

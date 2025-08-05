@@ -47,7 +47,7 @@ export default function Login() {
       alert("Signup successful. Please check your email to confirm your account.");
       setIsSignUp(false);
     } else {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
@@ -56,6 +56,13 @@ export default function Login() {
         setErrorMsg("Login failed: " + error.message);
         setLoading(false);
         return;
+      }
+
+      // Save the access token to localStorage for API requests
+      const token = data?.session?.access_token;
+      if (token) {
+        localStorage.setItem("auth.token", token);
+        console.log("Saved token:", localStorage.getItem("auth.token")); // Debug log
       }
 
       window.location.href = "/";

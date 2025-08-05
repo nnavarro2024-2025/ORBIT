@@ -7,9 +7,29 @@ import { emailService } from "./services/emailService";
 import {
   insertFacilityBookingSchema,
   insertTimeExtensionRequestSchema,
-  insertOrzSessionSchema,
 } from "@shared/schema";
 import { z } from "zod";
+
+// ✅ Helper function to seed facilities
+async function ensureFacilitiesExist() {
+  let facilities = await storage.getAllFacilities();
+  if (facilities.length === 0) {
+    console.log("🏢 [FACILITIES] No facilities found, creating sample facilities");
+    const sampleFacilities = [
+      { name: "Study Room A", description: "Quiet study room with 4 seats", capacity: 4 },
+      { name: "Study Room B", description: "Group study room with 8 seats", capacity: 8 },
+      { name: "Conference Room", description: "Large conference room for meetings", capacity: 20 },
+      { name: "Computer Lab", description: "Computer lab with 15 workstations", capacity: 15 },
+    ];
+
+    for (const facility of sampleFacilities) {
+      await storage.createFacility(facility);
+    }
+
+    facilities = await storage.getAllFacilities();
+  }
+  return facilities;
+}
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // =========================
@@ -96,8 +116,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.log("🕰️ [EXTENSION] Request body:", req.body);
     try {
       const userId = req.user.claims.sub;
-      const data = insertTimeExtensionRequestSchema.parse(req.body);
-      const request = await storage.createTimeExtensionRequest({ ...data, userId });
+      const data = insertTimeExtensionRequestSchema.parse({ ...req.body, userId });
+      const request = await storage.createTimeExtensionRequest(data);
       res.json(request);
     } catch (error) {
       console.error("❌ [EXTENSION] Error creating request:", error);
@@ -111,14 +131,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/bookings", isAuthenticated, async (req: any, res) => {
     console.log("📅 [BOOKING] New booking request:", req.body);
     try {
-      const userId = req.user.claims.sub;
-      const data = insertFacilityBookingSchema.parse(req.body);
-      const booking = await storage.createFacilityBooking({ ...data, userId });
+      // Ensure facilities exist before booking
+      await ensureFacilitiesExist();
 
+      const userId = req.user.claims.sub;
+      const data = insertFacilityBookingSchema.parse({
+        ...req.body,
+        startTime: new Date(req.body.startTime),
+        endTime: new Date(req.body.endTime),
+        userId,
+      });
+
+      const booking = await storage.createFacilityBooking(data);
       console.log("✅ [BOOKING] Booking saved:", booking);
 
       const user = await storage.getUser(userId);
       const facility = await storage.getFacility(data.facilityId);
+
       if (user?.email && facility) {
         await emailService.sendBookingConfirmation(booking, user, facility.name);
       }
@@ -162,7 +191,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Same logging pattern continues for `/approve`, `/deny`, `/stats`, etc...
+  // =========================
+  // 🏢 FACILITIES ROUTES
+  // =========================
+  app.get("/api/facilities", async (req: any, res) => {
+    console.log("🏢 [FACILITIES] Fetching facilities");
+    try {
+      const facilities = await ensureFacilitiesExist();
+      res.json(facilities);
+    } catch (error) {
+      console.error("❌ [FACILITIES] Error fetching facilities:", error);
+      res.status(500).json({ message: "Failed to fetch facilities" });
+    }
+  });
 
   // =========================
   // ✅ SERVER BOOT
