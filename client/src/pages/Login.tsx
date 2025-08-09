@@ -1,11 +1,13 @@
 import { useState, useEffect } from "react";
-import { useParams } from "wouter";
+import { useRoute } from "wouter";
 import { BookOpen, Dock, Calendar } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/useAuth";
 
 export default function Login() {
-  const { subsystem } = useParams<{ subsystem?: string }>();
+  const [match, params] = useRoute<{ subsystem?: string }>("/login/:subsystem?");
+  const subsystem = params?.subsystem;
+
   const { isAuthenticated } = useAuth();
 
   const [email, setEmail] = useState("");
@@ -26,6 +28,8 @@ export default function Login() {
     setLoading(true);
     setErrorMsg("");
 
+    const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+
     if (isSignUp) {
       const { data, error } = await supabase.auth.signUp({
         email,
@@ -44,6 +48,31 @@ export default function Login() {
         return;
       }
 
+      // Sync user data on your backend after successful signup
+      try {
+        // Note: token might be undefined if signUp requires email confirmation first
+        const token = data?.session?.access_token || "";
+
+        const res = await fetch(`${API_URL}/api/auth/sync`, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          credentials: "include",
+        });
+
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(`Sync failed: ${res.status} ${text}`);
+        }
+      } catch (syncError) {
+        console.error("User sync failed:", syncError);
+        setErrorMsg("Signup succeeded but syncing user data failed.");
+        setLoading(false);
+        return;
+      }
+
       alert("Signup successful. Please check your email to confirm your account.");
       setIsSignUp(false);
     } else {
@@ -58,11 +87,10 @@ export default function Login() {
         return;
       }
 
-      // Save the access token to localStorage for API requests
       const token = data?.session?.access_token;
       if (token) {
         localStorage.setItem("auth.token", token);
-        console.log("Saved token:", localStorage.getItem("auth.token")); // Debug log
+        console.log("Saved token:", localStorage.getItem("auth.token"));
       }
 
       window.location.href = "/";

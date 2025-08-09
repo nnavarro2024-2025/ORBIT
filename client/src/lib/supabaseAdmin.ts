@@ -8,4 +8,6 @@ if (!supabaseUrl || !serviceRoleKey) {
   throw new Error('Missing Supabase environment variables for server-side client');
 }
 
-export const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
+export const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+  auth: { persistSession: false, detectSessionInUrl: false }
+});

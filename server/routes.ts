@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./supabaseAuth";
 import { sessionService } from "./services/sessionService";
 import { emailService } from "./services/emailService";
+import { supabaseAdmin } from "../client/src/lib/supabaseAdmin"; // <-- Import supabase admin client here
 import {
   insertFacilityBookingSchema,
   insertTimeExtensionRequestSchema,
@@ -45,6 +46,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("❌ [AUTH] Error fetching user:", error);
       res.status(500).json({ message: "Failed to fetch user" });
+    }
+  });
+
+  // === NEW: USER SYNC ROUTE ===
+  app.post("/api/auth/sync", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+
+      // Fetch user info from Supabase Auth using Admin API
+      const { data: { user }, error } = await supabaseAdmin.auth.admin.getUserById(userId);
+      if (error || !user) {
+        console.error("❌ [AUTH SYNC] Failed to get user from Supabase Auth:", error);
+        return res.status(404).json({ message: "User not found in Supabase Auth" });
+      }
+
+      // Prepare user data to upsert into your public users table
+      const userRecord = {
+        id: user.id,
+        email: user.email,
+        firstName: user.user_metadata?.firstName || "",
+        lastName: user.user_metadata?.lastName || "",
+        profileImageUrl: user.user_metadata?.avatar_url || "",
+        role: "student" as "student" | "faculty" | "admin", // cast explicitly
+        status: "active" as "active" | "banned" | "suspended",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+
+
+      };
+
+      // Upsert user into your users table via storage module
+      const updatedUser = await storage.upsertUser(userRecord);
+
+      console.log("🔄 [AUTH SYNC] User synced:", updatedUser);
+      res.json(updatedUser);
+    } catch (error) {
+      console.error("❌ [AUTH SYNC] Error syncing user:", error);
+      res.status(500).json({ message: "Failed to sync user data" });
     }
   });
 
