@@ -8,24 +8,14 @@ import { setupVite, serveStatic, log } from "./vite";
 async function startServer() {
   const app = express();
 
-  // --- ADD CORS MIDDLEWARE ---
-  const allowedOrigins = [
-    "https://orbit-kiuu5bpnh-james-lemuels-projects.vercel.app", // your Vercel frontend
-     "http://localhost:3000", 
-    "http://localhost:5000", // local dev frontend (optional)
-    "https://happy-ghosts-judge.loca.lt",
-  ];
-
+  // --- DYNAMIC CORS: allow all origins (adjust for production!) ---
   app.use(
     cors({
-      origin: function (origin, callback) {
-        if (!origin || allowedOrigins.indexOf(origin) !== -1) {
-          callback(null, true);
-        } else {
-          callback(new Error("Not allowed by CORS"));
-        }
+      origin: (origin, callback) => {
+        if (!origin) return callback(null, true); // allow non-browser tools like Postman, curl
+        callback(null, true); // allow all origins dynamically
       },
-      credentials: true, // important if frontend sends cookies or auth headers
+      credentials: true, // allow cookies/auth headers
     })
   );
 
