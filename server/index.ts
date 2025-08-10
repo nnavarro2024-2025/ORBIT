@@ -11,7 +11,9 @@ async function startServer() {
   // --- ADD CORS MIDDLEWARE ---
   const allowedOrigins = [
     "https://orbit-kiuu5bpnh-james-lemuels-projects.vercel.app", // your Vercel frontend
+     "http://localhost:3000", 
     "http://localhost:5000", // local dev frontend (optional)
+    "https://happy-ghosts-judge.loca.lt",
   ];
 
   app.use(
