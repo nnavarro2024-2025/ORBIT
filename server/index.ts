@@ -1,13 +1,31 @@
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-
-import express, { type Request, Response, NextFunction } from "express";
+import express, { Request, Response, NextFunction } from "express";
+import cors from "cors";
 import path from "path";
-import { createServer, type Server } from "http";
-import { registerRoutes } from "./routes"; // your route registrations
+import { createServer, Server } from "http";
+import { registerRoutes } from "./routes"; // your routes
 import { setupVite, serveStatic, log } from "./vite";
 
 async function startServer() {
   const app = express();
+
+  // --- ADD CORS MIDDLEWARE ---
+  const allowedOrigins = [
+    "https://orbit-kiuu5bpnh-james-lemuels-projects.vercel.app", // your Vercel frontend
+    "http://localhost:5000", // local dev frontend (optional)
+  ];
+
+  app.use(
+    cors({
+      origin: function (origin, callback) {
+        if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+          callback(null, true);
+        } else {
+          callback(new Error("Not allowed by CORS"));
+        }
+      },
+      credentials: true, // important if frontend sends cookies or auth headers
+    })
+  );
 
   // Body parsing middleware
   app.use(express.json());
@@ -38,10 +56,10 @@ async function startServer() {
     next();
   });
 
-  // Register all your API routes (make sure they use valid paths)
+  // Register API routes
   const server: Server = await registerRoutes(app);
 
-  // Global error handler middleware (must be after routes)
+  // Global error handler
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
@@ -49,17 +67,13 @@ async function startServer() {
     res.status(status).json({ message });
   });
 
-  // Setup frontend serving
+  // Frontend serving & fallback
   if (app.get("env") === "development") {
-    // Vite dev server integration
     await setupVite(app, server);
   } else {
-    // Serve production build static files
     serveStatic(app);
 
-    // React Router client-side routing fallback:
     app.get("*", (req, res) => {
-      // Only send index.html for non-API routes
       if (!req.path.startsWith("/api")) {
         res.sendFile(path.resolve("dist/public/index.html"));
       } else {
@@ -68,7 +82,7 @@ async function startServer() {
     });
   }
 
-  // Start the HTTP server
+  // Start server
   const port = parseInt(process.env.PORT || "5000", 10);
   server.listen(port, "0.0.0.0", () => {
     log(`🚀 Server running on http://localhost:${port}`);
