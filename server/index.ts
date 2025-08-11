@@ -1,3 +1,5 @@
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
 import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import path from "path";
@@ -8,14 +10,28 @@ import { setupVite, serveStatic, log } from "./vite";
 async function startServer() {
   const app = express();
 
-  // --- DYNAMIC CORS: allow all origins (adjust for production!) ---
+  // --- CORS middleware with strict origin whitelist ---
+  const allowedOrigins = [
+    "http://localhost:5000",               // your local frontend URL
+    "https://your-production-frontend.com" // add your deployed frontend URL here later
+  ];
+
   app.use(
     cors({
       origin: (origin, callback) => {
-        if (!origin) return callback(null, true); // allow non-browser tools like Postman, curl
-        callback(null, true); // allow all origins dynamically
+        // Allow requests with no origin (e.g. Postman, curl)
+        if (!origin) return callback(null, true);
+
+        if (allowedOrigins.includes(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error("Not allowed by CORS"));
+        }
       },
-      credentials: true, // allow cookies/auth headers
+      credentials: true, // Allow cookies and Authorization headers
+      methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+      allowedHeaders: ["Content-Type", "Authorization", "Accept"],
+      optionsSuccessStatus: 204, // For legacy browsers support
     })
   );
 
@@ -48,7 +64,7 @@ async function startServer() {
     next();
   });
 
-  // Register API routes
+  // Register your API routes
   const server: Server = await registerRoutes(app);
 
   // Global error handler

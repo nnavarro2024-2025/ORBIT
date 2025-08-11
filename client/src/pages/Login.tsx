@@ -31,6 +31,7 @@ export default function Login() {
     const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
     if (isSignUp) {
+      // Sign up flow
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
@@ -48,15 +49,21 @@ export default function Login() {
         return;
       }
 
-      // Sync user data on your backend after successful signup
-      try {
-        // Note: token might be undefined if signUp requires email confirmation first
-        const token = data?.session?.access_token || "";
+      if (!data.session) {
+        // No session means email confirmation required
+        alert("Signup successful! Please check your email and confirm your account.");
+        setIsSignUp(false);
+        setLoading(false);
+        return;
+      }
 
+      try {
+        // Sync user data with backend if you have an API endpoint for that
+        const token = data.session.access_token;
         const res = await fetch(`${API_URL}/api/auth/sync`, {
           method: "POST",
           headers: {
-            "Authorization": `Bearer ${token}`,
+            Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
           credentials: "include",
@@ -66,16 +73,17 @@ export default function Login() {
           const text = await res.text();
           throw new Error(`Sync failed: ${res.status} ${text}`);
         }
+
+        alert("Signup successful and user synced!");
+        setIsSignUp(false);
       } catch (syncError) {
         console.error("User sync failed:", syncError);
         setErrorMsg("Signup succeeded but syncing user data failed.");
         setLoading(false);
         return;
       }
-
-      alert("Signup successful. Please check your email to confirm your account.");
-      setIsSignUp(false);
     } else {
+      // Login flow
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -87,9 +95,8 @@ export default function Login() {
         return;
       }
 
-      const token = data?.session?.access_token;
-      if (token) {
-        localStorage.setItem("auth.token", token);
+      if (data.session?.access_token) {
+        localStorage.setItem("auth.token", data.session.access_token);
         console.log("Saved token:", localStorage.getItem("auth.token"));
       }
 

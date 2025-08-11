@@ -48,6 +48,9 @@ function Router() {
 
 function App() {
   useEffect(() => {
+    // Clear any existing token on app load to force fresh login/session sync
+    localStorage.removeItem("auth.token");
+
     const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
     const syncUserData = async (token: string) => {
@@ -69,6 +72,7 @@ function App() {
       }
     };
 
+    // Get current session and sync token
     supabase.auth.getSession().then(({ data }) => {
       const token = data?.session?.access_token;
       if (token) {
@@ -78,7 +82,7 @@ function App() {
       }
     });
 
-    // Correct destructuring here:
+    // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (session?.access_token) {
