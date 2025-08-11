@@ -10,29 +10,14 @@ import { setupVite, serveStatic, log } from "./vite";
 async function startServer() {
   const app = express();
 
-  // --- CORS middleware with strict origin whitelist ---
-  const allowedOrigins = [
-    "http://localhost:5000",               // your local frontend URL
-    "https://your-production-frontend.com",
-    "https://orbit-hklrot71t-james-lemuels-projects.vercel.app" // add your deployed frontend URL here later
-  ];
-
+  // --- CORS middleware: allow all origins dynamically ---
   app.use(
     cors({
-      origin: (origin, callback) => {
-        // Allow requests with no origin (e.g. Postman, curl)
-        if (!origin) return callback(null, true);
-
-        if (allowedOrigins.includes(origin)) {
-          callback(null, true);
-        } else {
-          callback(new Error("Not allowed by CORS"));
-        }
-      },
-      credentials: true, // Allow cookies and Authorization headers
+      origin: true, // allow all origins
+      credentials: true, // allow cookies and Authorization headers
       methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
       allowedHeaders: ["Content-Type", "Authorization", "Accept"],
-      optionsSuccessStatus: 204, // For legacy browsers support
+      optionsSuccessStatus: 204,
     })
   );
 
