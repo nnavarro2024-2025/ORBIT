@@ -13,7 +13,8 @@ async function startServer() {
   // --- CORS middleware with strict origin whitelist ---
   const allowedOrigins = [
     "http://localhost:5000",               // your local frontend URL
-    "https://your-production-frontend.com" // add your deployed frontend URL here later
+    "https://your-production-frontend.com",
+    "https://orbit-hklrot71t-james-lemuels-projects.vercel.app" // add your deployed frontend URL here later
   ];
 
   app.use(
