@@ -39,8 +39,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = req.user.claims.sub;
       const user = await storage.getUser(userId);
+      console.log("🔐 [AUTH] User found:", user);
       res.json(user);
-    } catch {
+    } catch (error) {
+      console.error("❌ [AUTH] Error fetching user:", error);
       res.status(500).json({ message: "Failed to fetch user" });
     }
   });
@@ -49,7 +51,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = req.user.claims.sub;
       const { data: { user }, error } = await supabaseAdmin.auth.admin.getUserById(userId);
-      if (error || !user) return res.status(404).json({ message: "User not found in Supabase Auth" });
+
+      if (error || !user) {
+        console.error("❌ [AUTH SYNC] Failed to get user from Supabase Auth:", error);
+        return res.status(404).json({ message: "User not found in Supabase Auth" });
+      }
 
       const userRecord = {
         id: user.id,
@@ -64,8 +70,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
 
       const updatedUser = await storage.upsertUser(userRecord);
+      console.log("🔄 [AUTH SYNC] User synced:", updatedUser);
       res.json(updatedUser);
-    } catch {
+    } catch (error) {
+      console.error("❌ [AUTH SYNC] Error syncing user:", error);
       res.status(500).json({ message: "Failed to sync user data" });
     }
   });
@@ -75,7 +83,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // =========================
   app.post("/api/orz/sessions", isAuthenticated, async (req: any, res) => {
     try {
-      const session = await sessionService.startSession(req.user.claims.sub, req.body.stationId);
+      const userId = req.user.claims.sub;
+      const { stationId } = req.body;
+      const session = await sessionService.startSession(userId, stationId);
       res.json(session);
     } catch (error) {
       res.status(400).json({ message: (error as Error).message });
@@ -86,7 +96,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const session = await storage.getActiveOrzSession(req.user.claims.sub);
       res.json(session);
-    } catch {
+    } catch (error) {
       res.status(500).json({ message: "Failed to fetch active session" });
     }
   });
@@ -95,7 +105,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       await sessionService.updateActivity(req.params.sessionId);
       res.json({ success: true });
-    } catch {
+    } catch (error) {
       res.status(500).json({ message: "Failed to update activity" });
     }
   });
@@ -104,7 +114,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       await sessionService.endSession(req.params.sessionId);
       res.json({ success: true });
-    } catch {
+    } catch (error) {
       res.status(500).json({ message: "Failed to end session" });
     }
   });
@@ -113,7 +123,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const sessions = await storage.getOrzSessionsByUser(req.user.claims.sub);
       res.json(sessions);
-    } catch {
+    } catch (error) {
       res.status(500).json({ message: "Failed to fetch session history" });
     }
   });
@@ -123,7 +133,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // =========================
   app.post("/api/orz/time-extension", isAuthenticated, async (req: any, res) => {
     try {
-      const data = insertTimeExtensionRequestSchema.parse({ ...req.body, userId: req.user.claims.sub });
+      const userId = req.user.claims.sub;
+      const data = insertTimeExtensionRequestSchema.parse({ ...req.body, userId });
       const request = await storage.createTimeExtensionRequest(data);
       res.json(request);
     } catch (error) {
@@ -144,7 +155,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         endTime: new Date(req.body.endTime),
         userId,
       });
-
       const booking = await storage.createFacilityBooking(data);
 
       const user = await storage.getUser(userId);
@@ -163,34 +173,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const bookings = await storage.getFacilityBookingsByUser(req.user.claims.sub);
       res.json(bookings);
-    } catch {
+    } catch (error) {
       res.status(500).json({ message: "Failed to fetch bookings" });
     }
   });
 
   // =========================
-  // 🔐 ADMIN ACCESS (LOCAL-FRIENDLY)
+  // 🔐 ADMIN ACCESS (TEMP BYPASS + DEBUG)
   // =========================
   app.get("/api/bookings/pending", isAuthenticated, async (req: any, res) => {
+    const user = await storage.getUser(req.user.claims.sub);
+
+    console.log("🔍 [ADMIN DEBUG] user id:", req.user.claims.sub);
+    console.log("🔍 [ADMIN DEBUG] fetched user:", user);
+
+    // TEMP BYPASS: anyone authenticated can fetch
+    // Uncomment for real admin-only access:
+    // if (user?.role !== "admin") {
+    //   console.warn("⚠️ [ADMIN] Access denied for non-admin:", user?.id);
+    //   return res.status(403).json({ message: "Admin access required" });
+    // }
+
     try {
-      const user = await storage.getUser(req.user.claims.sub);
-
-      // Flexible local check
-      const host = req.hostname || req.get("host") || "";
-      const isLocal = host.includes("localhost") || host.includes("127.0.0.1");
-
-      console.log("🔍 [ADMIN DEBUG] Request Host:", host);
-      console.log("🔍 [ADMIN DEBUG] User ID:", req.user.claims.sub);
-      console.log("🔍 [ADMIN DEBUG] Fetched User:", user);
-      console.log("🔍 [ADMIN DEBUG] Is Local:", isLocal);
-
-      if (!isLocal && user?.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
-      }
-
       const bookings = await storage.getPendingFacilityBookings();
+      console.log("✅ [ADMIN DEBUG] Pending bookings fetched:", bookings.length);
+      bookings.forEach((b, i) =>
+        console.log(`📌 [BOOKING ${i + 1}]`, b)
+      );
       res.json(bookings);
-    } catch {
+    } catch (error) {
+      console.error("❌ [ADMIN] Error fetching pending bookings:", error);
       res.status(500).json({ message: "Failed to fetch pending bookings" });
     }
   });
@@ -202,7 +214,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const facilities = await ensureFacilitiesExist();
       res.json(facilities);
-    } catch {
+    } catch (error) {
       res.status(500).json({ message: "Failed to fetch facilities" });
     }
   });
