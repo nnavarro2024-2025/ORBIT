@@ -215,6 +215,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // =========================
   app.get("/api/bookings/pending", isAuthenticated, async (req: any, res) => {
     const user = await storage.getUser(req.user.claims.sub);
+    console.log("🔍 [ADMIN DEBUG] user id:", req.user.claims.sub); // <-- add this
+    console.log("🔍 [ADMIN DEBUG] fetched user:", user);           // <-- add this
     console.log("🔍 [ADMIN] Pending bookings requested by:", user?.email || "Unknown");
     if (user?.role !== "admin") {
       console.warn("⚠️ [ADMIN] Access denied for non-admin:", user?.id);
