@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import {  isAuthenticated } from "./supabaseAuth";
+import { isAuthenticated } from "./supabaseAuth";
 import { sessionService } from "./services/sessionService";
 import { emailService } from "./services/emailService";
 import { supabaseAdmin } from "../client/src/lib/supabaseAdmin";
@@ -38,6 +38,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // =========================
   app.get("/api/auth/user", isAuthenticated, async (req: any, res) => {
     try {
+      res.set("Cache-Control", "no-store");
       const userId = req.user.claims.sub;
       const user = await storage.getUser(userId);
       res.json(user);
@@ -90,6 +91,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/orz/sessions/active", isAuthenticated, async (req: any, res) => {
     try {
+      res.set("Cache-Control", "no-store");
       const session = await storage.getActiveOrzSession(req.user.claims.sub);
       res.json(session);
     } catch (error) {
@@ -117,6 +119,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/orz/sessions/history", isAuthenticated, async (req: any, res) => {
     try {
+      res.set("Cache-Control", "no-store");
       const sessions = await storage.getOrzSessionsByUser(req.user.claims.sub);
       res.json(sessions);
     } catch (error) {
@@ -169,6 +172,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/bookings", isAuthenticated, async (req: any, res) => {
     try {
+      res.set("Cache-Control", "no-store");
       const bookings = await storage.getFacilityBookingsByUser(req.user.claims.sub);
       res.json(bookings);
     } catch (error) {
@@ -177,10 +181,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // =========================
-  // 🔐 ADMIN ACCESS (TEMPORARILY OPEN FOR TESTING)
+  // 🔐 ADMIN ACCESS
   // =========================
   app.get("/api/bookings/pending", isAuthenticated, async (req: any, res) => {
     try {
+      res.set("Cache-Control", "no-store");
       const bookings = await storage.getPendingFacilityBookings();
       res.json(bookings);
     } catch (error) {
@@ -193,6 +198,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // =========================
   app.get("/api/facilities", async (req: any, res) => {
     try {
+      res.set("Cache-Control", "no-store");
       const facilities = await ensureFacilitiesExist();
       res.json(facilities);
     } catch (error) {
