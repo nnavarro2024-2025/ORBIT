@@ -9,8 +9,9 @@ import {
   insertFacilityBookingSchema,
   insertTimeExtensionRequestSchema,
 } from "@shared/schema";
+import { z } from "zod";
 
-// Helper to seed facilities if none exist
+// ✅ Helper function to seed facilities
 async function ensureFacilitiesExist() {
   let facilities = await storage.getAllFacilities();
   if (facilities.length === 0) {
@@ -36,10 +37,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // 🧠 AUTH ROUTES
   // =========================
   app.get("/api/auth/user", isAuthenticated, async (req: any, res) => {
+    console.log("🔐 [AUTH] Fetching user info for:", req.user.claims.sub);
     try {
       const userId = req.user.claims.sub;
       const user = await storage.getUser(userId);
-      console.log("🔐 [AUTH] User found:", user);
+      console.log("✅ [AUTH] User found:", user);
       res.json(user);
     } catch (error) {
       console.error("❌ [AUTH] Error fetching user:", error);
@@ -82,48 +84,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // 💻 ORZ SESSION ROUTES
   // =========================
   app.post("/api/orz/sessions", isAuthenticated, async (req: any, res) => {
+    console.log("🖥️ [ORZ] Start session req body:", req.body);
     try {
       const userId = req.user.claims.sub;
       const { stationId } = req.body;
       const session = await sessionService.startSession(userId, stationId);
+      console.log("✅ [ORZ] Session started:", session);
       res.json(session);
     } catch (error) {
+      console.error("❌ [ORZ] Error starting session:", error);
       res.status(400).json({ message: (error as Error).message });
     }
   });
 
   app.get("/api/orz/sessions/active", isAuthenticated, async (req: any, res) => {
+    console.log("📡 [ORZ] Get active session for:", req.user.claims.sub);
     try {
       const session = await storage.getActiveOrzSession(req.user.claims.sub);
       res.json(session);
     } catch (error) {
+      console.error("❌ [ORZ] Error fetching active session:", error);
       res.status(500).json({ message: "Failed to fetch active session" });
     }
   });
 
   app.post("/api/orz/sessions/:sessionId/activity", isAuthenticated, async (req: any, res) => {
+    console.log("📍 [ORZ] Update activity for session:", req.params.sessionId);
     try {
       await sessionService.updateActivity(req.params.sessionId);
       res.json({ success: true });
     } catch (error) {
+      console.error("❌ [ORZ] Error updating activity:", error);
       res.status(500).json({ message: "Failed to update activity" });
     }
   });
 
   app.post("/api/orz/sessions/:sessionId/end", isAuthenticated, async (req: any, res) => {
+    console.log("🔚 [ORZ] End session:", req.params.sessionId);
     try {
       await sessionService.endSession(req.params.sessionId);
       res.json({ success: true });
     } catch (error) {
+      console.error("❌ [ORZ] Error ending session:", error);
       res.status(500).json({ message: "Failed to end session" });
     }
   });
 
   app.get("/api/orz/sessions/history", isAuthenticated, async (req: any, res) => {
+    console.log("🕓 [ORZ] Fetch history for:", req.user.claims.sub);
     try {
       const sessions = await storage.getOrzSessionsByUser(req.user.claims.sub);
       res.json(sessions);
     } catch (error) {
+      console.error("❌ [ORZ] Error fetching session history:", error);
       res.status(500).json({ message: "Failed to fetch session history" });
     }
   });
@@ -132,12 +145,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ⏱️ TIME EXTENSION
   // =========================
   app.post("/api/orz/time-extension", isAuthenticated, async (req: any, res) => {
+    console.log("🕰️ [EXTENSION] Request body:", req.body);
     try {
       const userId = req.user.claims.sub;
       const data = insertTimeExtensionRequestSchema.parse({ ...req.body, userId });
       const request = await storage.createTimeExtensionRequest(data);
       res.json(request);
     } catch (error) {
+      console.error("❌ [EXTENSION] Error creating request:", error);
       res.status(400).json({ message: (error as Error).message });
     }
   });
@@ -146,8 +161,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // 🏢 FACILITY BOOKINGS
   // =========================
   app.post("/api/bookings", isAuthenticated, async (req: any, res) => {
+    console.log("📅 [BOOKING] New booking request:", req.body);
     try {
       await ensureFacilitiesExist();
+
       const userId = req.user.claims.sub;
       const data = insertFacilityBookingSchema.parse({
         ...req.body,
@@ -155,51 +172,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
         endTime: new Date(req.body.endTime),
         userId,
       });
+
       const booking = await storage.createFacilityBooking(data);
+      console.log("✅ [BOOKING] Booking saved:", booking);
 
       const user = await storage.getUser(userId);
       const facility = await storage.getFacility(data.facilityId);
+
       if (user?.email && facility) {
         await emailService.sendBookingConfirmation(booking, user, facility.name);
       }
 
       res.json(booking);
     } catch (error) {
+      console.error("❌ [BOOKING] Error creating booking:", error);
       res.status(400).json({ message: (error as Error).message });
     }
   });
 
   app.get("/api/bookings", isAuthenticated, async (req: any, res) => {
+    console.log("📖 [BOOKING] Fetching bookings for user:", req.user.claims.sub);
     try {
       const bookings = await storage.getFacilityBookingsByUser(req.user.claims.sub);
+      console.log("✅ [BOOKING] Bookings fetched:", bookings.length);
       res.json(bookings);
     } catch (error) {
+      console.error("❌ [BOOKING] Error fetching bookings:", error);
       res.status(500).json({ message: "Failed to fetch bookings" });
     }
   });
 
   // =========================
-  // 🔐 ADMIN ACCESS (TEMP BYPASS + DEBUG)
+  // 🔐 ADMIN ACCESS (TEMPORARILY OPEN FOR TESTING)
   // =========================
   app.get("/api/bookings/pending", isAuthenticated, async (req: any, res) => {
     const user = await storage.getUser(req.user.claims.sub);
-
-    console.log("🔍 [ADMIN DEBUG] user id:", req.user.claims.sub);
-    console.log("🔍 [ADMIN DEBUG] fetched user:", user);
-
-    // TEMP BYPASS: anyone authenticated can fetch
-    // Uncomment for real admin-only access:
-    // if (user?.role !== "admin") {
-    //   console.warn("⚠️ [ADMIN] Access denied for non-admin:", user?.id);
-    //   return res.status(403).json({ message: "Admin access required" });
-    // }
+    console.log("🔍 [ADMIN TEST MODE] Pending bookings requested by:", user?.email || "Unknown");
+    console.warn("⚠️ [TEST MODE] Admin role check bypassed. All authenticated users can view pending bookings.");
 
     try {
       const bookings = await storage.getPendingFacilityBookings();
-      console.log("✅ [ADMIN DEBUG] Pending bookings fetched:", bookings.length);
-      bookings.forEach((b, i) =>
-        console.log(`📌 [BOOKING ${i + 1}]`, b)
-      );
       res.json(bookings);
     } catch (error) {
       console.error("❌ [ADMIN] Error fetching pending bookings:", error);
@@ -211,10 +223,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // 🏢 FACILITIES ROUTES
   // =========================
   app.get("/api/facilities", async (req: any, res) => {
+    console.log("🏢 [FACILITIES] Fetching facilities");
     try {
       const facilities = await ensureFacilitiesExist();
       res.json(facilities);
     } catch (error) {
+      console.error("❌ [FACILITIES] Error fetching facilities:", error);
       res.status(500).json({ message: "Failed to fetch facilities" });
     }
   });
