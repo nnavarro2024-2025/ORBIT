@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { setupAuth, isAuthenticated } from "./supabaseAuth";
+import {  isAuthenticated } from "./supabaseAuth";
 import { sessionService } from "./services/sessionService";
 import { emailService } from "./services/emailService";
 import { supabaseAdmin } from "../client/src/lib/supabaseAdmin";
