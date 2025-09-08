@@ -1,6 +1,6 @@
 import { useAuth } from "@/hooks/useAuth";
 import { Link, useLocation } from "wouter";
-import { BookOpen, Calendar, Dock, Users, Shield } from "lucide-react";
+import { Calendar, Dock, Users, Shield } from "lucide-react";
 import Footer from "@/components/Footer";
 
 export default function Landing() {
@@ -18,11 +18,15 @@ export default function Landing() {
           <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
             <div className="container mx-auto px-6 py-16">
               <div className="text-center mb-16">
-                <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full mb-6 shadow-2xl">
-                  <BookOpen className="h-10 w-10 text-white" />
+                <div className="inline-flex items-center justify-center mb-6">
+                  <img 
+                    src="/images/orbit-logo.png" 
+                    alt="ORBIT Logo" 
+                    className="h-20 w-auto object-contain"
+                  />
                 </div>
-                <h1 className="text-5xl font-bold text-gray-900 mb-4 tracking-tight">ORBIT</h1>
-                <p className="text-2xl text-gray-700 mb-4 font-light">Administrative Dashboard</p>
+                <h1 className="text-5xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-4 tracking-tight">ORBIT</h1>
+                <p className="text-2xl text-gray-700 mb-4 font-light">Integrated Library Facility & Computer Usage Management System</p>
                 <div className="bg-white border border-gray-200 rounded-lg px-6 py-3 inline-block shadow-lg">
                   <p className="text-gray-900 font-medium">
                     Welcome back, {user.firstName} {user.lastName}
@@ -78,10 +82,14 @@ export default function Landing() {
         <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
           <div className="container mx-auto px-6 py-16">
             <div className="text-center mb-16">
-              <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full mb-6 shadow-2xl">
-                <BookOpen className="h-10 w-10 text-white" />
+              <div className="inline-flex items-center justify-center mb-6">
+                <img 
+                  src="/images/orbit-logo.png" 
+                  alt="ORBIT Logo" 
+                  className="h-20 w-auto object-contain"
+                />
               </div>
-              <h1 className="text-5xl font-bold text-gray-900 mb-4 tracking-tight">ORBIT</h1>
+              <h1 className="text-5xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-4 tracking-tight">ORBIT</h1>
               <p className="text-xl text-gray-700 mb-6 font-light max-w-3xl mx-auto">
                 Integrated Library Facility & Computer Usage Management System
               </p>
@@ -139,15 +147,19 @@ export default function Landing() {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       <div className="container mx-auto px-6 py-16">
         <div className="text-center mb-16">
-          <div className="inline-flex items-center justify-center w-24 h-24 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full mb-8 shadow-2xl">
-            <BookOpen className="h-12 w-12 text-white" />
+          <div className="inline-flex items-center justify-center mb-8">
+            <img 
+              src="/images/orbit-logo.png" 
+              alt="ORBIT Logo" 
+              className="h-24 w-auto object-contain"
+            />
           </div>
-          <h1 className="text-6xl font-bold text-gray-900 mb-6 tracking-tight">ORBIT</h1>
+          <h1 className="text-6xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-6 tracking-tight">ORBIT</h1>
           <p className="text-3xl text-gray-700 mb-8 font-light">
             Integrated Library Facility & Computer Usage Management System
           </p>
           <p className="text-xl text-gray-600 max-w-3xl mx-auto leading-relaxed">
-            Streamline your library experience with our comprehensive digital management system
+            Streamline your library experience with comprehensive facility booking and computer usage management
           </p>
         </div>
 
@@ -177,9 +189,9 @@ export default function Landing() {
               <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-green-500 to-blue-600 rounded-full mb-6 shadow-xl">
                 <Users className="h-8 w-8 text-white" />
               </div>
-              <h3 className="text-xl font-bold mb-4 text-gray-900">Role-Based Access</h3>
+              <h3 className="text-xl font-bold mb-4 text-gray-900">User-Friendly Interface</h3>
               <p className="text-gray-600 leading-relaxed">
-                Secure access for students, faculty, and administrators
+                Easy-to-use system designed specifically for library users
               </p>
             </div>
           </div>
@@ -192,11 +204,12 @@ export default function Landing() {
               Get Started
             </button>
             <p className="text-gray-600 mt-4 text-sm font-medium">
-              Join thousands of students and faculty using ORBIT
+              Start managing your library experience with ORBIT
             </p>
           </div>
         </div>
       </div>
+      
       <Footer />
     </div>
   );

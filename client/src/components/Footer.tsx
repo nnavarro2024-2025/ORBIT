@@ -21,9 +21,9 @@ export default function Footer() {
         
         <div className="mt-4 pt-4 border-t border-white/20">
           <div className="text-center text-sm">
-            <span className="font-bold text-white">ORBIT Campus Management System</span>
+            <span className="font-bold text-white">ORBIT - Integrated Library Facility & Computer Usage Management System</span>
             <span className="mx-2 text-blue-200">•</span>
-            <span className="text-blue-100">© 2025 • Revolutionizing Campus Technology</span>
+            <span className="text-blue-100">© 2025 • Enhancing Library Experience</span>
           </div>
         </div>
       </div>

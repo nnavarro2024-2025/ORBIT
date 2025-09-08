@@ -34,6 +34,7 @@ import {
   Monitor,
   User as UserIcon,
   AlertTriangle,
+  MapPin,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { User, OrzSession, TimeExtensionRequest, FacilityBooking, SystemAlert, ActivityLog, Facility } from "../../../../shared/schema";
@@ -398,6 +399,34 @@ export default function AdminDashboard() {
     },
   });
 
+  const toggleFacilityAvailabilityMutation = useMutation({
+    mutationFn: async ({ facilityId, isActive }: { facilityId: number; isActive: boolean }) => {
+      const result = await apiRequest("PUT", `/api/admin/facilities/${facilityId}/availability`, { isActive });
+      return result.json();
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/facilities"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/activity"] });
+      toast({
+        title: "Facility Updated",
+        description: `Facility has been ${variables.isActive ? 'made available' : 'made unavailable'}.`,
+        variant: "default",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error Updating Facility",
+        description: error.message || "Failed to update facility availability.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Helper function for toggling facility availability
+  const toggleFacilityAvailability = (facilityId: number, isActive: boolean) => {
+    toggleFacilityAvailabilityMutation.mutate({ facilityId, isActive });
+  };
+
   // Check if user is admin
   if (authLoading) {
     return (
@@ -548,12 +577,66 @@ export default function AdminDashboard() {
       return details.replace(uuidRegex, 'a request').replace('for session', 'for').trim();
     }
 
+    if (activity.action === "User Unbanned") {
+      // Handle "Admin (ID removed) unbanned user (ID removed) by jamesrabang7@gmail.com"
+      const emailMatch = details.match(/by ([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+      if (emailMatch) {
+        const adminEmail = emailMatch[1];
+        
+        // Extract user ID from the details if available
+        const userIdMatch = details.match(/unbanned user ([a-zA-Z0-9-]+) by/);
+        if (userIdMatch) {
+          const userId = userIdMatch[1];
+          const userEmail = getUserEmail(userId);
+          return `Admin ${adminEmail} unbanned user ${userEmail}`;
+        }
+        
+        // Look for pattern without "by" in between
+        const userIdMatch2 = details.match(/Admin.*unbanned user ([a-zA-Z0-9-]+)/);
+        if (userIdMatch2) {
+          const userId = userIdMatch2[1];
+          const userEmail = getUserEmail(userId);
+          return `Admin ${adminEmail} unbanned user ${userEmail}`;
+        }
+        
+        // If no specific user ID found, look for general pattern
+        return `Admin ${adminEmail} unbanned a user`;
+      }
+      
+      // Handle case without admin email but with user ID
+      const userIdOnlyMatch = details.match(/unbanned user ([a-zA-Z0-9-]+)/);
+      if (userIdOnlyMatch) {
+        const userId = userIdOnlyMatch[1];
+        const userEmail = getUserEmail(userId);
+        return `Admin unbanned user ${userEmail}`;
+      }
+      
+      // Fallback - clean up the message
+      return details
+        .replace(/Admin \(ID removed\)/g, 'Admin')
+        .replace(/user \(ID removed\)/g, 'a user')
+        .replace(uuidRegex, '')
+        .trim();
+    }
+
+    if (activity.action === "User Banned") {
+      // Extract user ID from details
+      const userIdMatch = details.match(/banned user ([a-zA-Z0-9-]+)/);
+      if (userIdMatch) {
+        const userId = userIdMatch[1];
+        const userEmail = getUserEmail(userId);
+        return details.replace(`user ${userId}`, `user ${userEmail}`);
+      }
+    }
+
     // Default fallback for any other action
     return details.replace(uuidRegex, '(ID removed)').trim();
   };
 
   const formatAlertMessage = (message: string | null): string => {
     if (!message) return '';
+    
+    // Handle session ID replacements for computer alerts
     const uuidRegex = /Session ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/;
     const match = message.match(uuidRegex);
 
@@ -562,10 +645,181 @@ export default function AdminDashboard() {
       const session = [...(activeSessions || []), ...(endedSessions || [])].find(s => s.id === sessionId);
       if (session) {
         const userEmail = getUserEmail(session.userId);
-        return `Session for ${userEmail} at Station ${session.stationId} was automatically logged out due to inactivity.`;
+        return `The computer session for ${userEmail} was automatically logged out due to inactivity.`;
       }
     }
-    return message;
+
+    // Handle "The computer session for this user was automatically logged out due to inactivity."
+    if (message.includes('The computer session for this user was automatically logged out due to inactivity')) {
+      // Try to extract session ID from the original message or find a way to identify the user
+      // For now, let's look for any session info in the message
+      const sessionMatch = message.match(/Session ID: ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/);
+      if (sessionMatch) {
+        const sessionId = sessionMatch[1];
+        const session = [...(activeSessions || []), ...(endedSessions || [])].find(s => s.id === sessionId);
+        if (session) {
+          const userEmail = getUserEmail(session.userId);
+          return `The computer session for ${userEmail} was automatically logged out due to inactivity.`;
+        }
+      }
+      // If no session ID found, return generic message but improved
+      return message.replace('this user', 'a user');
+    }
+
+    // Handle user unbanned messages with UUID
+    if (message.includes('has been unbanned by admin') && message.includes('-')) {
+      const userIdMatch = message.match(/User ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) has been unbanned/);
+      if (userIdMatch) {
+        const userId = userIdMatch[1];
+        const userEmail = getUserEmail(userId);
+        return message.replace(`User ${userId}`, `User ${userEmail}`);
+      }
+    }
+
+    // Handle "User [UUID] has been unbanned by admin and account access restored" pattern
+    if (message.includes('has been unbanned by admin and account access restored')) {
+      // First try to match UUID pattern
+      const userIdMatch = message.match(/User ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) has been unbanned/);
+      if (userIdMatch) {
+        const userId = userIdMatch[1];
+        const userEmail = getUserEmail(userId);
+        
+        // Try to find the corresponding activity log to get the actual admin email
+        const relatedActivity = activities?.find(activity => 
+          activity.action === "User Unbanned" && 
+          activity.details?.includes(userId)
+        );
+        
+        let adminEmail = 'admin';
+        if (relatedActivity) {
+          // First try to extract admin email from "by [email]" pattern
+          const adminEmailMatch = relatedActivity.details?.match(/by ([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+          if (adminEmailMatch) {
+            adminEmail = adminEmailMatch[1];
+          } else {
+            // Fallback to admin ID lookup
+            const adminIdMatch = relatedActivity.details?.match(/Admin ([a-zA-Z0-9-]+) unbanned user/);
+            if (adminIdMatch) {
+              const adminId = adminIdMatch[1];
+              const adminUser = usersMap.get(adminId);
+              adminEmail = adminUser?.email || adminId;
+            }
+          }
+        }
+        
+        return `User ${userEmail} has been unbanned by ${adminEmail} and account access restored.`;
+      }
+      
+      // Handle email-based messages (no UUID) - extract user email from message
+      const emailMatch = message.match(/User ([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}) has been unbanned/);
+      if (emailMatch) {
+        const userEmail = emailMatch[1];
+        
+        // Find the user by email to get their ID
+        const unbannedUser = usersData?.find(u => u.email === userEmail);
+        const userId = unbannedUser?.id;
+        
+        // Try to find the corresponding activity log to get the actual admin email
+        const relatedActivity = activities?.find(activity => 
+          activity.action === "User Unbanned" && 
+          (userId ? activity.details?.includes(userId) : 
+           Math.abs(new Date(activity.createdAt).getTime() - Date.now()) < 60000) // Within last minute as fallback
+        );
+        
+        let adminEmail = user?.email || 'admin';
+        if (relatedActivity) {
+          // First try to extract admin email from "by [email]" pattern
+          const adminEmailMatch = relatedActivity.details?.match(/by ([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+          if (adminEmailMatch) {
+            adminEmail = adminEmailMatch[1];
+          } else {
+            // Fallback to admin ID lookup
+            const adminIdMatch = relatedActivity.details?.match(/Admin ([a-zA-Z0-9-]+) unbanned user/);
+            if (adminIdMatch) {
+              const adminId = adminIdMatch[1];
+              const adminUser = usersMap.get(adminId);
+              adminEmail = adminUser?.email || adminId;
+            }
+          }
+        }
+        
+        return `User ${userEmail} has been unbanned by ${adminEmail} and account access restored.`;
+      }
+      
+      // Fallback for generic case
+      const relatedActivity = activities?.find(activity => 
+        activity.action === "User Unbanned" && 
+        Math.abs(new Date(activity.createdAt).getTime() - Date.now()) < 60000 // Within last minute
+      );
+      
+      let adminEmail = user?.email || 'admin';
+      if (relatedActivity) {
+        // First try to extract admin email from "by [email]" pattern
+        const adminEmailMatch = relatedActivity.details?.match(/by ([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+        if (adminEmailMatch) {
+          adminEmail = adminEmailMatch[1];
+        } else {
+          // Fallback to admin ID lookup
+          const adminIdMatch = relatedActivity.details?.match(/Admin ([a-zA-Z0-9-]+) unbanned user/);
+          if (adminIdMatch) {
+            const adminId = adminIdMatch[1];
+            const adminUser = usersMap.get(adminId);
+            adminEmail = adminUser?.email || adminId;
+          }
+        }
+      }
+      
+      return message.replace('by admin', `by ${adminEmail}`);
+    }
+
+    // Handle user management messages - fix the format for unbanned users
+    if (message.includes('unbanned user') && message.includes('by ')) {
+      // Extract the admin email at the end
+      const byMatch = message.match(/by ([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+      if (byMatch) {
+        const adminEmail = byMatch[1];
+        
+        // Try to extract user ID or email being unbanned - multiple patterns
+        let userEmail = 'a user';
+        
+        // Pattern 1: "unbanned user (ID removed)"
+        const userIdMatch1 = message.match(/unbanned user \(ID removed\)/);
+        if (userIdMatch1) {
+          // Try to find the actual user ID in the original message
+          const fullUserIdMatch = message.match(/User ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/);
+          if (fullUserIdMatch) {
+            const userId = fullUserIdMatch[1];
+            userEmail = getUserEmail(userId);
+          }
+        }
+        
+        // Pattern 2: "unbanned user [userId]"
+        const userIdMatch2 = message.match(/unbanned user ([a-zA-Z0-9-]+) by/);
+        if (userIdMatch2) {
+          const userId = userIdMatch2[1];
+          userEmail = getUserEmail(userId);
+        }
+        
+        return `Admin ${adminEmail} unbanned user ${userEmail}`;
+      }
+    }
+
+    // Handle banned user messages
+    if (message.includes('banned user') && message.includes('by admin')) {
+      const userIdMatch = message.match(/User ([a-zA-Z0-9-]+) has been banned/);
+      if (userIdMatch) {
+        const userId = userIdMatch[1];
+        const userEmail = getUserEmail(userId);
+        return message.replace(`User ${userId}`, `User ${userEmail}`);
+      }
+    }
+
+    // General cleanup - remove session IDs and other technical details
+    return message
+      .replace(/\(Session ID: [0-9a-f-]+\)/g, '')
+      .replace(/\(ID: [0-9a-f-]+\)/g, '')
+      .replace(/\(ID removed\)/g, '')
+      .trim();
   };
 
   const renderContent = () => {
@@ -955,6 +1209,9 @@ export default function AdminDashboard() {
                   <div className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium">
                     {activeBookings?.length || 0} Active
                   </div>
+                  <div className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">
+                    {upcomingBookings?.length || 0} Upcoming
+                  </div>
                   <div className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-medium">
                     {pendingBookings?.length || 0} Pending
                   </div>
@@ -1002,22 +1259,43 @@ export default function AdminDashboard() {
                                 <div>
                                   <h4 className="font-medium text-gray-900">{getUserEmail(booking.userId)}</h4>
                                   <p className="text-sm text-gray-600">{getFacilityName(booking.facilityId)}</p>
-                                  <TooltipProvider>
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <p className="text-xs text-gray-500 truncate max-w-[200px] cursor-help">
-                                          {booking.purpose}
-                                        </p>
-                                      </TooltipTrigger>
-                                      <TooltipContent side="top" className="max-w-sm p-3">
-                                        <p className="whitespace-pre-wrap">{booking.purpose}</p>
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  </TooltipProvider>
                                 </div>
                               </div>
                               
                               <div className="flex items-center gap-6">
+                                <div className="text-right">
+                                  <TooltipProvider>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <div className="flex items-center gap-1 cursor-help justify-end">
+                                          {booking.purpose && booking.purpose.length > 30 ? (
+                                            <>
+                                              <Eye className="h-3 w-3 text-blue-600" />
+                                              <span className="text-xs text-blue-600">View purpose</span>
+                                            </>
+                                          ) : (
+                                            <div className="text-right">
+                                              <p className="text-sm font-medium text-gray-900">Purpose</p>
+                                              <p className="text-sm text-gray-600 max-w-[200px] truncate">
+                                                {booking.purpose || 'No purpose specified'}
+                                              </p>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </TooltipTrigger>
+                                      <TooltipContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
+                                        <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                          <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
+                                        </div>
+                                        <div className="p-4 max-h-48 overflow-y-auto">
+                                          <p className="whitespace-pre-wrap text-sm text-gray-900 leading-6 break-words text-left">
+                                            {booking.purpose || 'No purpose specified'}
+                                          </p>
+                                        </div>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
+                                </div>
                                 <div className="text-right">
                                   <p className="text-sm font-medium text-gray-900">Started</p>
                                   <p className="text-sm text-gray-600">{formatDateTime(booking.startTime)}</p>
@@ -1090,25 +1368,46 @@ export default function AdminDashboard() {
                                 <div className="bg-blue-100 p-2 rounded-lg">
                                   <Clock className="h-5 w-5 text-blue-600" />
                                 </div>
-                                <div>
+                                <div className="flex-1">
                                   <h4 className="font-medium text-gray-900">{getUserEmail(booking.userId)}</h4>
                                   <p className="text-sm text-gray-600">{getFacilityName(booking.facilityId)}</p>
-                                  <TooltipProvider>
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <p className="text-xs text-gray-500 truncate max-w-[200px] cursor-help">
-                                          {booking.purpose}
-                                        </p>
-                                      </TooltipTrigger>
-                                      <TooltipContent side="top" className="max-w-sm p-3">
-                                        <p className="whitespace-pre-wrap">{booking.purpose}</p>
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  </TooltipProvider>
                                 </div>
                               </div>
                               
                               <div className="flex items-center gap-6">
+                                <div className="text-right">
+                                  <TooltipProvider>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <div className="flex items-center gap-1 cursor-help justify-end">
+                                          {booking.purpose && booking.purpose.length > 30 ? (
+                                            <>
+                                              <Eye className="h-3 w-3 text-blue-600" />
+                                              <span className="text-xs text-blue-600">View purpose</span>
+                                            </>
+                                          ) : (
+                                            <div className="text-right">
+                                              <p className="text-sm font-medium text-gray-900">Purpose</p>
+                                              <p className="text-sm text-gray-600 max-w-[200px] truncate">
+                                                {booking.purpose || 'No purpose specified'}
+                                              </p>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </TooltipTrigger>
+                                      <TooltipContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
+                                        <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                          <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
+                                        </div>
+                                        <div className="p-4 max-h-48 overflow-y-auto">
+                                          <p className="whitespace-pre-wrap text-sm text-gray-900 leading-6 break-words text-left">
+                                            {booking.purpose || 'No purpose specified'}
+                                          </p>
+                                        </div>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
+                                </div>
                                 <div className="text-right">
                                   <p className="text-sm font-medium text-gray-900">Starts</p>
                                   <p className="text-sm text-gray-600">{formatDateTime(booking.startTime)}</p>
@@ -1184,22 +1483,43 @@ export default function AdminDashboard() {
                                 <div>
                                   <h4 className="font-medium text-gray-900">{getUserEmail(booking.userId)}</h4>
                                   <p className="text-sm text-gray-600">{getFacilityName(booking.facilityId)}</p>
-                                  <TooltipProvider>
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <p className="text-xs text-gray-500 truncate max-w-[200px] cursor-help">
-                                          {booking.purpose}
-                                        </p>
-                                      </TooltipTrigger>
-                                      <TooltipContent side="top" className="max-w-sm p-3">
-                                        <p className="whitespace-pre-wrap">{booking.purpose}</p>
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  </TooltipProvider>
                                 </div>
                               </div>
                               
                               <div className="flex items-center gap-6">
+                                <div className="text-right">
+                                  <TooltipProvider>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <div className="flex items-center gap-1 cursor-help justify-end">
+                                          {booking.purpose && booking.purpose.length > 30 ? (
+                                            <>
+                                              <Eye className="h-3 w-3 text-blue-600" />
+                                              <span className="text-xs text-blue-600">View purpose</span>
+                                            </>
+                                          ) : (
+                                            <div className="text-right">
+                                              <p className="text-sm font-medium text-gray-900">Purpose</p>
+                                              <p className="text-sm text-gray-600 max-w-[200px] truncate">
+                                                {booking.purpose || 'No purpose specified'}
+                                              </p>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </TooltipTrigger>
+                                      <TooltipContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
+                                        <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                          <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
+                                        </div>
+                                        <div className="p-4 max-h-48 overflow-y-auto">
+                                          <p className="whitespace-pre-wrap text-sm text-gray-900 leading-6 break-words text-left">
+                                            {booking.purpose || 'No purpose specified'}
+                                          </p>
+                                        </div>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
+                                </div>
                                 <div className="text-right">
                                   <p className="text-sm font-medium text-gray-900">Starts</p>
                                   <p className="text-sm text-gray-600">{formatDateTime(booking.startTime)}</p>
@@ -1307,22 +1627,43 @@ export default function AdminDashboard() {
                                 <div>
                                   <h4 className="font-medium text-gray-900">{getUserEmail(booking.userId)}</h4>
                                   <p className="text-sm text-gray-600">{getFacilityName(booking.facilityId)}</p>
-                                  <TooltipProvider>
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <p className="text-xs text-gray-500 truncate max-w-[200px] cursor-help">
-                                          {booking.purpose}
-                                        </p>
-                                      </TooltipTrigger>
-                                      <TooltipContent side="top" className="max-w-sm p-3">
-                                        <p className="whitespace-pre-wrap">{booking.purpose}</p>
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  </TooltipProvider>
                                 </div>
                               </div>
                               
                               <div className="flex items-center gap-6">
+                                <div className="text-right">
+                                  <TooltipProvider>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <div className="flex items-center gap-1 cursor-help justify-end">
+                                          {booking.purpose && booking.purpose.length > 30 ? (
+                                            <>
+                                              <Eye className="h-3 w-3 text-blue-600" />
+                                              <span className="text-xs text-blue-600">View purpose</span>
+                                            </>
+                                          ) : (
+                                            <div className="text-right">
+                                              <p className="text-sm font-medium text-gray-900">Purpose</p>
+                                              <p className="text-sm text-gray-600 max-w-[200px] truncate">
+                                                {booking.purpose || 'No purpose specified'}
+                                              </p>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </TooltipTrigger>
+                                      <TooltipContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
+                                        <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                          <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
+                                        </div>
+                                        <div className="p-4 max-h-48 overflow-y-auto">
+                                          <p className="whitespace-pre-wrap text-sm text-gray-900 leading-6 break-words text-left">
+                                            {booking.purpose || 'No purpose specified'}
+                                          </p>
+                                        </div>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
+                                </div>
                                 <div className="text-right">
                                   <p className="text-sm font-medium text-gray-900">Started</p>
                                   <p className="text-sm text-gray-600">{formatDateTime(booking.startTime)}</p>
@@ -1732,10 +2073,23 @@ export default function AdminDashboard() {
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="bg-orange-100 text-orange-800 px-3 py-1 rounded-full text-sm font-medium">
-                    {alerts?.filter(a => !a.isRead).length || 0} Unread
+                    {alerts?.filter(a => {
+                      if (a.isRead) return false;
+                      // Exclude computer/ORZ alerts from unread count
+                      const t = (a.title || '').toLowerCase();
+                      const m = (a.message || '').toLowerCase();
+                      const isComputerAlert = t.includes('automatically logged out') || t.includes('auto-logout') || m.includes('inactivity');
+                      return !isComputerAlert;
+                    }).length || 0} Unread
                   </div>
                   <div className="bg-gray-100 text-gray-800 px-3 py-1 rounded-full text-sm font-medium">
-                    {alerts?.length || 0} Total
+                    {alerts?.filter(a => {
+                      // Exclude computer/ORZ alerts from total count
+                      const t = (a.title || '').toLowerCase();
+                      const m = (a.message || '').toLowerCase();
+                      const isComputerAlert = t.includes('automatically logged out') || t.includes('auto-logout') || m.includes('inactivity');
+                      return !isComputerAlert;
+                    }).length || 0} Total
                   </div>
                 </div>
               </div>
@@ -1934,6 +2288,7 @@ export default function AdminDashboard() {
                         })
                         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
                         .map((alert: SystemAlert) => {
+                          const formattedMessage = formatAlertMessage(alert.message);
                           const isUnbanActivity = (alert.title || '').toLowerCase().includes('unbanned') || 
                                                 (alert.message || '').toLowerCase().includes('unbanned');
                           const isBanActivity = (alert.title || '').toLowerCase().includes('banned') && !isUnbanActivity;
@@ -1962,7 +2317,7 @@ export default function AdminDashboard() {
                                   <div className="flex items-start justify-between">
                                     <div>
                                       <h4 className="font-medium text-gray-900">{alert.title}</h4>
-                                      <p className="text-sm text-gray-600 mt-1">{alert.message}</p>
+                                      <p className="text-sm text-gray-600 mt-1">{formattedMessage}</p>
                                       {isUnbanActivity && (
                                         <div className="mt-2 inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
                                           <UserCheck className="h-3 w-3" />
@@ -2033,30 +2388,81 @@ export default function AdminDashboard() {
               <div className="flex items-center justify-between mb-6">
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900">System Settings</h2>
-                  <p className="text-gray-600 mt-1">Configure system preferences and administrative options</p>
-                </div>
-                <div className="bg-gray-100 text-gray-800 px-3 py-1 rounded-full text-sm font-medium">
-                  Coming Soon
+                  <p className="text-gray-600 mt-1">Manage facility availability and system configurations</p>
                 </div>
               </div>
-              
-              <div className="text-center py-12">
-                <div className="bg-gray-100 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
-                  <Settings className="h-8 w-8 text-gray-400" />
-                </div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">System Settings</h3>
-                <p className="text-gray-600 mb-6 max-w-md mx-auto">
-                  Advanced system configuration options will be available in a future update. 
-                  Stay tuned for enhanced administrative controls.
-                </p>
-                <button
-                  onClick={() => toast({ title: "Coming soon", description: "System settings will be available in a future update." })}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors duration-200"
-                >
-                  <Settings className="h-4 w-4" />
-                  Notify Me
-                </button>
-              </div>
+
+              <Tabs defaultValue="facilities" className="space-y-6">
+                <TabsList className="grid w-full grid-cols-1">
+                  <TabsTrigger value="facilities" className="flex items-center gap-2">
+                    <Settings className="h-4 w-4" />
+                    Facility Management
+                  </TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="facilities" className="space-y-4">
+                  <div className="bg-gray-50 rounded-lg p-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-semibold text-gray-900">Facility Availability Control</h3>
+                      <span className="text-sm text-gray-600">{facilities?.length || 0} facilities</span>
+                    </div>
+                    
+                    {facilities && facilities.length > 0 ? (
+                      <div className="space-y-3">
+                        {facilities.map((facility: Facility) => (
+                          <div key={facility.id} className="bg-white rounded-lg p-4 border border-gray-200 hover:border-gray-300 transition-colors duration-200">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-4">
+                                <div className={`p-2 rounded-lg ${facility.isActive ? 'bg-green-100' : 'bg-red-100'}`}>
+                                  <MapPin className={`h-5 w-5 ${facility.isActive ? 'text-green-600' : 'text-red-600'}`} />
+                                </div>
+                                <div>
+                                  <h4 className="font-medium text-gray-900">{facility.name}</h4>
+                                  <p className="text-sm text-gray-600">Capacity: {facility.capacity} people</p>
+                                  {facility.description && (
+                                    <p className="text-sm text-gray-500 mt-1">{facility.description}</p>
+                                  )}
+                                </div>
+                              </div>
+                              
+                              <div className="flex items-center gap-4">
+                                <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                                  facility.isActive 
+                                    ? 'bg-green-100 text-green-800' 
+                                    : 'bg-red-100 text-red-800'
+                                }`}>
+                                  {facility.isActive ? 'Available' : 'Unavailable'}
+                                </span>
+                                <button
+                                  onClick={() => toggleFacilityAvailability(facility.id, !facility.isActive)}
+                                  disabled={toggleFacilityAvailabilityMutation.isPending}
+                                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
+                                    facility.isActive
+                                      ? 'bg-red-600 hover:bg-red-700 text-white'
+                                      : 'bg-green-600 hover:bg-green-700 text-white'
+                                  }`}
+                                >
+                                  {toggleFacilityAvailabilityMutation.isPending && toggleFacilityAvailabilityMutation.variables?.facilityId === facility.id
+                                    ? 'Updating...'
+                                    : facility.isActive ? 'Make Unavailable' : 'Make Available'
+                                  }
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-center py-8">
+                        <div className="bg-gray-100 rounded-full w-12 h-12 flex items-center justify-center mx-auto mb-3">
+                          <Settings className="h-6 w-6 text-gray-400" />
+                        </div>
+                        <p className="text-gray-600 text-sm">No facilities found</p>
+                      </div>
+                    )}
+                  </div>
+                </TabsContent>
+              </Tabs>
             </div>
           </div>
         );
@@ -2067,70 +2473,85 @@ export default function AdminDashboard() {
           <div className="space-y-8">
             {/* Stats Overview */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow duration-200">
+              <button
+                onClick={() => setSelectedView("orz-management")}
+                className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-all duration-200 hover:border-green-300 text-left group"
+              >
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">Active Computer Users</p>
+                    <p className="text-sm font-medium text-gray-600 group-hover:text-green-700">Active Computer Users</p>
                     <p className="text-3xl font-bold text-green-600 mt-1">{stats?.activeUsers || 0}</p>
                     <p className="text-xs text-gray-500 mt-1">Currently logged in</p>
                   </div>
-                  <div className="bg-green-100 p-3 rounded-full">
+                  <div className="bg-green-100 p-3 rounded-full group-hover:bg-green-200 transition-colors duration-200">
                     <UserCheck className="h-6 w-6 text-green-600" />
                   </div>
                 </div>
-              </div>
+              </button>
 
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow duration-200">
+              <button
+                onClick={() => setSelectedView("booking-management")}
+                className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-all duration-200 hover:border-blue-300 text-left group"
+              >
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">Active Bookings</p>
+                    <p className="text-sm font-medium text-gray-600 group-hover:text-blue-700">Active Bookings</p>
                     <p className="text-3xl font-bold text-blue-600 mt-1">{activeBookings?.length || 0}</p>
                     <p className="text-xs text-gray-500 mt-1">Currently in progress</p>
                   </div>
-                  <div className="bg-blue-100 p-3 rounded-full">
+                  <div className="bg-blue-100 p-3 rounded-full group-hover:bg-blue-200 transition-colors duration-200">
                     <Calendar className="h-6 w-6 text-blue-600" />
                   </div>
                 </div>
-              </div>
+              </button>
 
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow duration-200">
+              <button
+                onClick={() => setSelectedView("security")}
+                className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-all duration-200 hover:border-orange-300 text-left group"
+              >
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">System Alerts</p>
+                    <p className="text-sm font-medium text-gray-600 group-hover:text-orange-700">System Alerts</p>
                     <p className="text-3xl font-bold text-orange-600 mt-1">{stats?.systemAlerts || 0}</p>
                     <p className="text-xs text-gray-500 mt-1">Requiring attention</p>
                   </div>
-                  <div className="bg-orange-100 p-3 rounded-full">
+                  <div className="bg-orange-100 p-3 rounded-full group-hover:bg-orange-200 transition-colors duration-200">
                     <Bell className="h-6 w-6 text-orange-600" />
                   </div>
                 </div>
-              </div>
+              </button>
 
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow duration-200">
+              <button
+                onClick={() => setSelectedView("orz-management")}
+                className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-all duration-200 hover:border-yellow-300 text-left group"
+              >
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">Time Extensions</p>
+                    <p className="text-sm font-medium text-gray-600 group-hover:text-yellow-700">Time Extensions</p>
                     <p className="text-3xl font-bold text-yellow-600 mt-1">{pendingExtensions?.length || 0}</p>
                     <p className="text-xs text-gray-500 mt-1">Pending approval</p>
                   </div>
-                  <div className="bg-yellow-100 p-3 rounded-full">
+                  <div className="bg-yellow-100 p-3 rounded-full group-hover:bg-yellow-200 transition-colors duration-200">
                     <Clock className="h-6 w-6 text-yellow-600" />
                   </div>
                 </div>
-              </div>
+              </button>
 
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow duration-200">
+              <button
+                onClick={() => setSelectedView("booking-management")}
+                className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-all duration-200 hover:border-purple-300 text-left group"
+              >
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600">Booking Requests</p>
+                    <p className="text-sm font-medium text-gray-600 group-hover:text-purple-700">Booking Requests</p>
                     <p className="text-3xl font-bold text-purple-600 mt-1">{stats?.pendingBookings || 0}</p>
                     <p className="text-xs text-gray-500 mt-1">Awaiting approval</p>
                   </div>
-                  <div className="bg-purple-100 p-3 rounded-full">
+                  <div className="bg-purple-100 p-3 rounded-full group-hover:bg-purple-200 transition-colors duration-200">
                     <Activity className="h-6 w-6 text-purple-600" />
                   </div>
                 </div>
-              </div>
+              </button>
             </div>
 
             {/* Quick Actions */}

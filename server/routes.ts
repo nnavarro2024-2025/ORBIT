@@ -402,9 +402,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userId,
       });
 
+      // Check if facility is available for booking
+      const facility = await storage.getFacility(data.facilityId);
+      if (!facility) {
+        return res.status(404).json({ message: "Facility not found." });
+      }
+      
+      if (!facility.isActive) {
+        return res.status(400).json({ message: "This facility is currently unavailable for booking. Please select another facility." });
+      }
+
       const booking = await storage.createFacilityBooking(data);
       const user = await storage.getUser(userId);
-      const facility = await storage.getFacility(data.facilityId);
 
       if (user?.email && facility) {
         await emailService.sendBookingConfirmation(booking, user, facility.name);
@@ -738,15 +747,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (orzSession) {
         const computerStation = await storage.getComputerStation(orzSession.stationId);
         if (computerStation) {
-          stationDetails = `station ${computerStation.name} (ID: ${computerStation.id})`;
+          stationDetails = `station ${computerStation.name}`;
         }
       }
+
+      // Get admin user data for logging
+      const adminUser = await storage.getUser(req.user.claims.sub);
+      const adminEmail = adminUser?.email || req.user.claims.sub;
 
       // Log the activity
       await storage.createActivityLog({
         id: randomUUID(),
         action: "Time Extension Approved",
-        details: `Admin approved time extension request ${requestId} for ${stationDetails} by ${timeExtensionRequest.requestedMinutes} minutes.`,
+        details: `Admin approved time extension request for ${stationDetails} by ${timeExtensionRequest.requestedMinutes} minutes by ${adminEmail}`,
         userId: req.user.claims.sub,
         ipAddress: req.ip,
         userAgent: req.get('User-Agent'),
@@ -790,16 +803,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (orzSession) {
           const computerStation = await storage.getComputerStation(orzSession.stationId);
           if (computerStation) {
-            stationDetails = `request ${requestId} for station ${computerStation.name} (ID: ${computerStation.id})`;
+            stationDetails = `request for station ${computerStation.name}`;
           }
         }
       }
+
+      // Get admin user data for logging
+      const adminUser = await storage.getUser(req.user.claims.sub);
+      const adminEmail = adminUser?.email || req.user.claims.sub;
 
       // Log the activity
       await storage.createActivityLog({
         id: randomUUID(),
         action: "Time Extension Denied",
-        details: `Admin denied time extension ${stationDetails}.`,
+        details: `Admin denied time extension ${stationDetails} by ${adminEmail}`,
         userId: req.user.claims.sub,
         ipAddress: req.ip,
         userAgent: req.get('User-Agent'),
@@ -942,6 +959,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Ban user with reason and duration
       await storage.banUser(userId, reason, banEndDate);
 
+      // Get the banned user data for alert messages
+      const bannedUser = await storage.getUser(userId);
+      const bannedUserEmail = bannedUser?.email || userId;
+
       // End all active ORZ sessions for the banned user
       await storage.endAllUserSessions(userId);
 
@@ -955,7 +976,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           type: "booking",
           severity: "medium",
           title: "Bookings Cancelled Due to User Ban",
-          message: `${cancelledBookingsCount} booking(s) for user ${userId} were automatically cancelled due to user ban.`,
+          message: `${cancelledBookingsCount} booking(s) for user ${bannedUserEmail} were automatically cancelled due to user ban.`,
           userId: req.user.claims.sub,
           isRead: false,
           createdAt: new Date(),
@@ -978,13 +999,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Continue with ban process even if metadata update fails
       }
 
+      // Get admin user data for the alert message
+      const adminUser = await storage.getUser(req.user.claims.sub);
+      const adminEmail = adminUser?.email || req.user.claims.sub;
+
       // Create system alert for user ban
       await storage.createSystemAlert({
         id: randomUUID(),
         type: "user",
         severity: "high",
         title: "User Banned",
-        message: `User ${userId} has been banned by admin. Reason: ${reason}. Duration: ${duration === "permanent" ? "Permanent" : duration}. All active sessions terminated and ${cancelledBookingsCount} bookings cancelled.`,
+        message: `User ${bannedUserEmail} has been banned by ${adminEmail}. Reason: ${reason}. Duration: ${duration === "permanent" ? "Permanent" : duration}. All active sessions terminated and ${cancelledBookingsCount} bookings cancelled.`,
         userId: req.user.claims.sub, // Admin who performed the action
         isRead: false,
         createdAt: new Date(),
@@ -1023,13 +1048,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Unban user (clears ban reason and dates)
       await storage.unbanUser(userId);
 
+      // Get admin user data for the alert message
+      const adminUser = await storage.getUser(req.user.claims.sub);
+      const adminEmail = adminUser?.email || req.user.claims.sub;
+
+      // Get the unbanned user data for the alert message
+      const unbannedUser = await storage.getUser(userId);
+      const unbannedUserEmail = unbannedUser?.email || userId;
+
       // Create system alert for user unban
       await storage.createSystemAlert({
         id: randomUUID(),
         type: "user",
         severity: "medium",
         title: "User Unbanned",
-        message: `User ${userId} has been unbanned by admin and account access restored.`,
+        message: `User ${unbannedUserEmail} has been unbanned by ${adminEmail} and account access restored.`,
         userId: req.user.claims.sub, // Admin who performed the action
         isRead: false,
         createdAt: new Date(),
@@ -1086,6 +1119,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error updating facility:", error);
       res.status(500).json({ message: "Failed to update facility." });
+    }
+  });
+
+  // New: Update Facility Availability
+  app.put("/api/admin/facilities/:facilityId/availability", isAuthenticated, requireAdmin, async (req: any, res) => {
+    try {
+      const { facilityId } = req.params;
+      const { isActive } = req.body;
+
+      if (typeof isActive !== 'boolean') {
+        return res.status(400).json({ message: "isActive must be a boolean value." });
+      }
+
+      const facility = await storage.getFacility(parseInt(facilityId));
+      if (!facility) {
+        return res.status(404).json({ message: "Facility not found." });
+      }
+
+      await storage.updateFacility(parseInt(facilityId), { isActive });
+
+      // Get admin user data for logging
+      const adminUser = await storage.getUser(req.user.claims.sub);
+      const adminEmail = adminUser?.email || req.user.claims.sub;
+
+      // Log activity
+      await storage.createActivityLog({
+        id: randomUUID(),
+        userId: req.user.claims.sub,
+        action: `Facility ${isActive ? 'Enabled' : 'Disabled'}`,
+        details: `${isActive ? 'Made available' : 'Made unavailable'} facility "${facility.name}" by ${adminEmail}`,
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent'),
+        createdAt: new Date(),
+      });
+
+      res.json({ 
+        success: true, 
+        message: `Facility ${isActive ? 'made available' : 'made unavailable'} successfully.` 
+      });
+    } catch (error) {
+      console.error("Error updating facility availability:", error);
+      res.status(500).json({ message: "Failed to update facility availability." });
     }
   });
 

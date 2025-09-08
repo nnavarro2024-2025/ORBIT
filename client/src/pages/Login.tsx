@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
 import { useRoute } from "wouter";
-import { BookOpen, Dock, Calendar } from "lucide-react";
+import { BookOpen, Dock, Calendar, Check } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/useAuth";
 import Footer from "@/components/Footer";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 export default function Login() {
   const [, params] = useRoute<{ subsystem?: string }>("/login/:subsystem?");
@@ -18,6 +20,7 @@ export default function Login() {
   const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [showTermsModal, setShowTermsModal] = useState(false);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -142,10 +145,14 @@ export default function Login() {
         <div className="relative w-full max-w-md z-10">
           <div className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl p-8 shadow-2xl">
             <div className="text-center mb-8">
-              <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full mb-4 shadow-xl animate-pulse">
-                {subsystemInfo.icon}
+              <div className="inline-flex items-center justify-center mb-4">
+                <img 
+                  src="/images/orbit-logo.png" 
+                  alt="ORBIT Logo" 
+                  className="h-16 w-auto object-contain filter brightness-200"
+                />
               </div>
-              <h2 className="text-3xl font-bold text-white mb-2">
+              <h2 className="text-3xl font-bold bg-gradient-to-r from-blue-200 to-purple-200 bg-clip-text text-transparent mb-2">
                 {isSignUp ? "Join ORBIT" : "Welcome Back"}
               </h2>
               <p className="text-blue-100 text-lg font-medium">{subsystemInfo.title}</p>
@@ -226,7 +233,10 @@ export default function Login() {
           <div className="text-center pt-4 border-t border-white/20">
             <p className="text-sm text-blue-200">
               By continuing, you agree to our{" "}
-              <button className="text-blue-300 hover:text-blue-100 underline transition-colors font-medium">
+              <button 
+                onClick={() => setShowTermsModal(true)}
+                className="text-blue-300 hover:text-blue-100 underline transition-colors font-medium"
+              >
                 Terms and Conditions
               </button>
             </p>
@@ -265,6 +275,92 @@ export default function Login() {
           </div>
         </div>
       </div>
+      
+      {/* Terms and Conditions Modal */}
+      <Dialog open={showTermsModal} onOpenChange={setShowTermsModal}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold text-center mb-4">
+              Terms and Conditions
+            </DialogTitle>
+          </DialogHeader>
+          
+          <div className="space-y-4 text-sm text-gray-700">
+            <div>
+              <h3 className="font-semibold text-lg mb-2">ORBIT Library Management System - Terms of Use</h3>
+              <p className="mb-4">
+                Welcome to ORBIT (Integrated Library Facility & Computer Usage Management System). 
+                By using this system, you agree to the following terms and conditions:
+              </p>
+            </div>
+
+            <div>
+              <h4 className="font-semibold mb-2">1. Acceptable Use</h4>
+              <ul className="list-disc list-inside space-y-1 ml-4">
+                <li>Use the system only for legitimate library and academic purposes</li>
+                <li>Respect other users' booking times and computer session allocations</li>
+                <li>Do not attempt to circumvent time limits or access restrictions</li>
+                <li>Report any technical issues or policy violations to library staff</li>
+              </ul>
+            </div>
+
+            <div>
+              <h4 className="font-semibold mb-2">2. Computer Usage</h4>
+              <ul className="list-disc list-inside space-y-1 ml-4">
+                <li>Computer sessions are subject to time limits as set by library policy</li>
+                <li>Automatic logout will occur after periods of inactivity</li>
+                <li>Time extensions require approval and are subject to availability</li>
+                <li>Inappropriate use may result in session termination</li>
+              </ul>
+            </div>
+
+            <div>
+              <h4 className="font-semibold mb-2">3. Facility Booking</h4>
+              <ul className="list-disc list-inside space-y-1 ml-4">
+                <li>Bookings are subject to approval by library administration</li>
+                <li>Users must arrive on time and present valid identification</li>
+                <li>Cancellations should be made at least 2 hours in advance</li>
+                <li>No-shows may result in future booking restrictions</li>
+              </ul>
+            </div>
+
+            <div>
+              <h4 className="font-semibold mb-2">4. Privacy and Data</h4>
+              <ul className="list-disc list-inside space-y-1 ml-4">
+                <li>Usage data is collected for system administration and improvement</li>
+                <li>Personal information is protected according to institutional privacy policies</li>
+                <li>Session logs may be reviewed for policy compliance</li>
+              </ul>
+            </div>
+
+            <div>
+              <h4 className="font-semibold mb-2">5. Violations and Restrictions</h4>
+              <ul className="list-disc list-inside space-y-1 ml-4">
+                <li>Violations of these terms may result in account suspension</li>
+                <li>Repeated violations may lead to permanent restriction from library services</li>
+                <li>Appeals may be submitted through proper institutional channels</li>
+              </ul>
+            </div>
+
+            <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+              <p className="text-blue-800 text-center font-medium">
+                These terms are subject to change. Continued use of the system constitutes acceptance of any updates.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex justify-center mt-6">
+            <Button 
+              onClick={() => setShowTermsModal(false)}
+              className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+            >
+              <Check className="h-4 w-4 mr-2" />
+              I Understand
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      
       <Footer />
     </>
   );

@@ -20,4 +20,8 @@ export default defineConfig({
       },
     },
   },
+  base: '/',
+  build: {
+    outDir: process.env.NODE_ENV === 'production' ? 'dist/public' : 'dist',
+  },
 })

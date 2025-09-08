@@ -51,11 +51,18 @@ export default function BannedUser() {
         <Card className="w-full max-w-2xl mx-4 border-red-200 shadow-lg">
           <CardHeader className="text-center pb-6">
             <div className="flex justify-center mb-4">
-              <Ban className="h-20 w-20 text-red-500" />
+              <img 
+                src="/images/orbit-logo.png" 
+                alt="ORBIT Logo" 
+                className="h-16 w-auto object-contain mb-2"
+              />
+            </div>
+            <div className="flex justify-center mb-4">
+              <Ban className="h-16 w-16 text-red-500" />
             </div>
             <CardTitle className="text-3xl font-bold text-red-700">Account Suspended</CardTitle>
             <p className="text-lg text-gray-700 font-medium mt-2">
-              Your account has been suspended and you no longer have access to the system.
+              Your account has been suspended and you no longer have access to the ORBIT system.
             </p>
           </CardHeader>
           <CardContent className="space-y-4">

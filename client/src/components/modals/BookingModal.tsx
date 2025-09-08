@@ -123,24 +123,27 @@ interface BookingModalProps {
   isOpen: boolean;
   onClose: () => void;
   facilities: Facility[];
+  selectedFacilityId?: number | null;
 }
 
 export default function BookingModal({
   isOpen,
   onClose,
   facilities = [],
+  selectedFacilityId = null,
 }: BookingModalProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
 
   const predefinedFacilities = [
-    { id: 1, name: "Study Room A" },
-    { id: 2, name: "Computer Station B" },
-    { id: 3, name: "Nap Pod C" },
+    { id: 1, name: "Study Room A", isActive: true },
+    { id: 2, name: "Study Room B", isActive: true },
+    { id: 3, name: "Nap Pod C", isActive: true },
   ];
 
-  const fallbackFacilities = facilities.length > 0 ? facilities : predefinedFacilities;
+  const allFacilities = facilities.length > 0 ? facilities : predefinedFacilities;
+  const fallbackFacilities = allFacilities.filter(facility => facility.isActive);
 
   const getFacilityMaxCapacity = (facility?: Facility | null) => {
     if (!facility) return 20;
@@ -154,28 +157,40 @@ export default function BookingModal({
     return facility.capacity || 20;
   };
 
-type BookingFormData = z.infer<typeof bookingSchema>;
+  type BookingFormData = z.infer<typeof bookingSchema>;
 
   const form = useForm<BookingFormData>({
     resolver: zodResolver(bookingSchema),
     mode: 'onChange',
     defaultValues: {
       facilityId: "",
-      startTime: new Date(new Date().getTime() + 60 * 1000), // Default to current date and time + 1 minute
-      endTime: new Date(Date.now() + 30 * 60 * 1000),
+      startTime: new Date(new Date().getTime() + 5 * 60 * 1000), // Default to current date and time + 5 minutes
+      endTime: new Date(Date.now() + 35 * 60 * 1000), // 30 minutes after start time
       purpose: "",
       participants: 1,
     },
   });
 
-  // Automatically select first facility when modal opens
+  // Auto-select facility when modal opens with a specific facility ID
   useEffect(() => {
-    if (isOpen && facilities.length > 0 && !form.watch("facilityId")) {
-      const firstId = facilities[0].id.toString();
-      form.setValue("facilityId", firstId);
-      handleFacilityChange(firstId);
+    if (isOpen && selectedFacilityId) {
+      const facility = facilities.find(f => f.id === selectedFacilityId);
+      if (facility && facility.isActive) {
+        setSelectedFacility(facility);
+        // Also update the form field
+        form.setValue('facilityId', facility.id.toString());
+      }
+    } else if (isOpen && !selectedFacilityId) {
+      // Reset selection when modal opens without a specific facility
+      setSelectedFacility(null);
+      // Only auto-select first facility if no specific facility was requested
+      if (fallbackFacilities.length > 0 && !form.watch("facilityId")) {
+        const firstId = fallbackFacilities[0].id.toString();
+        form.setValue("facilityId", firstId);
+        handleFacilityChange(firstId);
+      }
     }
-  }, [isOpen, facilities]);
+  }, [isOpen, selectedFacilityId, facilities, form, fallbackFacilities]);
 
   const handleFacilityChange = (facilityId: string) => {
     const facility = facilities.find((f) => f.id === parseInt(facilityId));
@@ -190,6 +205,12 @@ type BookingFormData = z.infer<typeof bookingSchema>;
 
   const createBookingMutation = useMutation({
     mutationFn: async (data: BookingFormData) => {
+      // Check if selected facility is available
+      const selectedFacility = facilities.find(f => f.id === parseInt(data.facilityId));
+      if (!selectedFacility || !selectedFacility.isActive) {
+        throw new Error("Selected facility is currently unavailable for booking. Please choose another facility.");
+      }
+
       const bookingData = {
         ...data,
         facilityId: parseInt(data.facilityId),
@@ -285,38 +306,55 @@ type BookingFormData = z.infer<typeof bookingSchema>;
         </DialogHeader>
 
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-            <div className="grid md:grid-cols-2 gap-6">
-              <FormField
-                control={form.control}
-                name="facilityId"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Facility</FormLabel>
-                    <Select
-                      value={field.value}
-                      onValueChange={(value) => {
-                        field.onChange(value);
-                        handleFacilityChange(value);
-                      }}
-                    >
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select a facility" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {fallbackFacilities.map((f) => (
-                          <SelectItem key={f.id} value={f.id.toString()}>
-                            {f.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+          {fallbackFacilities.length === 0 ? (
+            <div className="text-center py-8">
+              <div className="bg-gray-100 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
+                <CalendarIcon className="h-8 w-8 text-gray-400" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">No Facilities Available</h3>
+              <p className="text-gray-600 mb-6">
+                All facilities are currently unavailable for booking. Please contact an administrator or try again later.
+              </p>
+              <button
+                onClick={onClose}
+                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors duration-200"
+              >
+                Close
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+              <div className="grid md:grid-cols-2 gap-6">
+                <FormField
+                  control={form.control}
+                  name="facilityId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Facility</FormLabel>
+                      <Select
+                        value={field.value}
+                        onValueChange={(value) => {
+                          field.onChange(value);
+                          handleFacilityChange(value);
+                        }}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select a facility" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {fallbackFacilities.map((f) => (
+                            <SelectItem key={f.id} value={f.id.toString()}>
+                              {f.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
 
               <FormField
                 control={form.control}
@@ -505,6 +543,7 @@ type BookingFormData = z.infer<typeof bookingSchema>;
               </Button>
             </div>
           </form>
+          )}
         </Form>
       </DialogContent>
     </Dialog>

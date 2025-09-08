@@ -4,10 +4,7 @@
     {
       "src": "client/package.json",
       "use": "@vercel/static-build",
-      "config": { 
-        "distDir": "../dist",
-        "buildCommand": "npm run build"
-      }
+      "config": { "distDir": "dist" }
     },
     {
       "src": "api/**/*.ts",
@@ -15,14 +12,8 @@
     }
   ],
   "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/api/$1"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/dist/$1"
-    }
-  ],
-  "installCommand": "npm install && cd client && npm install"
+    { "src": "/api/(.*)", "dest": "/api/$1" },
+    { "handle": "filesystem" },
+    { "src": "/(.*)", "dest": "/index.html" }
+  ]
 }

@@ -24,7 +24,7 @@ import {
   userStatusEnum,
 } from "../shared/schema";
 import { db } from "./db";
-import { eq, and, desc, gte, lte, count, sql, isNotNull } from "drizzle-orm";
+import { eq, and, desc, asc, gte, lte, count, sql, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 
 export interface IStorage {
@@ -247,7 +247,7 @@ class DatabaseStorage implements IStorage {
 
   // Facility operations
   async getAllFacilities(): Promise<Facility[]> {
-    return db.select().from(facilities);
+    return db.select().from(facilities).orderBy(asc(facilities.id));
   }
 
   async getFacility(id: number): Promise<Facility | undefined> {
