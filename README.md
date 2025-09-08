@@ -1,4 +1,4 @@
-# 🎯 TaskMasterPro - Integrated Campus Management System
+# 🚀 ORBIT - Campus Management System
 
 [![React](https://img.shields.io/badge/React-18-blue.svg)](https://reactjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue.svg)](https://www.typescriptlang.org/)
@@ -6,40 +6,40 @@
 [![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-green.svg)](https://supabase.com/)
 [![Vercel](https://img.shields.io/badge/Deploy-Vercel-black.svg)](https://vercel.com/)
 
-A modern, full-stack campus management system designed for educational institutions. Combines computer lab management (ORZ System) with facility booking capabilities, featuring real-time session tracking, automated workflows, and comprehensive administrative oversight.
+A comprehensive, full-stack campus management system designed for educational institutions. ORBIT combines computer lab management with facility booking capabilities, featuring real-time session tracking, automated workflows, and comprehensive administrative oversight.
 
 ## 🌟 Key Features
 
-### 🖥️ **ORZ Computer Lab Management**
+### 🖥️ **Computer Lab Management**
 
 - **Real-time Session Tracking** - Monitor active computer sessions across multiple labs
-- **Smart Auto-logout** - Automatic session termination after 10 minutes of inactivity
-- **Time Extension System** - Students can request additional time with admin approval
+- **Smart Auto-logout** - Automatic session termination after configurable inactivity periods
+- **Time Extension System** - Students can request additional time with admin approval workflow
 - **Comprehensive Analytics** - Session history, usage patterns, and lab utilization reports
-- **Multi-lab Support** - Manage multiple computer labs (Lab A, Lab B, Lab C)
+- **Multi-lab Support** - Manage multiple computer labs with individual station tracking
 
 ### 🏢 **Facility Booking System**
 
 - **Room Reservations** - Book collaborative learning rooms, board rooms, and study spaces
-- **Approval Workflow** - Admin approval system for facility bookings
-- **Email Notifications** - Automated confirmations and reminders via SMTP
-- **Booking Calendar** - Visual calendar interface for availability checking
+- **Approval Workflow** - Admin approval system for facility bookings with notification system
+- **Email Notifications** - Automated confirmations and reminders via integrated email service
+- **Booking Calendar** - Visual calendar interface for availability checking and scheduling
 - **Conflict Prevention** - Automatic detection and prevention of double-bookings
 
 ### 👥 **Role-Based Access Control**
 
-- **Students** - Access to ORZ sessions and facility booking
+- **Students** - Access to computer sessions and facility booking with appropriate limitations
 - **Faculty** - Enhanced booking privileges and extended session limits
-- **Administrators** - Full system control, user management, and analytics
-- **Banned User Handling** - Automatic restriction system with custom messaging
+- **Administrators** - Full system control, user management, analytics, and system oversight
+- **Ban Management** - Comprehensive user restriction system with custom messaging and appeals
 
 ### 🔧 **Administrative Features**
 
-- **User Management** - Create, edit, ban/unban users with detailed profiles
-- **Session Control** - Monitor, extend, or terminate active sessions
-- **Booking Oversight** - Approve/reject facility requests with notes
-- **System Analytics** - Comprehensive dashboards and usage reports
-- **Activity Logging** - Complete audit trail of all system activities
+- **User Management** - Create, edit, ban/unban users with detailed profiles and role assignment
+- **Session Control** - Monitor, extend, or terminate active sessions with detailed logging
+- **Booking Oversight** - Approve/reject facility requests with admin notes and communication
+- **System Analytics** - Comprehensive dashboards showing usage patterns and system health
+- **Activity Logging** - Complete audit trail of all system activities for compliance
 
 ## 🛠️ Technology Stack
 
@@ -88,8 +88,8 @@ A modern, full-stack campus management system designed for educational instituti
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/TaskMasterPro.git
-cd TaskMasterPro
+git clone https://github.com/james-hub21/ORBIT.git
+cd ORBIT
 
 # Install dependencies
 npm install
@@ -123,7 +123,7 @@ SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=your_email@domain.com
 SMTP_PASS=your_app_password
-SMTP_FROM="TaskMasterPro <your_email@domain.com>"
+SMTP_FROM="ORBIT System <your_email@domain.com>"
 ```
 
 ### **3. Database Setup**
@@ -186,57 +186,79 @@ NODE_ENV=production
 ## 📁 Project Structure
 
 ```
-TaskMasterPro/
+ORBIT/
 ├── 📁 client/                    # React Frontend Application
 │   ├── 📁 src/
 │   │   ├── 📁 components/        # Reusable UI Components
-│   │   │   ├── 📁 ui/           # Shadcn/ui Base Components
-│   │   │   ├── 📁 modals/       # Modal Components
+│   │   │   ├── 📁 ui/           # Shadcn/ui Base Components  
+│   │   │   ├── 📁 modals/       # Modal Components (Booking, Profile, etc.)
 │   │   │   ├── Header.tsx       # Navigation Header
-│   │   │   └── Sidebar.tsx      # Navigation Sidebar
+│   │   │   ├── Sidebar.tsx      # Navigation Sidebar
+│   │   │   ├── ToastNotification.tsx  # Toast System
+│   │   │   └── UserEmailDisplay.tsx   # User Info Display
 │   │   ├── 📁 pages/            # Route Components
 │   │   │   ├── 📁 admin/        # Admin Dashboard Pages
-│   │   │   ├── 📁 student/      # Student Dashboard Pages
+│   │   │   ├── 📁 student/      # Student Dashboard Pages  
 │   │   │   ├── Login.tsx        # Authentication Page
-│   │   │   └── Landing.tsx      # Public Landing Page
+│   │   │   ├── Landing.tsx      # Public Landing Page
+│   │   │   └── BannedUser.tsx   # Banned User Interface
 │   │   ├── 📁 lib/              # Utilities & Configuration
 │   │   │   ├── supabase.ts      # Supabase Client Setup
 │   │   │   ├── api.ts           # API Client Functions
+│   │   │   ├── authUtils.ts     # Authentication Utilities
+│   │   │   ├── queryClient.ts   # React Query Setup
 │   │   │   └── utils.ts         # Helper Functions
 │   │   ├── 📁 hooks/            # Custom React Hooks
+│   │   │   ├── useAuth.ts       # Authentication Hook
+│   │   │   ├── use-toast.ts     # Toast Hook
+│   │   │   └── use-mobile.tsx   # Mobile Detection Hook
 │   │   └── App.tsx              # Main Application Component
 │   ├── index.html               # HTML Entry Point
 │   ├── package.json             # Frontend Dependencies
+│   ├── tailwind.config.ts       # Tailwind Configuration
 │   └── vite.config.ts           # Vite Configuration
 ├── 📁 server/                    # Express Backend Application
 │   ├── 📁 services/             # Business Logic Services
-│   │   ├── emailService.ts      # Email Handling
-│   │   ├── sessionService.ts    # Session Management
-│   │   └── userService.ts       # User Operations
-│   ├── db.ts                    # Database Connection (Local)
+│   │   ├── emailService.ts      # Email Handling & SMTP
+│   │   ├── sessionService.ts    # Session Management Logic
+│   │   └── userService.ts       # User Operations & Management
+│   ├── db.ts                    # Database Connection (Local Development)
 │   ├── db-vercel.ts             # Database Connection (Serverless)
 │   ├── routes.ts                # API Route Definitions
 │   ├── storage.ts               # Data Access Layer
+│   ├── supabase.ts              # Supabase Client
 │   ├── supabaseAdmin.ts         # Supabase Admin Client
+│   ├── supabaseAuth.ts          # Supabase Authentication
 │   └── index.ts                 # Server Entry Point
 ├── 📁 api/                       # Vercel Serverless Functions
 │   ├── index.ts                 # Main API Handler
 │   ├── facilities.ts            # Facility Management API
 │   ├── computer-stations.ts     # Station Management API
 │   └── 📁 auth/                 # Authentication APIs
+│       └── user.ts              # User Authentication Endpoint
 ├── 📁 shared/                    # Shared Code & Types
-│   └── schema.ts                # Database Schema (Drizzle)
+│   └── schema.ts                # Database Schema (Drizzle ORM)
 ├── 📁 migrations/                # Database Migration Files
+│   ├── 0000_update_facility_names.sql
+│   ├── 0001_delete_extra_facilities.sql
+│   ├── 0002_add_ban_fields.sql
+│   └── 📁 meta/                 # Migration Metadata
 ├── 📁 scripts/                   # Utility Scripts
-│   ├── deploy.ps1               # Deployment Script
-│   ├── dev.ps1                  # Development Setup
-│   └── system-test.mjs          # System Testing
+│   ├── deploy.ps1               # Windows Deployment Script
+│   ├── dev.ps1                  # Development Setup Script
+│   ├── prepare-deploy.ps1       # Deployment Preparation
+│   ├── start-dev.ps1            # Development Startup
+│   ├── system-test.mjs          # System Testing Suite
+│   └── test-api.mjs             # API Testing Script
+├── 📁 attached_assets/           # Documentation & Assets
 ├── .env.example                 # Environment Template
+├── components.json              # Shadcn/ui Configuration
 ├── drizzle.config.ts            # Drizzle ORM Configuration
 ├── package.json                 # Root Dependencies & Scripts
 ├── tailwind.config.ts           # Tailwind CSS Configuration
 ├── tsconfig.json                # TypeScript Configuration
 ├── vercel.json                  # Vercel Deployment Config
+├── vite.config.vercel.ts        # Vite Vercel Configuration
 └── README.md                    # This File
 ```
 
@@ -250,15 +272,14 @@ POST /api/auth/login             # User authentication
 POST /api/auth/logout            # User logout
 ```
 
-### **ORZ Computer Sessions**
+### **Computer Sessions**
 
 ```http
-GET    /api/orz/sessions         # List all sessions (admin)
-POST   /api/orz/sessions         # Start new session
-GET    /api/orz/sessions/:id     # Get session details
-PUT    /api/orz/sessions/:id     # Update session
-DELETE /api/orz/sessions/:id     # End session
-POST   /api/orz/extend/:id       # Request time extension
+GET    /api/computer-stations     # List all computer stations and availability
+POST   /api/computer-stations     # Start new computer session
+GET    /api/computer-stations/:id # Get specific station details
+PUT    /api/computer-stations/:id # Update session or extend time
+DELETE /api/computer-stations/:id # End computer session
 ```
 
 ### **Facility Bookings**
@@ -285,46 +306,50 @@ GET    /api/admin/logs           # Activity logs
 
 ### **Core Tables**
 
-- **`users`** - User profiles, roles, and authentication data
-- **`orz_sessions`** - Computer lab session tracking
-- **`facilities`** - Available rooms and spaces
-- **`bookings`** - Facility reservation records
-- **`computer_stations`** - Lab workstation inventory
-- **`time_extension_requests`** - Session extension workflows
-- **`activity_logs`** - System audit trail
+- **`users`** - User profiles, roles, authentication data, and ban status
+- **`computer_sessions`** - Computer lab session tracking with timestamps
+- **`facilities`** - Available rooms and spaces for booking
+- **`bookings`** - Facility reservation records with approval status
+- **`computer_stations`** - Lab workstation inventory and availability
+- **`time_extension_requests`** - Session extension workflows and approvals
+- **`activity_logs`** - System audit trail for compliance and monitoring
 
 ### **Key Relationships**
 
-- Users can have multiple ORZ sessions and bookings
-- Facilities can have multiple bookings (time-based)
-- Sessions belong to specific computer stations
-- Extension requests link to active sessions
+- Users can have multiple computer sessions and facility bookings
+- Facilities can have multiple bookings with time-based availability
+- Sessions are linked to specific computer stations in designated labs
+- Extension requests are associated with active computer sessions
+- Admin actions are logged with user attribution and timestamps
 
 ## 🎯 Usage Examples
 
 ### **Starting a Computer Session**
 
-1. Student logs in and navigates to ORZ Dashboard
-2. Selects available computer station
-3. Session begins with automatic tracking
-4. System monitors for inactivity (10-minute timeout)
-5. Student can request extensions before timeout
+1. Student logs in and navigates to Computer Lab Dashboard
+2. Selects available computer station from real-time availability display
+3. Session begins with automatic tracking and activity monitoring
+4. System monitors for inactivity with configurable timeout periods
+5. Student can request time extensions through the interface before timeout
+6. Admin can approve/deny extension requests with notification system
 
 ### **Booking a Facility**
 
-1. User accesses Booking Dashboard
-2. Selects facility and desired time slot
-3. Submits booking request with details
-4. Admin receives notification for approval
-5. User receives confirmation email once approved
+1. User accesses Facility Booking Dashboard with calendar view
+2. Selects desired facility and available time slot
+3. Submits booking request with purpose and additional details
+4. Admin receives notification for approval workflow
+5. User receives email confirmation once booking is approved
+6. System prevents conflicts and manages booking modifications
 
 ### **Administrative Oversight**
 
-1. Admin views real-time dashboard with active sessions
-2. Can extend, terminate, or transfer sessions
-3. Manages facility booking approvals
-4. Reviews system analytics and user activity
-5. Handles user management (ban/unban, role changes)
+1. Admin views comprehensive real-time dashboard with active sessions and bookings
+2. Can extend, terminate, or transfer computer sessions with detailed logging
+3. Manages facility booking approvals with notes and communication tools
+4. Reviews system analytics including usage patterns and user behavior
+5. Handles user management including role assignments and ban/unban actions
+6. Monitors system health and performance through integrated dashboards
 
 ## 🔒 Security Features
 
@@ -343,14 +368,17 @@ GET    /api/admin/logs           # Activity logs
 # Run type checking
 npm run check
 
-# Run linting
+# Run linting (if configured)
 npm run lint
 
-# Run tests (when implemented)
-npm run test
-
-# Run system test
+# Run system tests
 node scripts/system-test.mjs
+
+# Run API tests
+node scripts/test-api.mjs
+
+# Test system integration
+npm run test-system
 ```
 
 ## 📈 Performance
@@ -376,20 +404,26 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙋‍♂️ Support
 
-For support, email support@taskmaster.pro or join our Discord community.
+For support and questions about the ORBIT system, please:
+- Create an issue on GitHub: https://github.com/james-hub21/ORBIT/issues
+- Contact the development team through the repository
+- Check the documentation and guides in the attached_assets folder
 
 ## 🔄 Changelog
 
-### v2.0.0 (Current)
+### v1.0.0 (Current)
 
-- 🎉 Complete system redesign with modern tech stack
-- ✨ Real-time session tracking and facility booking
-- 🔐 Enhanced security and role-based access
-- 📱 Responsive design for mobile and desktop
-- 🚀 Optimized for Vercel deployment
+- 🎉 Initial release of ORBIT Campus Management System
+- ✨ Real-time computer session tracking and facility booking system
+- 🔐 Comprehensive security with role-based access control
+- 📱 Responsive design optimized for desktop and mobile devices
+- 🚀 Production-ready deployment with Vercel and Supabase
+- 📊 Advanced analytics and reporting capabilities
+- 📧 Integrated email notification system
+- 🛡️ User ban/unban management with appeals system
 
 ---
 
-**Built with ❤️ for educational institutions**
+**Built with ❤️ for educational institutions by the ORBIT development team**
 
 _Last Updated: September 8, 2025_
