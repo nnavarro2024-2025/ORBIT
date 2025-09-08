@@ -5,6 +5,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import Header from "@/components/Header";
 import TimeExtensionModal from "@/components/modals/TimeExtensionModal";
+import DeveloperCredit from "@/components/DeveloperCredit";
 import { Dock, Clock, History, Settings, Circle, ChevronLeft, ChevronRight } from "lucide-react";
 
 interface Session {
@@ -439,6 +440,7 @@ export default function OrzDashboard() {
         }}
         sessionId={activeSession?.id}
       />
+      <DeveloperCredit />
     </div>
   );
 }

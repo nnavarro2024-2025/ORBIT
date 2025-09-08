@@ -1,7 +1,7 @@
 # 🚀 ORBIT - Campus Management System
 
 > **"Revolutionizing Campus Technology, One Innovation at a Time"**  
-> *Developed by James Lemuel M. Rabang - BSIT Student, University of the Immaculate Conception*
+> _Developed by James Lemuel M. Rabang - BSIT Student, University of the Immaculate Conception_
 
 [![React](https://img.shields.io/badge/React-18-blue.svg)](https://reactjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue.svg)](https://www.typescriptlang.org/)
@@ -433,14 +433,16 @@ For support and questions about the ORBIT system, please:
 **ORBIT Campus Management System** was developed by:
 
 ### **James Lemuel M. Rabang**
-- 🎓 **Program**: Bachelor of Science in Information Technology  
-- 🏫 **University**: University of the Immaculate Conception  
-- 📅 **Year**: 3rd Year Student  
+
+- 🎓 **Program**: Bachelor of Science in Information Technology
+- 🏫 **University**: University of the Immaculate Conception
+- 📅 **Year**: 3rd Year Student
 - 💻 **Role**: Lead Developer & System Architect
 
-> *"Developed with passion for creating innovative solutions that enhance educational technology and campus management systems."*
+> _"Developed with passion for creating innovative solutions that enhance educational technology and campus management systems."_
 
 ### 🎯 Development Focus
+
 - Full-stack web development with modern technologies
 - Campus management and educational technology solutions
 - Real-time systems and user experience optimization

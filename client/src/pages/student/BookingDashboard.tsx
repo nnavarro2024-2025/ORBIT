@@ -7,6 +7,7 @@ import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
 import BookingModal from "@/components/modals/BookingModal";
 import EditBookingModal from "@/components/modals/EditBookingModal";
+import DeveloperCredit from "@/components/DeveloperCredit";
 import { Plus, Calendar, History, Settings, Home, ChevronLeft, ChevronRight, Eye, Users, MapPin } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -784,6 +785,7 @@ export default function BookingDashboard() {
         facilities={facilities}
         onSave={handleSaveEditBooking}
       />
+      <DeveloperCredit />
     </div>
   );
 }
