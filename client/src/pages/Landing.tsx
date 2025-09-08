@@ -1,6 +1,7 @@
 import { useAuth } from "@/hooks/useAuth";
 import { Link, useLocation } from "wouter";
 import { BookOpen, Calendar, Dock, Users, Shield } from "lucide-react";
+import Footer from "@/components/Footer";
 
 export default function Landing() {
   const { isAuthenticated, user } = useAuth();
@@ -190,6 +191,7 @@ export default function Landing() {
           </div>
         </div>
       </div>
+      <Footer />
     </div>
   );
 }

@@ -44,7 +44,7 @@ export default function Header() {
   return (
     <header className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm backdrop-blur-sm">
       <div className="container mx-auto px-6 h-16 flex items-center justify-between gap-4">
-        <Link to="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity duration-200">
+        <Link to="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity duration-200" title="ORBIT Campus Management System | Developed by James Lemuel M. Rabang">
           <div className="bg-gradient-to-br from-blue-500 to-purple-600 p-2 rounded-lg shadow-lg">
             <span className="text-xl text-white">📚</span>
           </div>

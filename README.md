@@ -1,5 +1,8 @@
 # 🚀 ORBIT - Campus Management System
 
+> **"Revolutionizing Campus Technology, One Innovation at a Time"**  
+> *Developed by James Lemuel M. Rabang - BSIT Student, University of the Immaculate Conception*
+
 [![React](https://img.shields.io/badge/React-18-blue.svg)](https://reactjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue.svg)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-18+-green.svg)](https://nodejs.org/)
@@ -190,7 +193,7 @@ ORBIT/
 ├── 📁 client/                    # React Frontend Application
 │   ├── 📁 src/
 │   │   ├── 📁 components/        # Reusable UI Components
-│   │   │   ├── 📁 ui/           # Shadcn/ui Base Components  
+│   │   │   ├── 📁 ui/           # Shadcn/ui Base Components
 │   │   │   ├── 📁 modals/       # Modal Components (Booking, Profile, etc.)
 │   │   │   ├── Header.tsx       # Navigation Header
 │   │   │   ├── Sidebar.tsx      # Navigation Sidebar
@@ -198,7 +201,7 @@ ORBIT/
 │   │   │   └── UserEmailDisplay.tsx   # User Info Display
 │   │   ├── 📁 pages/            # Route Components
 │   │   │   ├── 📁 admin/        # Admin Dashboard Pages
-│   │   │   ├── 📁 student/      # Student Dashboard Pages  
+│   │   │   ├── 📁 student/      # Student Dashboard Pages
 │   │   │   ├── Login.tsx        # Authentication Page
 │   │   │   ├── Landing.tsx      # Public Landing Page
 │   │   │   └── BannedUser.tsx   # Banned User Interface
@@ -405,6 +408,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🙋‍♂️ Support
 
 For support and questions about the ORBIT system, please:
+
 - Create an issue on GitHub: https://github.com/james-hub21/ORBIT/issues
 - Contact the development team through the repository
 - Check the documentation and guides in the attached_assets folder
@@ -424,6 +428,26 @@ For support and questions about the ORBIT system, please:
 
 ---
 
-**Built with ❤️ for educational institutions by the ORBIT development team**
+## 👨‍💻 Developer
+
+**ORBIT Campus Management System** was developed by:
+
+### **James Lemuel M. Rabang**
+- 🎓 **Program**: Bachelor of Science in Information Technology  
+- 🏫 **University**: University of the Immaculate Conception  
+- 📅 **Year**: 3rd Year Student  
+- 💻 **Role**: Lead Developer & System Architect
+
+> *"Developed with passion for creating innovative solutions that enhance educational technology and campus management systems."*
+
+### 🎯 Development Focus
+- Full-stack web development with modern technologies
+- Campus management and educational technology solutions
+- Real-time systems and user experience optimization
+- Scalable architecture and deployment strategies
+
+---
+
+**Built with ❤️ for educational institutions by James Lemuel M. Rabang**
 
 _Last Updated: September 8, 2025_
