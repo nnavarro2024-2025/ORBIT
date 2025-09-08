@@ -8,6 +8,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
+import DeveloperCredit from "@/components/DeveloperCredit";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import BanUserModal from "@/components/modals/BanUserModal";
 import UserEmailDisplay from "@/components/UserEmailDisplay";
@@ -2463,6 +2464,7 @@ export default function AdminDashboard() {
           }}
         />
       )}
+      <DeveloperCredit />
     </div>
   );
 }

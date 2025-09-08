@@ -2,6 +2,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Ban, LogOut, Clock, AlertTriangle } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import Footer from "@/components/Footer";
+import DeveloperCredit from "@/components/DeveloperCredit";
 
 export default function BannedUser() {
   const { logout, user } = useAuth();
@@ -114,6 +116,7 @@ export default function BannedUser() {
           </Button>
         </CardContent>
       </Card>
+      <DeveloperCredit />
     </div>
   );
 }
