@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/useAuth";
 
 export default function Login() {
-  const [match, params] = useRoute<{ subsystem?: string }>("/login/:subsystem?");
+  const [, params] = useRoute<{ subsystem?: string }>("/login/:subsystem?");
   const subsystem = params?.subsystem;
 
   const { isAuthenticated } = useAuth();
@@ -111,135 +111,155 @@ export default function Login() {
       case "orz":
         return {
           title: "ORZ Computer Usage System",
-          icon: <Dock className="h-12 w-12 text-primary" />,
+          icon: <Dock className="h-8 w-8 text-white" />,
           description: "Access computer workstations in the Online Resource Zone",
         };
       case "booking":
         return {
           title: "Library Facility Booking System",
-          icon: <Calendar className="h-12 w-12 text-secondary" />,
+          icon: <Calendar className="h-8 w-8 text-white" />,
           description: "Book and manage library facilities and study rooms",
         };
       default:
         return {
           title: "ORBIT System",
-          icon: <BookOpen className="h-12 w-12 text-primary" />,
+          icon: <BookOpen className="h-8 w-8 text-white" />,
           description: "Integrated Library Facility & Computer Usage Management System",
         };
     }
   })();
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary to-blue-800 dark:from-blue-900 dark:to-blue-950 flex items-center justify-center">
-      <div className="material-card p-8 w-full max-w-md mx-6">
-        <div className="text-center mb-8">
-          {subsystemInfo.icon}
-          <h2 className="text-2xl font-bold mt-4 mb-2">
-            {isSignUp ? "Sign Up for ORBIT" : "Login to ORBIT"}
-          </h2>
-          <p className="text-muted-foreground">{subsystemInfo.title}</p>
-          <p className="text-sm text-muted-foreground mt-2">{subsystemInfo.description}</p>
-        </div>
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-indigo-900 flex items-center justify-center p-4 relative overflow-hidden">
+      {/* Background decoration */}
+      <div className="absolute inset-0 overflow-hidden">
+        <div className="absolute -top-40 -right-40 w-80 h-80 bg-blue-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse"></div>
+        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-purple-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse"></div>
+      </div>
+      
+      <div className="relative w-full max-w-md z-10">
+        <div className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl p-8 shadow-2xl">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full mb-4 shadow-xl animate-pulse">
+              {subsystemInfo.icon}
+            </div>
+            <h2 className="text-3xl font-bold text-white mb-2">
+              {isSignUp ? "Join ORBIT" : "Welcome Back"}
+            </h2>
+            <p className="text-blue-100 text-lg font-medium">{subsystemInfo.title}</p>
+            <p className="text-blue-200 text-sm mt-2">{subsystemInfo.description}</p>
+          </div>
 
-        <div className="space-y-6">
-          {errorMsg && <div className="text-sm text-red-500 text-center">{errorMsg}</div>}
+          <div className="space-y-6">
+          {errorMsg && (
+            <div className="bg-red-500/20 backdrop-blur border border-red-400/30 text-red-100 px-4 py-3 rounded-lg text-sm text-center shadow-lg">
+              {errorMsg}
+            </div>
+          )}
 
           {isSignUp && (
             <>
-              <div>
-                <label className="block text-sm font-medium mb-1 text-white">First Name</label>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-blue-100">First Name</label>
                 <input
                   type="text"
                   value={firstName}
                   onChange={(e) => setFirstName(e.target.value)}
-                  className="material-input w-full"
-                  placeholder="John"
+                  className="w-full px-4 py-3 bg-white/10 backdrop-blur border border-white/20 rounded-lg text-white placeholder-blue-200 focus:bg-white/20 focus:border-blue-400 focus:outline-none transition-all duration-200 shadow-sm"
+                  placeholder="Enter your first name"
                   required
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium mb-1 text-white">Last Name</label>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-blue-100">Last Name</label>
                 <input
                   type="text"
                   value={lastName}
                   onChange={(e) => setLastName(e.target.value)}
-                  className="material-input w-full"
-                  placeholder="Doe"
+                  className="w-full px-4 py-3 bg-white/10 backdrop-blur border border-white/20 rounded-lg text-white placeholder-blue-200 focus:bg-white/20 focus:border-blue-400 focus:outline-none transition-all duration-200 shadow-sm"
+                  placeholder="Enter your last name"
                   required
                 />
               </div>
             </>
           )}
 
-          <div>
-            <label className="block text-sm font-medium mb-1 text-white">Email</label>
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-blue-100">Email Address</label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="material-input w-full"
-              placeholder="example@domain.com"
+              className="w-full px-4 py-3 bg-white/10 backdrop-blur border border-white/20 rounded-lg text-white placeholder-blue-200 focus:bg-white/20 focus:border-blue-400 focus:outline-none transition-all duration-200 shadow-sm"
+              placeholder="your.email@university.edu"
               required
             />
           </div>
-          <div>
-            <label className="block text-sm font-medium mb-1 text-white">Password</label>
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-blue-100">Password</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="material-input w-full"
-              placeholder="••••••••"
+              className="w-full px-4 py-3 bg-white/10 backdrop-blur border border-white/20 rounded-lg text-white placeholder-blue-200 focus:bg-white/20 focus:border-blue-400 focus:outline-none transition-all duration-200 shadow-sm"
+              placeholder="Enter your password"
               required
             />
           </div>
 
           <button
             onClick={handleAuth}
-            className="material-button primary w-full"
+            className="w-full bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white font-bold py-3 px-4 rounded-lg transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none shadow-xl backdrop-blur border border-white/20"
             disabled={loading}
           >
             {loading
               ? isSignUp
-                ? "Signing up..."
-                : "Logging in..."
+                ? "Creating Account..."
+                : "Signing In..."
               : isSignUp
-              ? "Sign Up"
-              : "Login with University Email"}
+              ? "Create Account"
+              : "Sign In"}
           </button>
 
-          <div className="text-center pt-4 border-t">
-            <p className="text-sm text-muted-foreground">
+          <div className="text-center pt-4 border-t border-white/20">
+            <p className="text-sm text-blue-200">
               By continuing, you agree to our{" "}
-              <a href="#" className="text-primary hover:underline">
+              <button className="text-blue-300 hover:text-blue-100 underline transition-colors font-medium">
                 Terms and Conditions
-              </a>
+              </button>
             </p>
           </div>
 
           <div className="text-center text-sm">
             {isSignUp ? (
-              <>
+              <p className="text-blue-100">
                 Already have an account?{" "}
-                <button className="text-primary underline" onClick={() => setIsSignUp(false)}>
-                  Log In
+                <button 
+                  className="text-blue-300 hover:text-blue-100 underline font-medium transition-colors" 
+                  onClick={() => setIsSignUp(false)}
+                >
+                  Sign In
                 </button>
-              </>
+              </p>
             ) : (
-              <>
+              <p className="text-blue-100">
                 Don't have an account?{" "}
-                <button className="text-primary underline" onClick={() => setIsSignUp(true)}>
-                  Sign Up
+                <button 
+                  className="text-blue-300 hover:text-blue-100 underline font-medium transition-colors" 
+                  onClick={() => setIsSignUp(true)}
+                >
+                  Create Account
                 </button>
-              </>
+              </p>
             )}
           </div>
-        </div>
+          </div>
 
-        <div className="mt-6 text-center">
-          <a href="/" className="text-primary hover:underline text-sm">
-            ← Back to System Selection
-          </a>
+          <div className="mt-8 text-center">
+            <button onClick={() => window.location.href = "/"} className="text-blue-300 hover:text-blue-100 text-sm font-medium transition-colors inline-flex items-center gap-2">
+              ← Back to Home
+            </button>
+          </div>
         </div>
       </div>
     </div>

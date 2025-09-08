@@ -1,35 +1,54 @@
-import { LucideIcon } from "lucide-react";
+import { supabase } from "@/lib/supabase";
+import { LogOut } from "lucide-react";
 
-interface SidebarItem {
+type SidebarItem = {
   id: string;
   label: string;
-  icon: LucideIcon;
-}
+  icon: React.ElementType;
+};
 
-interface SidebarProps {
+type SidebarProps = {
   items: SidebarItem[];
   activeItem: string;
-  onItemClick: (itemId: string) => void;
-}
+  onItemClick: (id: string) => void;
+};
 
 export default function Sidebar({ items, activeItem, onItemClick }: SidebarProps) {
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    // Redirect is handled globally in useAuth.ts
+  };
+
   return (
-    <div className="material-card p-4">
-      <nav className="space-y-2">
-        {items.map((item) => {
-          const Icon = item.icon;
-          return (
-            <div
-              key={item.id}
-              onClick={() => onItemClick(item.id)}
-              className={`sidebar-item ${activeItem === item.id ? 'active' : ''}`}
-            >
-              <Icon className="h-5 w-5 mr-3" />
-              {item.label}
-            </div>
-          );
-        })}
+    <div className="material-card p-4 flex flex-col h-full">
+      <nav className="flex-grow">
+        <ul>
+          {items.map((item) => (
+            <li key={item.id}>
+              <button
+                onClick={() => onItemClick(item.id)}
+                className={`w-full text-left flex items-center px-4 py-3 rounded-lg transition-colors mb-1 ${
+                  activeItem === item.id
+                    ? "bg-primary/10 text-primary font-semibold"
+                    : "hover:bg-accent/50"
+                }`}
+              >
+                <item.icon className="h-5 w-5 mr-3" />
+                <span>{item.label}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
       </nav>
+      <div className="mt-4 pt-4 border-t">
+        <button
+          onClick={handleLogout}
+          className="w-full text-left flex items-center px-4 py-3 rounded-lg hover:bg-accent/50 text-muted-foreground"
+        >
+          <LogOut className="h-5 w-5 mr-3" />
+          <span>Log Out</span>
+        </button>
+      </div>
     </div>
   );
 }

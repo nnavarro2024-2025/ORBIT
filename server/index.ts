@@ -1,13 +1,18 @@
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
-import express, { Request, Response, NextFunction } from "express";
-import cors from "cors";
+import type { Request, Response, NextFunction } from "express";
 import path from "path";
 import { createServer, Server } from "http";
 import { registerRoutes } from "./routes"; // your routes
-import { setupVite, serveStatic, log } from "./vite";
 
 async function startServer() {
+  // Dynamic imports for CommonJS modules in ES module environment
+  const expressModule = await import("express");
+  const corsModule = await import("cors");
+  
+  const express = (expressModule as any).default || expressModule;
+  const cors = (corsModule as any).default || corsModule;
+  
   const app = express();
 
   // --- CORS middleware: allow all origins dynamically ---
@@ -25,31 +30,6 @@ async function startServer() {
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
 
-  // Logging middleware for /api routes
-  app.use((req, res, next) => {
-    const start = Date.now();
-    const pathUrl = req.path;
-    let capturedJsonResponse: any;
-
-    const originalResJson = res.json.bind(res);
-    res.json = (bodyJson: any) => {
-      capturedJsonResponse = bodyJson;
-      return originalResJson(bodyJson);
-    };
-
-    res.on("finish", () => {
-      const duration = Date.now() - start;
-      if (pathUrl.startsWith("/api")) {
-        let logLine = `${req.method} ${pathUrl} ${res.statusCode} in ${duration}ms`;
-        if (capturedJsonResponse) logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-        if (logLine.length > 80) logLine = logLine.slice(0, 79) + "…";
-        log(logLine);
-      }
-    });
-
-    next();
-  });
-
   // Register your API routes
   const server: Server = await registerRoutes(app);
 
@@ -57,19 +37,17 @@ async function startServer() {
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
-    log(`❌ Error: ${message}`);
+    console.error(`❌ Error: ${message}`);
     res.status(status).json({ message });
   });
 
-  // Frontend serving & fallback
-  if (app.get("env") === "development") {
-    await setupVite(app, server);
-  } else {
-    serveStatic(app);
+  // Frontend serving & fallback - ONLY in production
+  if (app.get("env") === "production") {
+    app.use(express.static(path.resolve("dist")));
 
-    app.get("*", (req, res) => {
+    app.get("*", (req: Request, res: Response) => {
       if (!req.path.startsWith("/api")) {
-        res.sendFile(path.resolve("dist/public/index.html"));
+        res.sendFile(path.resolve("dist/index.html"));
       } else {
         res.status(404).json({ message: "API route not found" });
       }
@@ -79,7 +57,7 @@ async function startServer() {
   // Start server
   const port = parseInt(process.env.PORT || "5000", 10);
   server.listen(port, "0.0.0.0", () => {
-    log(`🚀 Server running on http://localhost:${port}`);
+    console.log(`🚀 Server running on http://localhost:${port}`);
   });
 }
 

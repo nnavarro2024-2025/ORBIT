@@ -12,7 +12,6 @@ import {
   pgEnum,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
-import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 // Session storage table for Replit Auth
@@ -32,15 +31,21 @@ export const userRoleEnum = pgEnum("user_role", ["student", "faculty", "admin"])
 // User status enum
 export const userStatusEnum = pgEnum("user_status", ["active", "banned", "suspended"]);
 
+// Booking edit status enum
+
+
 // Users table for Replit Auth
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().notNull(),
-  email: varchar("email").unique(),
+  email: varchar("email").unique().notNull(),
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
   profileImageUrl: varchar("profile_image_url"),
   role: userRoleEnum("role").default("student").notNull(),
   status: userStatusEnum("status").default("active").notNull(),
+  banReason: text("ban_reason"),
+  banEndDate: timestamp("ban_end_date"),
+  bannedAt: timestamp("banned_at"),
   twoFactorEnabled: boolean("two_factor_enabled").default(false),
   twoFactorSecret: varchar("two_factor_secret"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -108,6 +113,7 @@ export const facilityBookings = pgTable("facility_bookings", {
   adminResponse: text("admin_response"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  
 });
 
 // System alerts
@@ -176,37 +182,70 @@ export const activityLogsRelations = relations(activityLogs, ({ one }) => ({
   user: one(users, { fields: [activityLogs.userId], references: [users.id] }),
 }));
 
-// Schemas for validation
-export const insertUserSchema = createInsertSchema(users).omit({
-  createdAt: true,
-  updatedAt: true,
+// Schemas for validation - using simplified approach to avoid drizzle-zod typing issues
+export const insertUserSchema = z.object({
+  id: z.string(),
+  email: z.string().email(),
+  firstName: z.string().optional(),
+  lastName: z.string().optional(),
+  profileImageUrl: z.string().optional(),
+  role: z.enum(["student", "admin"]).default("student"),
+  status: z.enum(["active", "banned", "suspended"]).default("active"),
+  banReason: z.string().optional(),
+  banEndDate: z.date().optional(),
+  bannedAt: z.date().optional(),
+  twoFactorEnabled: z.boolean().default(false),
+  twoFactorSecret: z.string().optional(),
 });
 
-export const insertOrzSessionSchema = createInsertSchema(orzSessions).omit({
-  id: true,
-  createdAt: true,
+export const insertOrzSessionSchema = z.object({
+  userId: z.string(),
+  stationId: z.number(),
+  plannedEndTime: z.date(),
+  endTime: z.date().optional(),
+  isActive: z.boolean().default(true),
+  lastActivity: z.date().default(() => new Date()),
 });
 
-export const insertTimeExtensionRequestSchema = createInsertSchema(timeExtensionRequests).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
+export const insertTimeExtensionRequestSchema = z.object({
+  userId: z.string(),
+  sessionId: z.string(),
+  requestedMinutes: z.number().positive(),
+  reason: z.string(),
+  status: z.enum(["pending", "approved", "denied"]).default("pending"),
+  adminId: z.string().optional(),
+  adminResponse: z.string().optional(),
 });
 
-export const insertFacilityBookingSchema = createInsertSchema(facilityBookings).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
+export const insertFacilityBookingSchema = z.object({
+  facilityId: z.number(),
+  userId: z.string(),
+  startTime: z.date(),
+  endTime: z.date(),
+  purpose: z.string(),
+  participants: z.number().positive(),
+  status: z.enum(["pending", "approved", "denied", "cancelled"]).default("pending"),
+  adminId: z.string().optional(),
+  adminResponse: z.string().optional(),
 });
 
-export const insertSystemAlertSchema = createInsertSchema(systemAlerts).omit({
-  id: true,
-  createdAt: true,
+export const createFacilityBookingSchema = insertFacilityBookingSchema;
+
+export const insertSystemAlertSchema = z.object({
+  type: z.string(),
+  severity: z.string(),
+  title: z.string(),
+  message: z.string(),
+  userId: z.string().optional(),
+  isRead: z.boolean().default(false),
 });
 
-export const insertActivityLogSchema = createInsertSchema(activityLogs).omit({
-  id: true,
-  createdAt: true,
+export const insertActivityLogSchema = z.object({
+  action: z.string(),
+  details: z.string().optional(),
+  userId: z.string().optional(),
+  ipAddress: z.string().optional(),
+  userAgent: z.string().optional(),
 });
 
 // Types

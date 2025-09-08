@@ -1,5 +1,6 @@
-import nodemailer from 'nodemailer';
-import { FacilityBooking, TimeExtensionRequest, User } from '@shared/schema';
+import * as nodemailer from 'nodemailer';
+
+import { FacilityBooking, TimeExtensionRequest, User } from '../../shared/schema';
 
 interface EmailConfig {
   host: string;

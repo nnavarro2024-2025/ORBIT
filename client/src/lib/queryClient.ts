@@ -1,20 +1,15 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import { supabase } from "./supabase";
 
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000"; // ✅ Backend URL
-
-async function throwIfResNotOk(res: Response) {
-  if (!res.ok) {
-    const text = (await res.text()) || res.statusText;
-    throw new Error(`${res.status}: ${text}`);
-  }
-}
 
 export async function apiRequest(
   method: string,
   url: string,
   data?: unknown
 ): Promise<Response> {
-  const token = localStorage.getItem("auth.token");
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token;
   const headers: Record<string, string> = {};
 
   if (data) {
@@ -25,24 +20,32 @@ export async function apiRequest(
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${BASE_URL}${url}`, { // ✅ Now points to backend
+  const res = await fetch(`${BASE_URL}${url}`, {
     method,
     headers,
     body: data ? JSON.stringify(data) : undefined,
     credentials: "include",
   });
 
-  await throwIfResNotOk(res);
+  if (res.status === 401) {
+    console.error("🚨 401 Unauthorized received in apiRequest. Session expired. NOT redirecting to login for debugging.");
+    await supabase.auth.signOut();
+    // window.location.href = "/login"; // Temporarily commented out for debugging
+    throw new Error("Session expired or unauthorized. Redirecting to login.");
+  }
+
+  if (!res.ok) {
+    const text = (await res.text()) || res.statusText;
+    throw new Error(`${res.status}: ${text}`);
+  }
+
   return res;
 }
 
-type UnauthorizedBehavior = "returnNull" | "throw";
-
-export function getQueryFn<T>(options: {
-  on401: UnauthorizedBehavior;
-}): QueryFunction<T> {
+export function getQueryFn<T>(): QueryFunction<T> {
   return async ({ queryKey }) => {
-    const token = localStorage.getItem("auth.token");
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
     const headers: Record<string, string> = {};
 
     if (token) {
@@ -56,11 +59,16 @@ export function getQueryFn<T>(options: {
       credentials: "include",
     });
 
-    if (options.on401 === "returnNull" && res.status === 401) {
-      return null as unknown as T;
+    if (res.status === 401) {
+      await supabase.auth.signOut();
+      // window.location.href = "/login"; // Temporarily commented out for debugging
+      throw new Error("Session expired or unauthorized. Redirecting to login.");
     }
 
-    await throwIfResNotOk(res);
+    if (!res.ok) {
+      const text = (await res.text()) || res.statusText;
+      throw new Error(`${res.status}: ${text}`);
+    }
     return (await res.json()) as T;
   };
 }
@@ -68,7 +76,7 @@ export function getQueryFn<T>(options: {
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      queryFn: getQueryFn<any>({ on401: "throw" }),
+      queryFn: getQueryFn<any>(),
       refetchInterval: false,
       refetchOnWindowFocus: false,
       staleTime: Infinity,

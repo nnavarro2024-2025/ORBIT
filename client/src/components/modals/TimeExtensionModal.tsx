@@ -147,7 +147,7 @@ export default function TimeExtensionModal({ isOpen, onClose, sessionId }: TimeE
             <div className="flex items-center space-x-4 pt-4">
               <Button
                 type="submit"
-                className="material-button primary flex-1"
+                className="flex-1"
                 disabled={createExtensionMutation.isPending}
               >
                 <Send className="h-4 w-4 mr-2" />
@@ -156,7 +156,7 @@ export default function TimeExtensionModal({ isOpen, onClose, sessionId }: TimeE
               <Button
                 type="button"
                 variant="outline"
-                className="material-button outlined flex-1"
+                className="flex-1"
                 onClick={onClose}
               >
                 Cancel

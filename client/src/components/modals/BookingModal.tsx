@@ -5,7 +5,8 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { X, Send } from "lucide-react";
+import { Send, Calendar as CalendarIcon, Plus, Minus } from "lucide-react"; // Added Plus, Minus icons
+import type { Facility } from "../../../../shared/schema";
 import {
   Dialog,
   DialogContent,
@@ -30,23 +31,90 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { format } from "date-fns";
+import { cn } from "@/lib/utils";
 
-// Add fallback facilities for debugging or testing
-const predefinedFacilities = [
-  { id: 1, name: "Study Room A" },
-  { id: 2, name: "Computer Station B" },
-  { id: 3, name: "Nap Pod C" },
-];
+// Custom Number Input with Controls
+interface NumberInputWithControlsProps {
+  value: number;
+  onChange: (value: number) => void;
+  min?: number;
+  max?: number;
+}
+
+const NumberInputWithControls: React.FC<NumberInputWithControlsProps> = ({
+  value,
+  onChange,
+  min = 1,
+  max = 99,
+}) => {
+  const handleIncrement = () => {
+    if (value < max) {
+      onChange(value + 1);
+    }
+  };
+
+  const handleDecrement = () => {
+    if (value > min) {
+      onChange(value - 1);
+    }
+  };
+
+  return (
+    <div className="flex items-center space-x-2">
+      <Button
+        type="button"
+        variant="outline"
+        size="icon"
+        onClick={handleDecrement}
+        disabled={value <= min}
+        className="h-8 w-8 shrink-0"
+      >
+        <Minus className="h-4 w-4" />
+      </Button>
+      <Input
+        type="text" // Changed to text to avoid native spin buttons
+        value={value}
+        onChange={(e) => {
+          const numValue = parseInt(e.target.value);
+          if (!isNaN(numValue) && numValue >= min && numValue <= max) {
+            onChange(numValue);
+          } else if (e.target.value === "") {
+            onChange(min); // Or some other default behavior for empty input
+          }
+        }}
+        className="w-16 text-center"
+      />
+      <Button
+        type="button"
+        variant="outline"
+        size="icon"
+        onClick={handleIncrement}
+        disabled={value >= max}
+        className="h-8 w-8 shrink-0"
+      >
+        <Plus className="h-4 w-4" />
+      </Button>
+    </div>
+  );
+};
+
 
 const bookingSchema = z
   .object({
     facilityId: z.string().min(1, "Please select a facility"),
-    startTime: z.string().min(1, "Start time is required"),
-    endTime: z.string().min(1, "End time is required"),
+    startTime: z.date({
+      message: "A start date and time is required.",
+    }),
+    endTime: z.date({
+      message: "An end date and time is required.",
+    }),
     purpose: z.string().min(1, "Purpose is required"),
-    participants: z.coerce.number().min(1, "Number of participants is required"),
+    participants: z.number().min(1, "Number of participants is required"),
   })
-  .refine((data) => new Date(data.endTime) > new Date(data.startTime), {
+  .refine((data) => data.endTime > data.startTime, {
     message: "End time must be after start time",
     path: ["endTime"],
   });
@@ -54,7 +122,7 @@ const bookingSchema = z
 interface BookingModalProps {
   isOpen: boolean;
   onClose: () => void;
-  facilities: any[];
+  facilities: Facility[];
 }
 
 export default function BookingModal({
@@ -64,16 +132,37 @@ export default function BookingModal({
 }: BookingModalProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [selectedFacility, setSelectedFacility] = useState<any>(null);
+  const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
+
+  const predefinedFacilities = [
+    { id: 1, name: "Study Room A" },
+    { id: 2, name: "Computer Station B" },
+    { id: 3, name: "Nap Pod C" },
+  ];
 
   const fallbackFacilities = facilities.length > 0 ? facilities : predefinedFacilities;
 
-  const form = useForm<z.infer<typeof bookingSchema>>({
+  const getFacilityMaxCapacity = (facility?: Facility | null) => {
+    if (!facility) return 20;
+    const raw = (facility.name || '').toLowerCase();
+    const normalized = raw.replace(/[^a-z0-9]/g, ''); // remove spaces/punctuations
+    const containsAll = (parts: string[]) => parts.every(p => normalized.includes(p));
+    const isCLR1 = containsAll(['collaborative','learning','room','1']) || containsAll(['collaborative','learning','1']) || normalized.includes('clr1');
+    const isCLR2 = containsAll(['collaborative','learning','room','2']) || containsAll(['collaborative','learning','2']) || normalized.includes('clr2');
+    if (isCLR1 || isCLR2) return 8;
+    if (normalized.includes('boardroom') || containsAll(['board','room'])) return 12;
+    return facility.capacity || 20;
+  };
+
+type BookingFormData = z.infer<typeof bookingSchema>;
+
+  const form = useForm<BookingFormData>({
     resolver: zodResolver(bookingSchema),
+    mode: 'onChange',
     defaultValues: {
       facilityId: "",
-      startTime: "",
-      endTime: "",
+      startTime: new Date(new Date().getTime() + 60 * 1000), // Default to current date and time + 1 minute
+      endTime: new Date(Date.now() + 30 * 60 * 1000),
       purpose: "",
       participants: 1,
     },
@@ -81,28 +170,32 @@ export default function BookingModal({
 
   // Automatically select first facility when modal opens
   useEffect(() => {
-    if (isOpen && fallbackFacilities.length > 0 && !form.watch("facilityId")) {
-      const firstId = fallbackFacilities[0].id.toString();
+    if (isOpen && facilities.length > 0 && !form.watch("facilityId")) {
+      const firstId = facilities[0].id.toString();
       form.setValue("facilityId", firstId);
       handleFacilityChange(firstId);
     }
-  }, [isOpen, fallbackFacilities]);
+  }, [isOpen, facilities]);
 
   const handleFacilityChange = (facilityId: string) => {
-    const facility = fallbackFacilities.find((f) => f.id === parseInt(facilityId));
-    setSelectedFacility(facility);
-    console.log("Selected facility:", facility);
+    const facility = facilities.find((f) => f.id === parseInt(facilityId));
+    setSelectedFacility(facility || null);
+    // Cap participants to selected facility's max
+    const currentParticipants = form.getValues("participants");
+    const maxCap = getFacilityMaxCapacity(facility || null);
+    if (currentParticipants > maxCap) {
+      form.setValue("participants", maxCap);
+    }
   };
 
   const createBookingMutation = useMutation({
-    mutationFn: async (data: z.infer<typeof bookingSchema>) => {
+    mutationFn: async (data: BookingFormData) => {
       const bookingData = {
         ...data,
         facilityId: parseInt(data.facilityId),
-        startTime: new Date(data.startTime).toISOString(),
-        endTime: new Date(data.endTime).toISOString(),
+        startTime: data.startTime.toISOString(),
+        endTime: data.endTime.toISOString(),
       };
-      console.log("Sending booking data:", bookingData);
       const response = await apiRequest("POST", "/api/bookings", bookingData);
       return response.json();
     },
@@ -126,20 +219,58 @@ export default function BookingModal({
     },
   });
 
-  const onSubmit = (data: z.infer<typeof bookingSchema>) => {
-    console.log("Form submitted:", data);
+  const onSubmit = (data: BookingFormData) => {
+    const now = new Date();
+    if (data.startTime.getTime() < now.getTime()) {
+      toast({
+        title: "Invalid Start Time",
+        description: "Start time cannot be in the past. Please select a future time.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const facility = facilities.find(f => f.id === parseInt(data.facilityId));
+    if (!facility) {
+      toast({
+        title: "Error",
+        description: "Selected facility not found.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    let maxCapacity = facility.capacity;
+    const lowerCaseName = facility.name.toLowerCase();
+
+    const isCLR1 = lowerCaseName.includes('collaborative learning room 1') || lowerCaseName.includes('collaborative learning 1');
+    const isCLR2 = lowerCaseName.includes('collaborative learning room 2') || lowerCaseName.includes('collaborative learning 2');
+
+    if (isCLR1 || isCLR2) {
+      maxCapacity = 8;
+    } else if (lowerCaseName.includes('board room') || lowerCaseName.includes('boardroom')) {
+      maxCapacity = 12;
+    }
+
+    if (data.participants > maxCapacity) {
+      toast({
+        title: "Capacity Exceeded",
+        description: `The selected room has a maximum capacity of ${maxCapacity} people. Please reduce the number of participants.`, 
+        variant: "destructive",
+      });
+      return;
+    }
+
     createBookingMutation.mutate(data);
   };
 
-  const formatDateTime = (start: string, end: string) => {
-    if (!start || !end) return "";
-    const s = new Date(start);
-    const e = new Date(end);
-    return `${s.toLocaleDateString()} • ${s.toLocaleTimeString()} - ${e.toLocaleTimeString()}`;
+  const formatDateTimeDisplay = (date: Date | undefined) => {
+    return date ? format(date, "PPP hh:mm a") : "Pick a date and time";
   };
 
-  const calculateDuration = (start: string, end: string) => {
-    const diff = new Date(end).getTime() - new Date(start).getTime();
+  const calculateDuration = (start: Date | undefined, end: Date | undefined) => {
+    if (!start || !end) return "";
+    const diff = end.getTime() - start.getTime();
     if (diff <= 0) return "";
     const hours = Math.floor(diff / (1000 * 60 * 60));
     const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
@@ -194,14 +325,20 @@ export default function BookingModal({
                   <FormItem>
                     <FormLabel>Number of Participants</FormLabel>
                     <FormControl>
-                      <Input
-                        type="number"
-                        min="1"
-                        max="20"
-                        {...field}
-                        onChange={(e) => field.onChange(parseInt(e.target.value))}
+                      <NumberInputWithControls
+                        value={field.value}
+                        onChange={(val) => {
+                          const maxCap = getFacilityMaxCapacity(selectedFacility);
+                          const numVal = typeof val === 'string' ? parseInt(val, 10) : val;
+                          field.onChange(Math.min(numVal, maxCap));
+                        }}
+                        min={1}
+                        max={getFacilityMaxCapacity(selectedFacility)}
                       />
                     </FormControl>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      Max capacity: {getFacilityMaxCapacity(selectedFacility)}
+                    </div>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -213,11 +350,50 @@ export default function BookingModal({
                 control={form.control}
                 name="startTime"
                 render={({ field }) => (
-                  <FormItem>
+                  <FormItem className="flex flex-col">
                     <FormLabel>Start Time</FormLabel>
-                    <FormControl>
-                      <Input type="datetime-local" {...field} />
-                    </FormControl>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <FormControl>
+                          <Button
+                            variant={"outline"}
+                            className={cn(
+                              "w-full pl-3 text-left font-normal",
+                              !field.value && "text-muted-foreground"
+                            )}
+                          >
+                            {field.value ? (
+                              format(field.value, "PPP hh:mm a")
+                            ) : (
+                              <span>Pick a date and time</span>
+                            )}
+                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                          </Button>
+                        </FormControl>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0">
+                        <Calendar
+                          mode="single"
+                          selected={field.value}
+                          onSelect={field.onChange}
+                          initialFocus
+                        />
+                        <div className="p-3 border-t border-border">
+                          <Input
+                            type="time"
+                            step={300}
+                            value={field.value ? format(field.value, "HH:mm") : ""}
+                            onChange={(e) => {
+                              const [hours, minutes] = e.target.value.split(":").map(Number);
+                              const newDate = field.value || new Date();
+                              newDate.setHours(hours, minutes);
+                              field.onChange(newDate);
+                            }}
+                            className="w-full"
+                          />
+                        </div>
+                      </PopoverContent>
+                    </Popover>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -227,11 +403,50 @@ export default function BookingModal({
                 control={form.control}
                 name="endTime"
                 render={({ field }) => (
-                  <FormItem>
+                  <FormItem className="flex flex-col">
                     <FormLabel>End Time</FormLabel>
-                    <FormControl>
-                      <Input type="datetime-local" {...field} />
-                    </FormControl>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <FormControl>
+                          <Button
+                            variant={"outline"}
+                            className={cn(
+                              "w-full pl-3 text-left font-normal",
+                              !field.value && "text-muted-foreground"
+                            )}
+                          >
+                            {field.value ? (
+                              format(field.value, "PPP hh:mm a")
+                            ) : (
+                              <span>Pick a date and time</span>
+                            )}
+                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                          </Button>
+                        </FormControl>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0">
+                        <Calendar
+                          mode="single"
+                          selected={field.value}
+                          onSelect={field.onChange}
+                          initialFocus
+                        />
+                        <div className="p-3 border-t border-border">
+                          <Input
+                            type="time"
+                            step={300}
+                            value={field.value ? format(field.value, "HH:mm") : ""}
+                            onChange={(e) => {
+                              const [hours, minutes] = e.target.value.split(":").map(Number);
+                              const newDate = field.value || new Date();
+                              newDate.setHours(hours, minutes);
+                              field.onChange(newDate);
+                            }}
+                            className="w-full"
+                          />
+                        </div>
+                      </PopoverContent>
+                    </Popover>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -263,7 +478,7 @@ export default function BookingModal({
                   <div className="flex justify-between">
                     <span className="text-sm">Date & Time:</span>
                     <span className="text-sm font-medium">
-                      {formatDateTime(form.watch("startTime"), form.watch("endTime"))}
+                      {formatDateTimeDisplay(form.watch("startTime"))} - {format(form.watch("endTime"), "HH:mm")}
                     </span>
                   </div>
                   <div className="flex justify-between">

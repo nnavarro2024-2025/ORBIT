@@ -1,6 +1,6 @@
 import { storage } from '../storage';
-import { OrzSession } from '@shared/schema';
-import crypto from 'crypto'; // Required for crypto.randomUUID()
+import { OrzSession } from '../../shared/schema';
+import * as crypto from 'crypto'; // Required for crypto.randomUUID()
 
 class SessionService {
   private inactivityTimer: Map<string, NodeJS.Timeout> = new Map();
@@ -20,6 +20,7 @@ class SessionService {
       stationId,
       plannedEndTime,
       lastActivity: new Date(),
+      isActive: true,
     });
 
     // Set up inactivity timer
@@ -28,36 +29,42 @@ class SessionService {
     return session;
   }
 
-  async updateActivity(sessionId: string): Promise<void> {
-    await storage.updateOrzSession(sessionId, { lastActivity: new Date() });
-
-    // Reset inactivity timer
-    this.clearInactivityTimer(sessionId);
-    
-    // Retrieve session to get userId for reset
-    const session = await storage.getActiveOrzSession(sessionId);
+  async updateActivity(userId: string): Promise<void> {
+    const session = await storage.getActiveOrzSession(userId);
     if (session) {
-      this.setupInactivityTimer(sessionId, session.userId);
+      await storage.updateOrzSession(session.id, { lastActivity: new Date() });
+
+      // Reset inactivity timer
+      this.clearInactivityTimer(session.id);
+      this.setupInactivityTimer(session.id, userId);
     }
   }
 
   async extendSession(sessionId: string, minutes: number): Promise<void> {
-    const session = await storage.getActiveOrzSession(sessionId);
+    
+    const session = await storage.getOrzSession(sessionId);
     if (!session) {
+      console.error(`[SessionService] Session not found for sessionId: ${sessionId}`);
       throw new Error('Session not found');
     }
 
+    
     const newEndTime = new Date(session.plannedEndTime.getTime() + minutes * 60 * 1000);
+    
     await storage.updateOrzSession(sessionId, { plannedEndTime: newEndTime });
+    
   }
 
   async endSession(sessionId: string): Promise<void> {
     await storage.endOrzSession(sessionId);
+    await storage.deletePendingTimeExtensionRequestsBySession(sessionId); // Add this line
     this.clearInactivityTimer(sessionId);
   }
 
   private setupInactivityTimer(sessionId: string, userId: string | null): void {
+    console.log(`[SessionService] Inactivity timer started for session ${sessionId}. Will expire in ${this.INACTIVITY_LIMIT / 1000} seconds.`);
     const timer = setTimeout(async () => {
+      console.log(`[SessionService] Session ${sessionId} auto-logged out due to inactivity.`);
       await this.endSession(sessionId);
       await storage.createSystemAlert({
         id: crypto.randomUUID(),
@@ -65,8 +72,8 @@ class SessionService {
         userId: userId ?? null,
         type: 'system',
         severity: 'medium',
-        title: 'Session Auto-Logout',
-        message: `Session ${sessionId} was automatically logged out due to inactivity`,
+        title: 'Session Automatically Logged Out',
+        message: `The computer session for this user was automatically logged out due to inactivity. (Session ID: ${sessionId})`,
         isRead: false,
       });
     }, this.INACTIVITY_LIMIT);
@@ -79,6 +86,7 @@ class SessionService {
     if (timer) {
       clearTimeout(timer);
       this.inactivityTimer.delete(sessionId);
+      console.log(`[SessionService] Inactivity timer cleared for session ${sessionId}.`);
     }
   }
 

@@ -6,16 +6,18 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/lib/supabase";
-
-import NotFound from "@/pages/not-found";
 import Landing from "@/pages/Landing";
 import Login from "@/pages/Login";
+import BannedUser from "@/pages/BannedUser";
 import OrzDashboard from "@/pages/student/OrzDashboard";
 import BookingDashboard from "@/pages/student/BookingDashboard";
 import AdminDashboard from "@/pages/admin/AdminDashboard";
 
+
 function Router() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
+
+  console.log("Router - isLoading:", isLoading, "isAuthenticated:", isAuthenticated, "user:", user);
 
   if (isLoading) {
     return (
@@ -25,23 +27,24 @@ function Router() {
     );
   }
 
+  // Check if user is banned FIRST - show ban message even if not "authenticated"
+  if (user && user.status === "banned") {
+    console.log("Router - User is banned, showing BannedUser component");
+    return <BannedUser />;
+  }
+
+  // Create protected route wrapper
+  const ProtectedRoute = ({ component: Component }: { component: React.ComponentType }) => {
+    return isAuthenticated ? <Component /> : <Login />;
+  };
+
   return (
     <>
-      {!isAuthenticated ? (
-        <>
-          <Route path="/" component={Landing} />
-          <Route path="/login/:subsystem?" component={Login} />
-          <Route path="*" component={NotFound} />
-        </>
-      ) : (
-        <>
-          <Route path="/" component={Landing} />
-          <Route path="/orz" component={OrzDashboard} />
-          <Route path="/booking" component={BookingDashboard} />
-          <Route path="/admin" component={AdminDashboard} />
-          <Route path="*" component={NotFound} />
-        </>
-      )}
+      <Route path="/" component={Landing} />
+      <Route path="/login/:subsystem?" component={Login} />
+      <Route path="/orz" component={() => <ProtectedRoute component={OrzDashboard} />} />
+      <Route path="/booking" component={() => <ProtectedRoute component={BookingDashboard} />} />
+      <Route path="/admin" component={() => <ProtectedRoute component={AdminDashboard} />} />
     </>
   );
 }
@@ -84,7 +87,7 @@ function App() {
 
     // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      async (_, session) => {
         if (session?.access_token) {
           localStorage.setItem("auth.token", session.access_token);
           await syncUserData(session.access_token);
