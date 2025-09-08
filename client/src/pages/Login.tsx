@@ -131,32 +131,33 @@ export default function Login() {
   })();
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-indigo-900 flex items-center justify-center p-4 relative overflow-hidden">
-      {/* Background decoration */}
-      <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute -top-40 -right-40 w-80 h-80 bg-blue-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse"></div>
-        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-purple-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse"></div>
-      </div>
-      
-      <div className="relative w-full max-w-md z-10">
-        <div className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl p-8 shadow-2xl">
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full mb-4 shadow-xl animate-pulse">
-              {subsystemInfo.icon}
+    <>
+      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-indigo-900 flex items-center justify-center p-4 relative overflow-hidden">
+        {/* Background decoration */}
+        <div className="absolute inset-0 overflow-hidden">
+          <div className="absolute -top-40 -right-40 w-80 h-80 bg-blue-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse"></div>
+          <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-purple-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse"></div>
+        </div>
+        
+        <div className="relative w-full max-w-md z-10">
+          <div className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl p-8 shadow-2xl">
+            <div className="text-center mb-8">
+              <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full mb-4 shadow-xl animate-pulse">
+                {subsystemInfo.icon}
+              </div>
+              <h2 className="text-3xl font-bold text-white mb-2">
+                {isSignUp ? "Join ORBIT" : "Welcome Back"}
+              </h2>
+              <p className="text-blue-100 text-lg font-medium">{subsystemInfo.title}</p>
+              <p className="text-blue-200 text-sm mt-2">{subsystemInfo.description}</p>
             </div>
-            <h2 className="text-3xl font-bold text-white mb-2">
-              {isSignUp ? "Join ORBIT" : "Welcome Back"}
-            </h2>
-            <p className="text-blue-100 text-lg font-medium">{subsystemInfo.title}</p>
-            <p className="text-blue-200 text-sm mt-2">{subsystemInfo.description}</p>
-          </div>
 
-          <div className="space-y-6">
-          {errorMsg && (
-            <div className="bg-red-500/20 backdrop-blur border border-red-400/30 text-red-100 px-4 py-3 rounded-lg text-sm text-center shadow-lg">
-              {errorMsg}
-            </div>
-          )}
+            <div className="space-y-6">
+            {errorMsg && (
+              <div className="bg-red-500/20 backdrop-blur border border-red-400/30 text-red-100 px-4 py-3 rounded-lg text-sm text-center shadow-lg">
+                {errorMsg}
+              </div>
+            )}
 
           {isSignUp && (
             <>
@@ -261,9 +262,10 @@ export default function Login() {
               ← Back to Home
             </button>
           </div>
+          </div>
         </div>
       </div>
       <Footer />
-    </div>
+    </>
   );
 }
