@@ -21,6 +21,19 @@ import { CalendarIcon, Plus, Minus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 
+// Small helper: return a short description for known facility names (same helper as BookingModal)
+const getFacilityDescriptionByName = (name?: string) => {
+  if (!name) return '';
+  const lower = name.toLowerCase();
+  if (lower.includes('collaborative learning room 1') || lower.includes('collaborative learning room 2') || lower.includes('collaborative learning')) {
+    return 'Collaborative space for group study and small projects (up to 8 people).';
+  }
+  if (lower.includes('board room') || lower.includes('boardroom')) {
+    return 'Formal boardroom for meetings and presentations (up to 12 people).';
+  }
+  return 'Comfortable study space suitable for individual or small group use.';
+};
+
 // Library working hours validation functions
 const isWithinLibraryHours = (date: Date): boolean => {
   const hours = date.getHours();
@@ -109,7 +122,8 @@ interface EditBookingModalProps {
   onClose: () => void;
   booking: any;
   facilities: any[];
-  onSave: (updatedBooking: any) => void;
+  // onSave may return a Promise resolving to the updated booking
+  onSave: (updatedBooking: any) => Promise<any> | void;
 }
 
 export default function EditBookingModal({
@@ -163,7 +177,7 @@ export default function EditBookingModal({
     }
   }, [startTime]);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     // Prevent rapid duplicate submissions
     const currentTimestamp = Date.now();
     if (isSubmitting || (currentTimestamp - lastSubmissionTime < SUBMISSION_COOLDOWN)) {
@@ -270,17 +284,23 @@ export default function EditBookingModal({
     setIsSubmitting(true);
 
     try {
-      onSave({
+      const payload = {
         ...booking,
         purpose,
         facilityId: parseInt(facilityId, 10),
         startTime: startTime!.toISOString(),
         endTime: endTime!.toISOString(),
         participants, // Include participants in saved data
-      });
+      };
+  // payload prepared for save
+      const result = await onSave(payload);
+
       setIsSubmitting(false);
       setLastSubmissionTime(Date.now());
+
+      // Close after successful save; caller (BookingDashboard) updates cache
       onClose();
+      return result;
     } catch (error: any) {
       setIsSubmitting(false);
       // Handle specific overlapping booking error
@@ -305,6 +325,7 @@ export default function EditBookingModal({
           variant: "destructive",
         });
       }
+      return undefined;
     }
   };
 
@@ -379,12 +400,17 @@ export default function EditBookingModal({
                 <SelectValue placeholder="Select a facility" />
               </SelectTrigger>
               <SelectContent>
-                {facilities.map((facility) => (
-                  <SelectItem key={facility.id} value={facility.id.toString()}>
-                    {facility.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
+                  {facilities.map((facility) => (
+                    <SelectItem
+                      key={facility.id}
+                      value={facility.id.toString()}
+                      available={!!facility.isActive}
+                      description={getFacilityDescriptionByName(facility.name)}
+                    >
+                      {facility.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
             </Select>
           </div>
           <div className="grid grid-cols-4 items-center gap-4">
@@ -392,12 +418,26 @@ export default function EditBookingModal({
               Participants
             </Label>
             <div className="col-span-3">
-              <NumberInputWithControls
-                value={participants}
-                onChange={setParticipants}
-                min={1}
-                max={20} // Assuming a reasonable max for participants
-              />
+              {/** compute current facility and max capacity similar to BookingModal */}
+              {(() => {
+                const currentFacility = facilityId ? facilities.find(f => f.id === parseInt(facilityId)) : null;
+                const maxCapacity = currentFacility && typeof currentFacility.capacity === 'number' && currentFacility.capacity > 0
+                  ? currentFacility.capacity
+                  : // fallback by name heuristics
+                  (currentFacility ? (currentFacility.name.toLowerCase().includes('board room') || currentFacility.name.toLowerCase().includes('boardroom') ? 12 : 8) : 8);
+
+                return (
+                  <>
+                    <NumberInputWithControls
+                      value={participants}
+                      onChange={(val) => setParticipants(Math.min(typeof val === 'string' ? parseInt(val, 10) : val, maxCapacity))}
+                      min={1}
+                      max={maxCapacity}
+                    />
+                    <div className="text-xs text-muted-foreground mt-1">Max capacity: {maxCapacity}</div>
+                  </>
+                );
+              })()}
             </div>
           </div>
           <div className="grid grid-cols-4 items-center gap-4">

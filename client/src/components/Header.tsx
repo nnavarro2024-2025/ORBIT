@@ -11,7 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Link, useLocation } from "wouter";
+import { useLocation } from "wouter";
 import ProfileModal from "./modals/ProfileModal";
 import { useState } from "react";
 
@@ -56,18 +56,16 @@ export default function Header() {
   return (
     <header className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm backdrop-blur-sm">
       <div className="container mx-auto px-6 h-16 flex items-center justify-between gap-4">
-        <Link to="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity duration-200" title="ORBIT - Integrated Library Facility Management System | Developed by James Lemuel M. Rabang">
-          <div className="flex items-center gap-3">
-            <img 
-              src="/orbit-logo.png" 
-              alt="ORBIT Logo" 
-              className="h-10 w-auto object-contain"
-            />
-            <span className="font-bold text-2xl tracking-wider bg-gradient-to-r from-pink-600 to-rose-600 bg-clip-text text-transparent">
-              ORBIT
-            </span>
-          </div>
-        </Link>
+        <div className="flex items-center gap-3">
+          <img 
+            src="/orbit-logo.png" 
+            alt="ORBIT Logo" 
+            className="h-10 w-auto object-contain"
+          />
+          <span className="font-bold text-2xl tracking-wider bg-gradient-to-r from-pink-600 to-rose-600 bg-clip-text text-transparent">
+            ORBIT
+          </span>
+        </div>
         <div className="flex items-center gap-3">
           <button 
             onClick={handleNotificationsClick} 

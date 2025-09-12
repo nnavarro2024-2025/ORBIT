@@ -15,7 +15,6 @@ import {
   AlertDialogAction,
   AlertDialogCancel,
 } from "@/components/ui/alert-dialog";
-import { supabase } from "@/lib/supabase";
 import {
   Sheet,
   SheetContent,
@@ -40,7 +39,6 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
   const [firstName, setFirstName] = useState(user?.firstName || "");
   const [lastName, setLastName] = useState(user?.lastName || "");
   const [profileImageUrlInput, setProfileImageUrlInput] = useState(user?.profileImageUrl || "");
-  const [localImageFile, setLocalImageFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(user?.profileImageUrl || null);
   // removed emailNotifications state; settings simplified per user request
   const [showSettings, setShowSettings] = useState(false); // State to toggle between profile info and settings
@@ -50,13 +48,12 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
     onSuccess: () => {
       toast({
         title: "Profile Updated",
-        description: "Your profile information has been updated. Please refresh the page to see changes.",
+        description: "Your profile information has been updated.",
       });
       // Close the modal after successful update
   onClose();
-  // Refresh the page so useAuth re-fetches the updated profile
-  // This is the simplest approach to ensure the UI shows the new avatar immediately
-  window.location.reload();
+  // Ask the auth hook to refresh the user (useAuth listens for this event)
+  try { window.dispatchEvent(new Event('orbit:auth:refresh')); } catch (e) {}
     },
     onError: (error: any) => {
       toast({
@@ -69,16 +66,7 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
 
   // Removed updateUserSettingsMutation as it was only for theme/emailNotifications
 
-  // Upload/update logic is now executed directly in the confirmation dialog action to avoid duplicate handlers
-
-  const handleFileChange = (file?: File) => {
-    if (!file) return;
-    setLocalImageFile(file);
-    const url = URL.createObjectURL(file);
-    setPreviewUrl(url);
-    // clear manual URL input when uploading a file
-    setProfileImageUrlInput('');
-  };
+  // Update logic uses the provided profile image URL
 
   const handleToggleSettings = () => setShowSettings(!showSettings);
 
@@ -154,22 +142,16 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
                           {`${user.firstName?.[0] || ''}${user.lastName?.[0] || ''}`.toUpperCase() || 'U'}
                         </AvatarFallback>
                       </Avatar>
-                      <div className="flex items-center space-x-2 pt-2">
-                        <label className="cursor-pointer inline-flex items-center px-3 py-1 bg-white border rounded text-sm">
-                          Upload
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="sr-only"
-                            onChange={(e) => handleFileChange(e.target.files?.[0])}
-                          />
-                        </label>
-                        <button
-                          className="px-3 py-1 bg-white border rounded text-sm"
-                          onClick={() => { setPreviewUrl(user?.profileImageUrl || null); setLocalImageFile(null); setProfileImageUrlInput(''); }}
-                        >
-                          Reset
-                        </button>
+                      <div className="flex flex-col w-full space-y-2 pt-2">
+                        <label className="block text-sm font-semibold text-gray-700">Profile Image URL</label>
+                        <input
+                          type="url"
+                          value={profileImageUrlInput}
+                          onChange={(e) => { setProfileImageUrlInput(e.target.value); setPreviewUrl(e.target.value || null); }}
+                          placeholder="https://example.com/your-avatar.png"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                        />
+                        <p className="text-sm text-gray-500">Paste a link to your avatar image above.</p>
                       </div>
                     </div>
 
@@ -216,24 +198,8 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
                                 // Execute upload and update logic
                                 const uploadAndUpdate = async () => {
                                   try {
-                                    let finalUrl = profileImageUrlInput || undefined;
-                                    if (localImageFile) {
-                                      const fileExt = localImageFile.name.split('.').pop();
-                                      const filePath = `avatars/${user.id}-${Date.now()}.${fileExt}`;
-                                      const { error } = await supabase.storage.from('avatars').upload(filePath, localImageFile, { upsert: true });
-                                      if (error) {
-                                        console.error('Supabase storage upload error:', error);
-                                        // Provide a clearer, actionable message for common bucket issues
-                                        const msg = (error.message || '').toLowerCase();
-                                        if (msg.includes('bucket') || msg.includes('not found') || msg.includes('does not exist')) {
-                                          throw new Error(`Bucket 'avatars' not found. Please create the 'avatars' bucket in your Supabase project or update the bucket name in client/src/components/modals/ProfileModal.tsx. (Supabase error: ${error.message || JSON.stringify(error)})`);
-                                        }
-                                        throw new Error(error.message || 'Failed to upload avatar');
-                                      }
-                                      const { data: publicData } = supabase.storage.from('avatars').getPublicUrl(filePath);
-                                      finalUrl = publicData.publicUrl;
-                                    }
-                                    await updateProfileMutation.mutateAsync({ firstName, lastName, profileImageUrl: finalUrl });
+                                        const finalUrl = profileImageUrlInput || undefined;
+                                        await updateProfileMutation.mutateAsync({ firstName, lastName, profileImageUrl: finalUrl });
                                   } catch (err: any) {
                                     toast({ title: 'Upload Failed', description: err.message || 'Could not upload image', variant: 'destructive' });
                                   }

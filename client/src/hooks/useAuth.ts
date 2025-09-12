@@ -55,6 +55,12 @@ export function useAuth() {
     // Initial fetch
     fetchUser();
 
+    // Listen for explicit refresh events (used by ProfileModal after successful update)
+    const onManualRefresh = () => {
+      fetchUser();
+    };
+    window.addEventListener('orbit:auth:refresh', onManualRefresh);
+
     // Listen to auth changes (login/logout)
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
       // If the user signs out, clear the user state
@@ -71,6 +77,7 @@ export function useAuth() {
     return () => {
       isMounted = false;
       authListener.subscription.unsubscribe();
+      window.removeEventListener('orbit:auth:refresh', onManualRefresh);
     };
   }, []);
 

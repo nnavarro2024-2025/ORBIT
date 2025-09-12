@@ -39,13 +39,68 @@ export default function BookingDashboard() {
   const [emailNotifications, setEmailNotifications] = useState(true); // Assuming default true
 
   const updateBookingMutation = useMutation({
-    mutationFn: (updatedBooking: any) => apiRequest("PUT", `/api/bookings/${updatedBooking.id}`, updatedBooking),
-    onSuccess: () => {
-      toast({
-        title: "Booking Updated",
-        description: "Your booking has been updated successfully.",
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
+    // Ensure the mutation returns the parsed JSON booking object
+    mutationFn: async (updatedBooking: any) => {
+      // sending updated booking to API
+      const res = await apiRequest("PUT", `/api/bookings/${updatedBooking.id}`, updatedBooking);
+      // apiRequest returns a Response from queryClient wrapper; read raw text to improve debug visibility
+      try {
+        const text = await res.text();
+        if (text) {
+          try {
+            const parsed = JSON.parse(text);
+            return parsed;
+          } catch (parseErr) {
+            console.warn('[BookingDashboard] updateBookingMutation.mutationFn - failed to parse JSON response', parseErr);
+            return text;
+          }
+        }
+        return undefined;
+      } catch (e) {
+        console.error('[BookingDashboard] updateBookingMutation.mutationFn - error reading response', e);
+        return res;
+      }
+    },
+    // Expect the server to return the updated booking object; update cache optimistically
+    onSuccess: (data: any) => {
+      try {
+        // If server returned the updated booking, update the bookings cache
+        if (data && data.id) {
+          queryClient.setQueryData(["/api/bookings"], (old: any) => {
+            if (!Array.isArray(old)) return old;
+            return old.map((b: any) => (b.id === data.id ? data : b));
+          });
+          // If we're currently editing this booking, update that local state too
+          setEditingBooking((prev: any) => (prev && prev.id === data.id ? data : prev));
+        } else {
+          // Fallback: server returned a legacy success payload (no booking object).
+          // Fetch the full bookings list and replace the cache so the UI reflects persisted changes.
+          (async () => {
+            try {
+              const res = await apiRequest("GET", "/api/bookings");
+              const fresh = await res.json();
+              if (Array.isArray(fresh)) {
+                queryClient.setQueryData(["/api/bookings"], fresh);
+              } else {
+                queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
+              }
+            } catch (fetchErr) {
+              console.warn('[BookingDashboard] onSuccess fallback fetch failed', fetchErr);
+              queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
+            }
+          })();
+        }
+
+        toast({
+          title: "Booking Updated",
+          description: "Your booking has been updated successfully.",
+        });
+      } catch (e) {
+        console.warn('Failed to update booking cache', e);
+        queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
+      }
+      // Ensure the bookings list is refreshed (defensive) so UI always reflects server state
+      try { queryClient.invalidateQueries({ queryKey: ["/api/bookings"] }); } catch (e) {}
     },
     onError: (error: any) => {
       // Handle specific conflict error
@@ -125,7 +180,8 @@ export default function BookingDashboard() {
   });
 
   const handleSaveEditBooking = (updatedBooking: any) => {
-    updateBookingMutation.mutate(updatedBooking);
+    // Use mutateAsync so callers can await completion and react to the result
+    return updateBookingMutation.mutateAsync(updatedBooking);
   };
 
   // Handler for email notifications change
@@ -429,7 +485,7 @@ export default function BookingDashboard() {
 
                     return (
                       <div key={booking.id} className="bg-white border border-gray-200 rounded-xl p-6 hover:shadow-md transition-all duration-200">
-                        <div className="flex items-start justify-between mb-4">
+                        <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-4">
                             <div className="bg-pink-100 p-3 rounded-lg">
                               <Calendar className="h-6 w-6 text-pink-600" />
@@ -439,7 +495,7 @@ export default function BookingDashboard() {
                               <p className="text-sm text-gray-600">Room #{booking.facilityId}</p>
                             </div>
                           </div>
-                          <span className={`px-3 py-1 rounded-full text-sm font-medium border ${statusColors[status.label as keyof typeof statusColors] || 'bg-gray-100 text-gray-800 border-gray-200'}`}>
+                          <span className={`px-3 py-0.5 rounded-full text-sm font-medium border ${statusColors[status.label as keyof typeof statusColors] || 'bg-gray-100 text-gray-800 border-gray-200'}`}>
                             <div className={`w-2 h-2 rounded-full mr-2 inline-block ${
                               status.label === 'Active' ? 'bg-green-500' :
                               status.label === 'Pending' || status.label === 'Pending Request' ? 'bg-yellow-500' :
@@ -510,8 +566,8 @@ export default function BookingDashboard() {
                           <div className="bg-gray-50 rounded-lg p-4">
                             <p className="text-sm font-medium text-gray-600 mb-1">Group Size</p>
                             <p className="font-semibold text-gray-900">
-                              {booking.participants || 1} participant{(booking.participants || 1) > 1 ? 's' : ''}
-                            </p>
+                                {booking.participants != null ? booking.participants : 1} participant{booking.participants != null && booking.participants > 1 ? 's' : ''}
+                              </p>
                             <p className="text-sm text-gray-600">
                               {(() => {
                                 const facility = facilities.find(f => f.id === booking.facilityId);
@@ -531,6 +587,7 @@ export default function BookingDashboard() {
                             {canEditBooking(booking) && (
                               <button
                                 onClick={() => {
+                                  // Edit clicked for booking - handled by opening modal
                                   setEditingBooking(booking);
                                   setShowEditBookingModal(true);
                                 }}
@@ -673,8 +730,8 @@ export default function BookingDashboard() {
                       </div>
 
                         <div className="p-6 flex flex-col h-full">
-                        <div className="flex items-start justify-between mb-2">
-                          <h3 className={`font-bold text-lg mb-2 transition-colors ${
+                        <div className="flex items-center justify-between mb-1">
+                          <h3 className={`font-bold text-lg mb-1 transition-colors ${
                             isAvailableForBooking
                               ? 'text-gray-900 group-hover:text-pink-700' 
                               : 'text-gray-500'
@@ -686,7 +743,7 @@ export default function BookingDashboard() {
                           </span>
                         </div>
                         
-                        <p className={`text-sm leading-relaxed mb-4 flex-grow ${
+                        <p className={`text-sm leading-relaxed mb-1 flex-grow ${
                           isAvailableForBooking ? 'text-gray-600' : 'text-gray-500'
                         }`}>
                           {getFacilityDescriptionByName(facility.name)}
@@ -844,63 +901,35 @@ export default function BookingDashboard() {
                 <h4 className="font-medium text-pink-900 mb-2">Booking Guidelines</h4>
                 <div className="text-sm text-pink-800 space-y-3">
                   <div>
-                    <h5 className="font-semibold text-pink-900 mb-1">📅 Booking Requirements</h5>
-                    <ul className="space-y-1 ml-4">
-                      <li>• All bookings must be made at least 30 minutes in advance</li>
-                      <li>• You can only have one active booking per facility at a time</li>
-                      <li>• Multiple bookings allowed for different facilities simultaneously</li>
-                      <li>• Bookings are limited to library operating hours (7:30 AM - 5:00 PM)</li>
+                    <h5 className="font-semibold text-pink-900 mb-1">Booking Essentials</h5>
+                    <ul className="space-y-1 ml-4 list-disc">
+                      <li>Make bookings at least 30 minutes before the start time.</li>
+                      <li>One active booking per facility at a time; you may book different facilities concurrently.</li>
+                      <li>Bookings are within library hours (7:30 AM – 5:00 PM). Requests outside these hours will be reviewed by staff.</li>
                     </ul>
                   </div>
-                  
+
                   <div>
-                    <h5 className="font-semibold text-pink-900 mb-1">⏰ Time Management</h5>
-                    <ul className="space-y-1 ml-4">
-                      <li>• Arrive on time - late arrivals may forfeit the booking</li>
-                      <li>• 15-minute grace period for check-in</li>
-                      <li>• Bookings must be within library hours (7:30 AM - 5:00 PM)</li>
-                      <li>• No time extensions available - you must book again following proper procedure</li>
-                      <li>• Early departure releases the space for others</li>
+                    <h5 className="font-semibold text-pink-900 mb-1">Group Size & Capacity</h5>
+                    <ul className="space-y-1 ml-4 list-disc">
+                      <li>Specify the correct number of participants when creating or editing a booking.</li>
+                      <li>Do not exceed the facility's maximum capacity (shown as “Max capacity”).</li>
+                      <li>All participants must be registered university users.</li>
                     </ul>
                   </div>
-                  
+
                   <div>
-                    <h5 className="font-semibold text-pink-900 mb-1">👥 Group Bookings</h5>
-                    <ul className="space-y-1 ml-4">
-                      <li>• Collaborative Learning Room 1: Maximum 8 people</li>
-                      <li>• Collaborative Learning Room 2: Maximum 8 people</li>
-                      <li>• Board Room: Maximum 12 people</li>
-                      <li>• Participant count cannot exceed facility capacity</li>
-                      <li>• All participants must be registered university users</li>
+                    <h5 className="font-semibold text-pink-900 mb-1">Conduct & Cancellations</h5>
+                    <ul className="space-y-1 ml-4 list-disc">
+                      <li>Respect the library environment; keep noise to a minimum.</li>
+                      <li>Dispose of trash and leave the space tidy for the next user.</li>
+                      <li>Cancel at least 30 minutes before the booking start to avoid restrictions for no-shows.</li>
                     </ul>
                   </div>
-                  
-                  <div>
-                    <h5 className="font-semibold text-pink-900 mb-1">📋 Conduct & Policies</h5>
-                    <ul className="space-y-1 ml-4">
-                      <li>• Maintain appropriate noise levels for library environment</li>
-                      <li>• No food or drinks except water in sealed containers</li>
-                      <li>• Clean up after use - leave space ready for next user</li>
-                      <li>• Report any equipment issues immediately to library staff</li>
-                      <li>• Follow University of the Immaculate Conception policies</li>
-                      <li>• No smoking, vaping, or alcohol allowed in university premises</li>
-                    </ul>
-                  </div>
-                  
-                  <div>
-                    <h5 className="font-semibold text-pink-900 mb-1">❌ Cancellations & No-Shows</h5>
-                    <ul className="space-y-1 ml-4">
-                      <li>• Cancel at least 30 minutes before your booking starts</li>
-                      <li>• No-shows may result in temporary booking restrictions</li>
-                      <li>• Repeated violations may lead to booking privileges suspension</li>
-                      <li>• Emergency cancellations should be reported to library staff</li>
-                      <li>• Late arrivals forfeit booking after 15-minute grace period</li>
-                    </ul>
-                  </div>
-                  
+
                   <div className="bg-pink-100 p-3 rounded border border-pink-300 mt-4">
-                    <p className="font-semibold text-pink-900">💡 Pro Tip:</p>
-                    <p className="text-pink-800">Book your study sessions early! Library hours are 7:30 AM - 5:00 PM, and popular time slots fill up quickly.</p>
+                    <p className="font-semibold text-pink-900">Tip</p>
+                    <p className="text-pink-800">Popular time slots fill quickly — plan and book early for best availability.</p>
                   </div>
                 </div>
               </div>
@@ -924,7 +953,7 @@ export default function BookingDashboard() {
                     <p className="text-xs text-gray-500 mt-1">Currently in progress</p>
                   </div>
                   <div className="bg-green-100 p-3 rounded-full group-hover:bg-green-200 transition-colors duration-200">
-                    <Calendar className="h-6 w-6 text-green-600" />
+                    <span className="text-2xl text-green-600 leading-none">📅</span>
                   </div>
                 </div>
               </button>
@@ -940,7 +969,7 @@ export default function BookingDashboard() {
                     <p className="text-xs text-gray-500 mt-1">Approved and scheduled</p>
                   </div>
                   <div className="bg-pink-100 p-3 rounded-full group-hover:bg-pink-200 transition-colors duration-200">
-                    <History className="h-6 w-6 text-pink-600" />
+                    <span className="text-2xl text-pink-600 leading-none">🕒</span>
                   </div>
                 </div>
               </button>
@@ -956,37 +985,13 @@ export default function BookingDashboard() {
                     <p className="text-xs text-gray-500 mt-1">Awaiting approval</p>
                   </div>
                   <div className="bg-orange-100 p-3 rounded-full group-hover:bg-orange-200 transition-colors duration-200">
-                    <Settings className="h-6 w-6 text-orange-600" />
+                    <span className="text-2xl text-orange-600 leading-none">⏳</span>
                   </div>
                 </div>
               </button>
             </div>
 
-            {/* New Booking Quick Card (removed duplicate Quick Actions elsewhere) */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-8">
-              <h3 className="text-lg font-bold text-gray-900 mb-4">New Booking</h3>
-              <div className="grid md:grid-cols-2 gap-4">
-                <div className="flex items-center gap-3 p-4 bg-pink-50 hover:bg-pink-100 rounded-lg transition-colors duration-200 border border-pink-200 cursor-pointer" onClick={() => openBookingModal()}>
-                  <div className="bg-pink-600 p-2 rounded-lg">
-                    <Plus className="h-5 w-5 text-white" />
-                  </div>
-                  <div className="text-left">
-                    <p className="font-medium text-pink-900">Quick New Booking</p>
-                    <p className="text-sm text-pink-700">Reserve a study room instantly</p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3 p-4 bg-white rounded-lg transition-colors duration-200 border border-gray-200">
-                  <div className="text-left">
-                    <p className="font-medium text-gray-900">Or browse</p>
-                    <p className="text-sm text-gray-600">Use the sidebar or view all rooms</p>
-                  </div>
-                  <div className="ml-auto">
-                    <button onClick={() => setSelectedView('available-rooms')} className="text-pink-600 hover:text-pink-800 font-medium text-sm transition-colors duration-200">View All →</button>
-                  </div>
-                </div>
-              </div>
-            </div>
+            {/* Quick actions removed (use sidebar / available rooms) */}
 
             {/* Available Rooms */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-8">
@@ -1068,7 +1073,7 @@ export default function BookingDashboard() {
                           ? 'hover:bg-gray-100 cursor-pointer' 
                           : 'opacity-60 cursor-not-allowed'
                       }`} onClick={() => isAvailableForBooking && openBookingModal(facility.id)}>
-                        <div className="flex items-start justify-between mb-3">
+                        <div className="flex items-center justify-between mb-3">
                           <div className={`p-2 rounded-lg shadow-sm transition-shadow duration-200 ${
                             isAvailableForBooking
                               ? 'bg-white group-hover:shadow-md' 
@@ -1097,7 +1102,7 @@ export default function BookingDashboard() {
                         <h4 className={`font-medium mb-1 ${isAvailableForBooking ? 'text-gray-900' : 'text-gray-500'}`}>
                           {facility.name}
                         </h4>
-                        <p className={`text-sm mb-3 line-clamp-2 ${isAvailableForBooking ? 'text-gray-600' : 'text-gray-400'}`}>
+                        <p className={`text-sm mb-2 line-clamp-2 ${isAvailableForBooking ? 'text-gray-600' : 'text-gray-400'}`}>
                           {getFacilityDescriptionByName(facility.name)}
                         </p>
 
@@ -1296,7 +1301,7 @@ export default function BookingDashboard() {
     <div className="min-h-screen bg-background flex flex-col">
       <Header />
       <div className="flex flex-1 relative">
-        <div className="w-64 h-screen border-r bg-card fixed top-0 left-0 z-30 overflow-y-auto">
+  <div className="w-64 h-[calc(100vh-4rem)] border-r bg-card fixed top-16 left-0 z-30 overflow-y-auto">
           <Sidebar
             items={sidebarItems}
             activeItem={selectedView}

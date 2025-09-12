@@ -591,7 +591,12 @@ export default function BookingModal({
                         </FormControl>
                         <SelectContent>
                           {fallbackFacilities.map((f) => (
-                            <SelectItem key={f.id} value={f.id.toString()} description={getFacilityDescriptionByName(f.name)}>
+                            <SelectItem
+                              key={f.id}
+                              value={f.id.toString()}
+                              description={getFacilityDescriptionByName(f.name)}
+                              available={!!(f.isActive && !getFacilityCurrentStatus(f.id))}
+                            >
                               {f.name}
                             </SelectItem>
                           ))}
@@ -610,8 +615,8 @@ export default function BookingModal({
                     <div className={`p-3 rounded-lg border ${
                       status.type === 'active' ? 'bg-red-50 border-red-200' : 'bg-yellow-50 border-yellow-200'
                     }`}>
-                      <div className="flex items-start gap-2">
-                        <div className={`w-2 h-2 rounded-full mt-1.5 ${
+                      <div className="flex items-center gap-2">
+                        <div className={`w-2 h-2 rounded-full ${
                           status.type === 'active' ? 'bg-red-500' : 'bg-yellow-500'
                         }`}></div>
                         <div className="flex-1">
@@ -621,7 +626,7 @@ export default function BookingModal({
                             {status.message}
                           </p>
                           {status.type === 'upcoming' && (status as any).bookings && (
-                            <div className="mt-2 space-y-1">
+                            <div className="mt-1 space-y-1">
                               {(status as any).bookings.slice(0, 3).map((booking: any, index: number) => (
                                 <p key={index} className="text-xs text-yellow-700">
                                   {new Date(booking.startTime).toLocaleDateString('en-US', {
@@ -659,13 +664,13 @@ export default function BookingModal({
 
                   return (
                     <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
-                      <div className="flex items-start gap-2">
-                        <div className="w-2 h-2 rounded-full bg-orange-500 mt-1.5"></div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-orange-500"></div>
                         <div className="flex-1">
-                          <p className="text-sm font-medium text-orange-800 mb-2">
+                          <p className="text-sm font-medium text-orange-800 mb-1">
                             ⚠️ Facility Booking Limit
                           </p>
-                          <p className="text-sm text-orange-700 mb-2">
+                          <p className="text-sm text-orange-700 mb-1">
                             You already have {userBookings.length} active booking{userBookings.length > 1 ? 's' : ''} for this facility. 
                             You cannot create additional requests for the same facility.
                           </p>
@@ -736,7 +741,7 @@ export default function BookingModal({
                   );
                 }}
               />
-            </div>
+                          </div>
 
             <div className="grid md:grid-cols-2 gap-6">
               {/* Start Date + Time split */}

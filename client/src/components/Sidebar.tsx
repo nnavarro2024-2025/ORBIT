@@ -1,5 +1,7 @@
 import { supabase } from "@/lib/supabase";
 import { LogOut } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { useLocation } from "wouter";
 
 type SidebarItem = {
   id: string;
@@ -14,9 +16,24 @@ type SidebarProps = {
 };
 
 export default function Sidebar({ items, activeItem, onItemClick }: SidebarProps) {
+  const { toast } = useToast();
+  const [, setLocation] = useLocation();
+
   const handleLogout = async () => {
-    await supabase.auth.signOut();
-    // Redirect is handled globally in useAuth.ts
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      toast({
+        title: "Logout Error",
+        description: "There was an error logging out. Please try again.",
+        variant: "destructive",
+      });
+    } else {
+      toast({
+        title: "Logged Out",
+        description: "You have been successfully logged out.",
+      });
+      setLocation("/login");
+    }
   };
 
   return (

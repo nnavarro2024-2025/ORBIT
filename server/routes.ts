@@ -327,6 +327,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Endpoint to accept avatar uploads as base64 JSON and upload via service-role (no client-side service key exposure)
+  app.post('/api/upload/avatar', isAuthenticated, async (req: any, res) => {
+    try {
+      const { fileName, mimeType, base64 } = req.body || {};
+      if (!fileName || !base64) {
+        return res.status(400).json({ message: 'Missing fileName or base64 in request body' });
+      }
+
+      // Decode base64 into a buffer
+      const buffer = Buffer.from(base64, 'base64');
+      const filePath = `avatars/${fileName}`;
+
+      const { data: upData, error: upErr } = await supabaseAdmin.storage.from('avatars').upload(filePath, buffer, {
+        upsert: true,
+        contentType: mimeType || 'application/octet-stream',
+      } as any);
+
+      if (upErr) {
+        console.error('Error uploading avatar via admin client:', upErr);
+        return res.status(500).json({ message: 'Failed to upload avatar', error: upErr });
+      }
+
+      const { data: publicData } = supabaseAdmin.storage.from('avatars').getPublicUrl(filePath);
+      let publicUrl = publicData?.publicUrl || null;
+      if (publicUrl && publicUrl.includes('/avatars/avatars/')) {
+        publicUrl = publicUrl.replace('/avatars/avatars/', '/avatars/');
+      }
+
+      return res.status(200).json({ publicUrl });
+    } catch (err) {
+      console.error('Error in /api/upload/avatar:', err);
+      return res.status(500).json({ message: 'Internal server error' });
+    }
+  });
+
   // New: Logout route
   app.post("/api/auth/logout", isAuthenticated, async (req: any, res) => {
     try {
@@ -525,7 +560,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/bookings/:bookingId", isAuthenticated, async (req: any, res) => {
     try {
       const { bookingId } = req.params;
-      const { purpose, startTime, endTime, facilityId } = req.body;
+      const { purpose, startTime, endTime, facilityId, participants } = req.body;
       const userId = req.user.claims.sub;
 
       // Basic validation for proposed changes
@@ -616,15 +651,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      await storage.updateFacilityBooking(bookingId, {
+      // Prepare update payload and include participants if provided
+  console.log('[server] PUT /api/bookings/:bookingId - incoming body', req.body);
+      
+      const updatePayload: any = {
         purpose,
         facilityId: parseInt(facilityId), // Parse facilityId to integer
         startTime: parsedStartTime,
         endTime: parsedEndTime,
         updatedAt: new Date(),
-      });
+      };
 
-      res.json({ success: true, message: "Booking updated successfully." });
+      if (participants !== undefined && participants !== null) {
+        // Ensure participants is stored as a number
+        const parsedParticipants = Number(participants);
+        if (!Number.isNaN(parsedParticipants)) {
+          updatePayload.participants = parsedParticipants;
+        }
+      }
+
+  await storage.updateFacilityBooking(bookingId, updatePayload);
+
+  // Return the updated booking so clients can immediately reflect changes
+  const updatedBooking = await storage.getFacilityBooking(bookingId);
+  console.log('[server] PUT /api/bookings/:bookingId - updatedBooking', updatedBooking);
+  res.json(updatedBooking);
     } catch (error) {
       console.error("Error updating booking:", error);
       res.status(500).json({ message: "Failed to update booking." });

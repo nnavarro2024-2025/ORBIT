@@ -18,7 +18,7 @@ import {
   Users,
   BarChart3,
   Activity,
-  Bell,
+  
   CheckCircle,
   XCircle,
   Loader2,
@@ -2412,7 +2412,7 @@ export default function AdminDashboard() {
                     <p className="text-xs text-gray-500 mt-1">Currently logged in</p>
                   </div>
                   <div className="bg-green-100 p-3 rounded-full group-hover:bg-green-200 transition-colors duration-200">
-                    <UserCheck className="h-6 w-6 text-green-600" />
+                    <span className="text-2xl text-green-600 leading-none">👥</span>
                   </div>
                 </div>
               </button>
@@ -2428,7 +2428,7 @@ export default function AdminDashboard() {
                     <p className="text-xs text-gray-500 mt-1">Currently in progress</p>
                   </div>
                   <div className="bg-pink-100 p-3 rounded-full group-hover:bg-pink-200 transition-colors duration-200">
-                    <Calendar className="h-6 w-6 text-pink-600" />
+                    <span className="text-2xl text-pink-600 leading-none">📅</span>
                   </div>
                 </div>
               </button>
@@ -2444,7 +2444,7 @@ export default function AdminDashboard() {
                     <p className="text-xs text-gray-500 mt-1">Requiring attention</p>
                   </div>
                   <div className="bg-orange-100 p-3 rounded-full group-hover:bg-orange-200 transition-colors duration-200">
-                    <Bell className="h-6 w-6 text-orange-600" />
+                    <span className="text-2xl text-orange-600 leading-none">🔔</span>
                   </div>
                 </div>
               </button>
@@ -2460,7 +2460,7 @@ export default function AdminDashboard() {
                     <p className="text-xs text-gray-500 mt-1">Pending approval</p>
                   </div>
                   <div className="bg-yellow-100 p-3 rounded-full group-hover:bg-yellow-200 transition-colors duration-200">
-                    <Clock className="h-6 w-6 text-yellow-600" />
+                    <span className="text-2xl text-yellow-600 leading-none">⏱️</span>
                   </div>
                 </div>
               </button>
