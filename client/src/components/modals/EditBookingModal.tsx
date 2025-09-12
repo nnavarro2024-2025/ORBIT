@@ -1,5 +1,15 @@
 import React, { useState, useEffect } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogAction,
+  AlertDialogCancel,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,6 +20,24 @@ import { format } from "date-fns";
 import { CalendarIcon, Plus, Minus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+
+// Library working hours validation functions
+const isWithinLibraryHours = (date: Date): boolean => {
+  const hours = date.getHours();
+  const minutes = date.getMinutes();
+  const timeInMinutes = hours * 60 + minutes;
+  
+  // 7:30 AM = 7 * 60 + 30 = 450 minutes
+  // 5:00 PM = 17 * 60 = 1020 minutes
+  const libraryOpenTime = 7 * 60 + 30; // 7:30 AM
+  const libraryCloseTime = 17 * 60; // 5:00 PM
+  
+  return timeInMinutes >= libraryOpenTime && timeInMinutes <= libraryCloseTime;
+};
+
+const formatLibraryHours = (): string => {
+  return "7:30 AM - 5:00 PM";
+};
 
 // Custom Number Input with Controls (copied from BookingModal.tsx)
 interface NumberInputWithControlsProps {
@@ -97,11 +125,16 @@ export default function EditBookingModal({
   const [endTime, setEndTime] = useState<Date | undefined>();
   const [participants, setParticipants] = useState(1); // Add participants state
   const { toast } = useToast(); // Add toast
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [lastSubmissionTime, setLastSubmissionTime] = useState(0);
+  const SUBMISSION_COOLDOWN = 2000; // 2 seconds cooldown between submissions
+  const [purposeError, setPurposeError] = useState("");
 
   useEffect(() => {
     if (booking) {
       setPurpose(booking.purpose || "");
       setFacilityId(booking.facilityId?.toString() || "");
+      setPurposeError(""); // Clear any previous validation errors
 
       const now = new Date();
       const defaultStart = new Date(now.getTime() + 1 * 60 * 1000);
@@ -131,65 +164,182 @@ export default function EditBookingModal({
   }, [startTime]);
 
   const handleSave = () => {
-    if (!purpose || !facilityId || !startTime || !endTime) {
+    // Prevent rapid duplicate submissions
+    const currentTimestamp = Date.now();
+    if (isSubmitting || (currentTimestamp - lastSubmissionTime < SUBMISSION_COOLDOWN)) {
       toast({
-        title: "Error",
-        description: "Please fill in all fields.",
+        title: "Please Wait",
+        description: "Please wait a moment before submitting another update.",
         variant: "destructive",
       });
       return;
     }
 
-    const now = new Date(); // Capture current time at the start of submission
-    if (startTime.getTime() < now.getTime()) { // Compare timestamps
-      toast({
+    // Validate purpose field
+    if (!purpose || purpose.trim() === "") {
+      setPurposeError("Purpose is required");
+      return;
+    }
+
+    // Collect all validation errors
+    const validationErrors: Array<{title: string, description: string}> = [];
+
+    if (!facilityId || !startTime || !endTime) {
+      validationErrors.push({
+        title: "Missing Information",
+        description: "Please fill in all required fields.",
+      });
+    }
+
+    if (startTime && startTime.getTime() < new Date().getTime()) {
+      validationErrors.push({
         title: "Invalid Start Time",
-        description: "Start time cannot be in the past. Please select a future time.",
-        variant: "destructive",
+        description: "Start time is in the past.",
+      });
+    }
+
+    // Validate library working hours for both start and end time
+    const startTimeValid = startTime && isWithinLibraryHours(startTime);
+    const endTimeValid = endTime && isWithinLibraryHours(endTime);
+    
+    if ((startTime && !startTimeValid) || (endTime && !endTimeValid)) {
+      let timeIssues = [];
+      if (startTime && !startTimeValid) timeIssues.push("start time");
+      if (endTime && !endTimeValid) timeIssues.push("end time");
+      
+      validationErrors.push({
+        title: "Library Hours",
+        description: `Your ${timeIssues.join(" and ")} ${timeIssues.length > 1 ? "are" : "is"} outside library operating hours (${formatLibraryHours()}). Room access is only available during these hours.`,
+      });
+    }
+
+    // Validate end time is after start time
+    if (startTime && endTime && endTime <= startTime) {
+      validationErrors.push({
+        title: "Invalid Time Selection",
+        description: "End time must be after start time.",
+      });
+    }
+
+    // Validate facility and capacity
+    if (facilityId) {
+      const facility = facilities.find(f => f.id === parseInt(facilityId));
+      if (!facility) {
+        validationErrors.push({
+          title: "Error",
+          description: "Selected facility not found.",
+        });
+      } else {
+        let maxCapacity = facility.capacity;
+        const lowerCaseName = facility.name.toLowerCase();
+
+        const isCLR1 = lowerCaseName.includes('collaborative learning room 1') || lowerCaseName.includes('collaborative learning 1');
+        const isCLR2 = lowerCaseName.includes('collaborative learning room 2') || lowerCaseName.includes('collaborative learning 2');
+
+        if (isCLR1 || isCLR2) {
+          maxCapacity = 8;
+        } else if (lowerCaseName.includes('board room') || lowerCaseName.includes('boardroom')) {
+          maxCapacity = 12;
+        }
+
+        if (participants > maxCapacity) {
+          validationErrors.push({
+            title: "Capacity Exceeded",
+            description: `The selected room has a maximum capacity of ${maxCapacity} people. Please reduce the number of participants.`,
+          });
+        }
+      }
+    }
+
+    // Show all validation errors as separate toasts
+    if (validationErrors.length > 0) {
+      setIsSubmitting(false);
+      validationErrors.forEach((error, index) => {
+        // Add a small delay between toasts to prevent them from overlapping
+        setTimeout(() => {
+          toast({
+            title: error.title,
+            description: error.description,
+            variant: "destructive",
+          });
+        }, index * 100); // 100ms delay between each toast
       });
       return;
     }
 
-    const facility = facilities.find(f => f.id === parseInt(facilityId));
-    if (!facility) {
-      toast({
-        title: "Error",
-        description: "Selected facility not found.",
-        variant: "destructive",
+    setIsSubmitting(true);
+
+    try {
+      onSave({
+        ...booking,
+        purpose,
+        facilityId: parseInt(facilityId, 10),
+        startTime: startTime!.toISOString(),
+        endTime: endTime!.toISOString(),
+        participants, // Include participants in saved data
       });
-      return;
+      setIsSubmitting(false);
+      setLastSubmissionTime(Date.now());
+      onClose();
+    } catch (error: any) {
+      setIsSubmitting(false);
+      // Handle specific overlapping booking error
+      if (error.message && error.message.includes("You already have another booking during this time")) {
+        toast({
+          title: "Booking Conflict",
+          description: formatBookingConflictMessage(error.message),
+          variant: "destructive",
+        });
+      }
+      // Handle facility spam prevention error
+      else if (error.message && error.message.includes("You already have an active booking for this facility")) {
+        toast({
+          title: "Facility Booking Limit",
+          description: formatBookingConflictMessage(error.message),
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Error",
+          description: error.message || "An error occurred while updating your booking.",
+          variant: "destructive",
+        });
+      }
     }
+  };
 
-    let maxCapacity = facility.capacity;
-    const lowerCaseName = facility.name.toLowerCase();
+  // Confirmation dialog state
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
-    const isCLR1 = lowerCaseName.includes('collaborative learning room 1') || lowerCaseName.includes('collaborative learning 1');
-    const isCLR2 = lowerCaseName.includes('collaborative learning room 2') || lowerCaseName.includes('collaborative learning 2');
-
-    if (isCLR1 || isCLR2) {
-      maxCapacity = 8;
-    } else if (lowerCaseName.includes('board room') || lowerCaseName.includes('boardroom')) {
-      maxCapacity = 12;
+  // Helper function to format booking conflict error messages
+  const formatBookingConflictMessage = (errorMessage: string) => {
+    try {
+      // Extract the readable part before any JSON or ID information
+      const readablePart = errorMessage.split('. Existing booking:')[0];
+      
+      // If there's existing booking info, try to parse and format it nicely
+      if (errorMessage.includes('Existing booking:') && errorMessage.includes('/')) {
+        // Extract date/time information if present
+        const dateTimeMatch = errorMessage.match(/(\d{1,2}\/\d{1,2}\/\d{4}[^"]*)/);
+        if (dateTimeMatch) {
+          return `${readablePart}. Your existing booking: ${dateTimeMatch[1]}`;
+        }
+      }
+      
+      // Remove any JSON-like content and IDs
+      const cleanMessage = readablePart
+        .replace(/\s*\{".*$/g, '') // Remove JSON part
+        .replace(/\s*Please cancel your existing booking first.*$/g, '') // Remove redundant instruction
+        .trim();
+      
+      return cleanMessage + '. Please cancel your existing booking first or choose a different time.';
+    } catch (e) {
+      // Fallback: clean up basic JSON and ID information
+      return errorMessage
+        .split('{"')[0] // Remove JSON part
+        .replace(/ID:[^,\s]*/g, '') // Remove ID references
+        .trim();
     }
-
-    if (participants > maxCapacity) {
-      toast({
-        title: "Capacity Exceeded",
-        description: `The selected room has a maximum capacity of ${maxCapacity} people. Please reduce the number of participants.`, 
-        variant: "destructive",
-      });
-      return;
-    }
-
-    onSave({
-      ...booking,
-      purpose,
-      facilityId: parseInt(facilityId, 10),
-      startTime: startTime.toISOString(),
-      endTime: endTime.toISOString(),
-      participants, // Include participants in saved data
-    });
-    onClose();
   };
 
 
@@ -198,6 +348,7 @@ export default function EditBookingModal({
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle>Edit Booking</DialogTitle>
+          <DialogDescription>Update booking details: date, time, participants, and purpose.</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-4">
           <div className="grid grid-cols-4 items-center gap-4">
@@ -207,9 +358,17 @@ export default function EditBookingModal({
             <Input
               id="purpose"
               value={purpose}
-              onChange={(e) => setPurpose(e.target.value)}
-              className="col-span-3"
+              onChange={(e) => {
+                setPurpose(e.target.value);
+                if (purposeError) setPurposeError(""); // Clear error when user types
+              }}
+              className={`col-span-3 ${purposeError ? "border-red-500" : ""}`}
             />
+            {purposeError && (
+              <p className="col-span-3 col-start-2 text-sm text-red-600 mt-1">
+                {purposeError}
+              </p>
+            )}
           </div>
           <div className="grid grid-cols-4 items-center gap-4">
             <Label htmlFor="facility" className="text-right">
@@ -287,7 +446,20 @@ export default function EditBookingModal({
                     step={300}
                     value={startTime ? format(startTime, "HH:mm") : ""}
                     onChange={(e) => {
-                      const [hours, minutes] = e.target.value.split(":").map(Number);
+                      const timeValue = e.target.value;
+                      if (!timeValue) return;
+
+                      // Validate time format (HH:MM)
+                      const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
+                      if (!timeRegex.test(timeValue)) {
+                        return; // Invalid time format, don't update
+                      }
+
+                      const [hours, minutes] = timeValue.split(":").map(Number);
+                      if (isNaN(hours) || isNaN(minutes) || hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+                        return; // Invalid time values, don't update
+                      }
+
                       if (startTime) { // If startTime is already a valid Date
                         const newTimeWithExistingDate = new Date(startTime); // Clone existing date
                         newTimeWithExistingDate.setHours(hours);
@@ -352,7 +524,20 @@ export default function EditBookingModal({
                     step={300}
                     value={endTime ? format(endTime, "HH:mm") : ""}
                     onChange={(e) => {
-                      const [hours, minutes] = e.target.value.split(":").map(Number);
+                      const timeValue = e.target.value;
+                      if (!timeValue) return;
+
+                      // Validate time format (HH:MM)
+                      const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
+                      if (!timeRegex.test(timeValue)) {
+                        return; // Invalid time format, don't update
+                      }
+
+                      const [hours, minutes] = timeValue.split(":").map(Number);
+                      if (isNaN(hours) || isNaN(minutes) || hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+                        return; // Invalid time values, don't update
+                      }
+
                       if (endTime) { // If endTime is already a valid Date
                         const newTimeWithExistingDate = new Date(endTime); // Clone existing date
                         newTimeWithExistingDate.setHours(hours);
@@ -376,7 +561,22 @@ export default function EditBookingModal({
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={handleSave}>Save Changes</Button>
+          <Button onClick={() => setShowConfirmDialog(true)} disabled={isSubmitting}>
+            {isSubmitting ? "Saving..." : "Save Changes"}
+          </Button>
+
+          <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Confirm Update</AlertDialogTitle>
+                <AlertDialogDescription>Are you sure you want to save changes to this booking?</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={() => { setShowConfirmDialog(false); handleSave(); }}>Confirm</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -21,6 +21,10 @@ export default function Sidebar({ items, activeItem, onItemClick }: SidebarProps
 
   return (
     <div className="material-card p-4 flex flex-col h-full">
+      {/* Logo / Title */}
+      <div className="mb-4 flex items-center gap-3">
+        {/* logo removed as requested - sidebar shows no header text or image */}
+      </div>
       <nav className="flex-grow">
         <ul>
           {items.map((item) => (
@@ -29,8 +33,8 @@ export default function Sidebar({ items, activeItem, onItemClick }: SidebarProps
                 onClick={() => onItemClick(item.id)}
                 className={`w-full text-left flex items-center px-4 py-3 rounded-lg transition-colors mb-1 ${
                   activeItem === item.id
-                    ? "bg-primary/10 text-primary font-semibold"
-                    : "hover:bg-accent/50"
+                    ? "bg-pink-50 text-pink-700 font-semibold"
+                    : "hover:bg-pink-50"
                 }`}
               >
                 <item.icon className="h-5 w-5 mr-3" />
@@ -43,7 +47,7 @@ export default function Sidebar({ items, activeItem, onItemClick }: SidebarProps
       <div className="mt-4 pt-4 border-t">
         <button
           onClick={handleLogout}
-          className="w-full text-left flex items-center px-4 py-3 rounded-lg hover:bg-accent/50 text-muted-foreground"
+          className="w-full text-left flex items-center px-4 py-3 rounded-lg hover:bg-pink-50 text-muted-foreground"
         >
           <LogOut className="h-5 w-5 mr-3" />
           <span>Log Out</span>

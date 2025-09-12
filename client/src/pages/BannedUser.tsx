@@ -2,8 +2,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Ban, LogOut, Clock, AlertTriangle } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
-import Footer from "@/components/Footer";
-import DeveloperCredit from "@/components/DeveloperCredit";
 
 export default function BannedUser() {
   const { logout, user } = useAuth();
@@ -47,12 +45,12 @@ export default function BannedUser() {
 
   return (
     <>
-      <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-red-50 to-red-100 p-4">
+      <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-pink-50 to-rose-100 p-4">
         <Card className="w-full max-w-2xl mx-4 border-red-200 shadow-lg">
           <CardHeader className="text-center pb-6">
             <div className="flex justify-center mb-4">
               <img 
-                src="/images/orbit-logo.png" 
+                src="/orbit-logo.png" 
                 alt="ORBIT Logo" 
                 className="h-16 w-auto object-contain mb-2"
               />
@@ -68,7 +66,7 @@ export default function BannedUser() {
           <CardContent className="space-y-4">
             
             {/* Combined Ban Information Card */}
-            <div className="bg-gradient-to-r from-red-50 to-blue-50 border border-red-200 rounded-xl p-6">
+            <div className="bg-gradient-to-r from-pink-50 to-rose-50 border border-pink-200 rounded-xl p-6">
               
               {/* Ban Reason Section */}
               {displayUser?.banReason && (
@@ -86,19 +84,19 @@ export default function BannedUser() {
               {/* Suspension Details Section */}
               <div>
                 <div className="flex items-start gap-3 mb-3">
-                  <Clock className="h-5 w-5 text-blue-500 mt-0.5 flex-shrink-0" />
-                  <h3 className="font-semibold text-blue-800 text-lg">Suspension Details</h3>
+                  <Clock className="h-5 w-5 text-pink-500 mt-0.5 flex-shrink-0" />
+                  <h3 className="font-semibold text-pink-800 text-lg">Suspension Details</h3>
                 </div>
                 <div className="bg-white/70 rounded-lg p-3 border border-blue-100 space-y-2">
                   {displayUser?.bannedAt && (
                     <div className="flex flex-col sm:flex-row sm:items-center gap-1">
-                      <span className="font-medium text-blue-800 min-w-[120px]">Suspended on:</span>
-                      <span className="text-blue-700">{formatBanDate(displayUser.bannedAt)}</span>
+                      <span className="font-medium text-pink-800 min-w-[120px]">Suspended on:</span>
+                      <span className="text-pink-700">{formatBanDate(displayUser.bannedAt)}</span>
                     </div>
                   )}
                   <div className="flex flex-col sm:flex-row sm:items-center gap-1">
-                    <span className="font-medium text-blue-800 min-w-[120px]">Duration:</span>
-                    <span className="text-blue-700 font-medium">
+                    <span className="font-medium text-pink-800 min-w-[120px]">Duration:</span>
+                    <span className="text-pink-700 font-medium">
                       {displayUser?.banEndDate ? formatBanDuration(displayUser.banEndDate) : "Permanent"}
                     </span>
                   </div>
@@ -124,9 +122,7 @@ export default function BannedUser() {
             </Button>
           </CardContent>
         </Card>
-        <DeveloperCredit />
       </div>
-      <Footer />
     </>
   );
 }

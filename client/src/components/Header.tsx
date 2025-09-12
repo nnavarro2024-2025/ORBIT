@@ -11,7 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import ProfileModal from "./modals/ProfileModal";
 import { useState } from "react";
 
@@ -19,13 +19,25 @@ export default function Header() {
   const { user } = useAuth();
   const { toast } = useToast();
   const [isProfileSidebarOpen, setIsProfileSidebarOpen] = useState(false);
+  const [, setLocation] = useLocation();
 
   const handleLogout = async () => {
     const { error } = await supabase.auth.signOut();
     if (error) {
       console.error("Error logging out:", error.message);
+      toast({
+        title: "Logout Error",
+        description: "There was an error logging out. Please try again.",
+        variant: "destructive",
+      });
+    } else {
+      toast({
+        title: "Logged Out",
+        description: "You have been successfully logged out.",
+      });
+      // Redirect to login page
+      setLocation("/login");
     }
-    // The redirect to the login page is handled globally in useAuth.ts
   };
 
   const handleNotificationsClick = () => {
@@ -44,14 +56,14 @@ export default function Header() {
   return (
     <header className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm backdrop-blur-sm">
       <div className="container mx-auto px-6 h-16 flex items-center justify-between gap-4">
-        <Link to="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity duration-200" title="ORBIT - Integrated Library Facility & Computer Usage Management System | Developed by James Lemuel M. Rabang">
+        <Link to="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity duration-200" title="ORBIT - Integrated Library Facility Management System | Developed by James Lemuel M. Rabang">
           <div className="flex items-center gap-3">
             <img 
-              src="/images/orbit-logo.png" 
+              src="/orbit-logo.png" 
               alt="ORBIT Logo" 
               className="h-10 w-auto object-contain"
             />
-            <span className="font-bold text-2xl tracking-wider bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+            <span className="font-bold text-2xl tracking-wider bg-gradient-to-r from-pink-600 to-rose-600 bg-clip-text text-transparent">
               ORBIT
             </span>
           </div>
@@ -59,7 +71,7 @@ export default function Header() {
         <div className="flex items-center gap-3">
           <button 
             onClick={handleNotificationsClick} 
-            className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all duration-200"
+            className="p-2 text-gray-600 hover:text-pink-600 hover:bg-pink-50 rounded-lg transition-all duration-200"
             title="Notifications"
           >
             <Bell className="h-5 w-5" />
@@ -72,7 +84,7 @@ export default function Header() {
                     {user.profileImageUrl ? (
                       <AvatarImage src={user.profileImageUrl} alt="User Avatar" />
                     ) : (
-                      <AvatarFallback className="bg-blue-500 text-white font-semibold">
+                      <AvatarFallback className="bg-pink-500 text-white font-semibold">
                         {getInitials(user.firstName, user.lastName)}
                       </AvatarFallback>
                     )}
@@ -96,7 +108,7 @@ export default function Header() {
                 <DropdownMenuSeparator />
                 <DropdownMenuItem 
                   onClick={() => setIsProfileSidebarOpen(true)}
-                  className="cursor-pointer p-3 rounded-lg hover:bg-blue-50 hover:text-blue-700"
+                  className="cursor-pointer p-3 rounded-lg hover:bg-pink-50 hover:text-pink-700"
                 >
                   <User className="mr-3 h-4 w-4" />
                   <span>Profile Settings</span>

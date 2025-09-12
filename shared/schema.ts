@@ -61,32 +61,8 @@ export const computerStations = pgTable("computer_stations", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-// ORZ computer sessions
-export const orzSessions = pgTable("orz_sessions", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: varchar("user_id").references(() => users.id).notNull(),
-  stationId: integer("station_id").references(() => computerStations.id).notNull(),
-  startTime: timestamp("start_time").defaultNow().notNull(),
-  endTime: timestamp("end_time"),
-  plannedEndTime: timestamp("planned_end_time").notNull(),
-  isActive: boolean("is_active").default(true).notNull(),
-  lastActivity: timestamp("last_activity").defaultNow().notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
-
-// Time extension requests
-export const timeExtensionRequests = pgTable("time_extension_requests", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  sessionId: uuid("session_id").references(() => orzSessions.id).notNull(),
-  userId: varchar("user_id").references(() => users.id).notNull(),
-  requestedMinutes: integer("requested_minutes").notNull(),
-  reason: text("reason").notNull(),
-  status: varchar("status").default("pending").notNull(), // pending, approved, denied
-  adminId: varchar("admin_id").references(() => users.id),
-  adminResponse: text("admin_response"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+// ORZ computer sessions removed
+// ORZ feature has been removed; type stubs are defined later to maintain compatibility.
 
 // Facilities
 export const facilities = pgTable("facilities", {
@@ -141,28 +117,16 @@ export const activityLogs = pgTable("activity_logs", {
 
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
-  orzSessions: many(orzSessions),
   facilityBookings: many(facilityBookings),
-  timeExtensionRequests: many(timeExtensionRequests),
   systemAlerts: many(systemAlerts),
   activityLogs: many(activityLogs),
 }));
 
-export const computerStationsRelations = relations(computerStations, ({ many }) => ({
-  orzSessions: many(orzSessions),
+export const computerStationsRelations = relations(computerStations, ({ many: _many }) => ({
+  // ORZ sessions removed
 }));
 
-export const orzSessionsRelations = relations(orzSessions, ({ one, many }) => ({
-  user: one(users, { fields: [orzSessions.userId], references: [users.id] }),
-  station: one(computerStations, { fields: [orzSessions.stationId], references: [computerStations.id] }),
-  timeExtensionRequests: many(timeExtensionRequests),
-}));
-
-export const timeExtensionRequestsRelations = relations(timeExtensionRequests, ({ one }) => ({
-  session: one(orzSessions, { fields: [timeExtensionRequests.sessionId], references: [orzSessions.id] }),
-  user: one(users, { fields: [timeExtensionRequests.userId], references: [users.id] }),
-  admin: one(users, { fields: [timeExtensionRequests.adminId], references: [users.id] }),
-}));
+// ORZ relations removed
 
 export const facilitiesRelations = relations(facilities, ({ many }) => ({
   bookings: many(facilityBookings),
@@ -252,9 +216,9 @@ export const insertActivityLogSchema = z.object({
 export type UpsertUser = typeof users.$inferInsert;
 export type User = typeof users.$inferSelect;
 export type InsertOrzSession = z.infer<typeof insertOrzSessionSchema>;
-export type OrzSession = typeof orzSessions.$inferSelect;
+export type OrzSession = any;
 export type InsertTimeExtensionRequest = z.infer<typeof insertTimeExtensionRequestSchema>;
-export type TimeExtensionRequest = typeof timeExtensionRequests.$inferSelect;
+export type TimeExtensionRequest = any;
 export type InsertFacilityBooking = z.infer<typeof insertFacilityBookingSchema>;
 export type FacilityBooking = typeof facilityBookings.$inferSelect;
 export type Facility = typeof facilities.$inferSelect;

@@ -1,7 +1,7 @@
 import { useAuth } from "@/hooks/useAuth";
+import { useEffect } from "react";
 import { Link, useLocation } from "wouter";
-import { Calendar, Dock, Users, Shield } from "lucide-react";
-import Footer from "@/components/Footer";
+import { Calendar, Users, Shield } from "lucide-react";
 
 export default function Landing() {
   const { isAuthenticated, user } = useAuth();
@@ -11,206 +11,138 @@ export default function Landing() {
     setLocation("/login");
   };
 
+  // Redirect non-admin authenticated users directly to the booking dashboard
+  useEffect(() => {
+    if (isAuthenticated && user && user.role !== "admin") {
+      setLocation("/booking");
+    }
+  }, [isAuthenticated, user, setLocation]);
+
   if (isAuthenticated && user) {
     if (user.role === "admin") {
       return (
         <>
-          <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-            <div className="container mx-auto px-6 py-16">
-              <div className="text-center mb-16">
-                <div className="inline-flex items-center justify-center mb-6">
-                  <img 
-                    src="/images/orbit-logo.png" 
-                    alt="ORBIT Logo" 
-                    className="h-20 w-auto object-contain"
+          <div className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-rose-50">
+            <div className="container mx-auto px-4 sm:px-6 py-8 sm:py-12 lg:py-16">
+              <div className="text-center mb-8 sm:mb-12 lg:mb-16">
+                <div className="inline-flex items-center justify-center mb-4 sm:mb-6">
+                  <img
+                    src="/orbit-logo.png"
+                    alt="ORBIT Logo"
+                    className="h-16 sm:h-20 lg:h-24 w-auto object-contain"
                   />
                 </div>
-                <h1 className="text-5xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-4 tracking-tight">ORBIT</h1>
-                <p className="text-2xl text-gray-700 mb-4 font-light">Integrated Library Facility & Computer Usage Management System</p>
-                <div className="bg-white border border-gray-200 rounded-lg px-6 py-3 inline-block shadow-lg">
-                  <p className="text-gray-900 font-medium">
-                    Welcome back, {user.firstName} {user.lastName}
+                <p className="text-lg sm:text-xl lg:text-2xl text-gray-700 mb-3 sm:mb-4 font-light">Integrated Library Facility Management System</p>
+                <div className="bg-white border border-gray-200 rounded-lg px-4 sm:px-6 py-2 sm:py-3 inline-block shadow-lg">
+                  <p className="text-sm sm:text-base text-gray-900 font-medium">
+                    Welcome back, Test User
                   </p>
                 </div>
               </div>
 
-              <div className="max-w-6xl mx-auto grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+              <div className="max-w-6xl mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
                 <Link to="/admin" className="group">
-                  <div className="bg-white border border-gray-200 rounded-2xl p-8 hover:bg-gray-50 cursor-pointer transition-all duration-300 transform hover:scale-105 hover:shadow-2xl shadow-lg">
+                  <div className="bg-white border border-gray-200 rounded-2xl p-6 sm:p-8 hover:bg-gray-50 cursor-pointer transition-all duration-300 transform hover:scale-105 hover:shadow-2xl shadow-lg">
                     <div className="text-center">
-                      <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-green-500 to-blue-600 rounded-full mb-6 shadow-xl group-hover:shadow-2xl transition-all duration-300">
-                        <Shield className="h-8 w-8 text-white" />
+                      <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 bg-gradient-to-br from-pink-500 to-rose-600 rounded-full mb-4 sm:mb-6 shadow-xl group-hover:shadow-2xl transition-all duration-300">
+                        <Shield className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
                       </div>
-                      <h3 className="text-xl font-bold mb-3 text-gray-900">Admin Dashboard</h3>
-                      <p className="text-gray-600">Manage system settings and users</p>
+                      <h3 className="text-lg sm:text-xl font-bold mb-2 sm:mb-3 text-gray-900">Admin Dashboard</h3>
+                      <p className="text-sm sm:text-base text-gray-600">Manage system settings and users</p>
                     </div>
                   </div>
                 </Link>
-                <Link to="/orz" className="group">
-                  <div className="bg-white border border-gray-200 rounded-2xl p-8 hover:bg-gray-50 cursor-pointer transition-all duration-300 transform hover:scale-105 hover:shadow-2xl shadow-lg">
-                    <div className="text-center">
-                      <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-purple-500 to-pink-600 rounded-full mb-6 shadow-xl group-hover:shadow-2xl transition-all duration-300">
-                        <Dock className="h-8 w-8 text-white" />
-                      </div>
-                      <h3 className="text-xl font-bold mb-3 text-gray-900">ORZ Management</h3>
-                      <p className="text-gray-600">Monitor computer usage</p>
-                    </div>
-                  </div>
-                </Link>
+                {/* ORZ feature removed */}
                 <Link to="/booking" className="group">
-                  <div className="bg-white border border-gray-200 rounded-2xl p-8 hover:bg-gray-50 cursor-pointer transition-all duration-300 transform hover:scale-105 hover:shadow-2xl shadow-lg">
+                  <div className="bg-white border border-gray-200 rounded-2xl p-6 sm:p-8 hover:bg-gray-50 cursor-pointer transition-all duration-300 transform hover:scale-105 hover:shadow-2xl shadow-lg">
                     <div className="text-center">
-                      <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-orange-500 to-red-600 rounded-full mb-6 shadow-xl group-hover:shadow-2xl transition-all duration-300">
-                        <Calendar className="h-8 w-8 text-white" />
+                      <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 bg-gradient-to-br from-pink-600 to-rose-700 rounded-full mb-4 sm:mb-6 shadow-xl group-hover:shadow-2xl transition-all duration-300">
+                        <Calendar className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
                       </div>
-                      <h3 className="text-xl font-bold mb-3 text-gray-900">Booking Management</h3>
-                      <p className="text-gray-600">Manage facility bookings</p>
+                      <h3 className="text-lg sm:text-xl font-bold mb-2 sm:mb-3 text-gray-900">Booking Management</h3>
+                      <p className="text-sm sm:text-base text-gray-600">Manage facility bookings</p>
                     </div>
                   </div>
                 </Link>
               </div>
             </div>
           </div>
-          <Footer />
         </>
       );
     }
 
-    // Student
-    return (
-      <>
-        <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-          <div className="container mx-auto px-6 py-16">
-            <div className="text-center mb-16">
-              <div className="inline-flex items-center justify-center mb-6">
-                <img 
-                  src="/images/orbit-logo.png" 
-                  alt="ORBIT Logo" 
-                  className="h-20 w-auto object-contain"
-                />
-              </div>
-              <h1 className="text-5xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-4 tracking-tight">ORBIT</h1>
-              <p className="text-xl text-gray-700 mb-6 font-light max-w-3xl mx-auto">
-                Integrated Library Facility & Computer Usage Management System
-              </p>
-              <div className="bg-white border border-gray-200 rounded-lg px-6 py-3 inline-block shadow-lg">
-                <p className="text-gray-900 font-medium">
-                  Welcome back, {user.firstName} {user.lastName}
-                </p>
-              </div>
-            </div>
-
-            <div className="max-w-4xl mx-auto grid md:grid-cols-2 gap-8">
-              <Link to="/orz" className="group">
-                <div className="bg-white border border-gray-200 rounded-2xl p-10 hover:bg-gray-50 cursor-pointer transition-all duration-300 transform hover:scale-105 hover:shadow-2xl shadow-lg">
-                  <div className="text-center">
-                    <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-purple-500 to-pink-600 rounded-full mb-6 shadow-xl group-hover:shadow-2xl transition-all duration-300">
-                      <Dock className="h-10 w-10 text-white" />
-                    </div>
-                    <h3 className="text-2xl font-bold mb-4 text-gray-900">ORZ Computer Usage</h3>
-                    <p className="text-gray-600 mb-6 leading-relaxed">
-                      Manage computer logins and usage in the Online Resource Zone
-                    </p>
-                    <div className="bg-gradient-to-r from-purple-600 to-pink-700 hover:from-purple-700 hover:to-pink-800 text-white font-bold py-3 px-6 rounded-lg transition-all duration-200 transform hover:scale-105 shadow-xl">
-                      Access System
-                    </div>
-                  </div>
-                </div>
-              </Link>
-
-              <Link to="/booking" className="group">
-                <div className="bg-white border border-gray-200 rounded-2xl p-10 hover:bg-gray-50 cursor-pointer transition-all duration-300 transform hover:scale-105 hover:shadow-2xl shadow-lg">
-                  <div className="text-center">
-                    <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-orange-500 to-red-600 rounded-full mb-6 shadow-xl group-hover:shadow-2xl transition-all duration-300">
-                      <Calendar className="h-10 w-10 text-white" />
-                    </div>
-                    <h3 className="text-2xl font-bold mb-4 text-gray-900">Facility Booking</h3>
-                    <p className="text-gray-600 mb-6 leading-relaxed">
-                      Book and manage library facilities and study rooms
-                    </p>
-                    <div className="bg-gradient-to-r from-orange-600 to-red-700 hover:from-orange-700 hover:to-red-800 text-white font-bold py-3 px-6 rounded-lg transition-all duration-200 transform hover:scale-105 shadow-xl">
-                      Book Facility
-                    </div>
-                  </div>
-                </div>
-              </Link>
-            </div>
-          </div>
-        </div>
-        <Footer />
-      </>
-    );
+  // Non-admins are redirected by the top-level effect; render nothing here
+  return null;
   }
 
   // Not logged in (Landing page)
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-      <div className="container mx-auto px-6 py-16">
-        <div className="text-center mb-16">
-          <div className="inline-flex items-center justify-center mb-8">
-            <img 
-              src="/images/orbit-logo.png" 
-              alt="ORBIT Logo" 
-              className="h-24 w-auto object-contain"
-            />
-          </div>
-          <h1 className="text-6xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-6 tracking-tight">ORBIT</h1>
-          <p className="text-3xl text-gray-700 mb-8 font-light">
-            Integrated Library Facility & Computer Usage Management System
-          </p>
-          <p className="text-xl text-gray-600 max-w-3xl mx-auto leading-relaxed">
-            Streamline your library experience with comprehensive facility booking and computer usage management
-          </p>
-        </div>
-
-        <div className="max-w-6xl mx-auto">
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 mb-16">
-            <div className="bg-white border border-gray-200 rounded-2xl p-8 text-center transform hover:scale-105 transition-all duration-300 hover:shadow-2xl shadow-lg">
-              <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-purple-500 to-pink-600 rounded-full mb-6 shadow-xl">
-                <Dock className="h-8 w-8 text-white" />
-              </div>
-              <h3 className="text-xl font-bold mb-4 text-gray-900">ORZ Computer Usage</h3>
-              <p className="text-gray-600 leading-relaxed">
-                Manage computer logins and usage in the Online Resource Zone
-              </p>
+    <div className="h-screen overflow-hidden bg-gradient-to-br from-pink-50 via-white to-rose-50">
+      <div className="h-full flex items-center justify-center">
+        <div className="w-full max-w-6xl px-6">
+          <div className="text-center mb-6 sm:mb-8 lg:mb-10">
+            <div className="inline-flex items-center justify-center mb-3 sm:mb-4 lg:mb-6">
+              <img 
+                src="/orbit-logo.png" 
+                alt="ORBIT Logo" 
+                className="h-18 sm:h-22 lg:h-24 w-auto object-contain"
+              />
             </div>
-
-            <div className="bg-white border border-gray-200 rounded-2xl p-8 text-center transform hover:scale-105 transition-all duration-300 hover:shadow-2xl shadow-lg">
-              <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-orange-500 to-red-600 rounded-full mb-6 shadow-xl">
-                <Calendar className="h-8 w-8 text-white" />
-              </div>
-              <h3 className="text-xl font-bold mb-4 text-gray-900">Facility Booking</h3>
-              <p className="text-gray-600 leading-relaxed">
-                Book and manage library facilities and study rooms
-              </p>
-            </div>
-
-            <div className="bg-white border border-gray-200 rounded-2xl p-8 text-center transform hover:scale-105 transition-all duration-300 hover:shadow-2xl shadow-lg">
-              <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-green-500 to-blue-600 rounded-full mb-6 shadow-xl">
-                <Users className="h-8 w-8 text-white" />
-              </div>
-              <h3 className="text-xl font-bold mb-4 text-gray-900">User-Friendly Interface</h3>
-              <p className="text-gray-600 leading-relaxed">
-                Easy-to-use system designed specifically for library users
-              </p>
-            </div>
-          </div>
-
-          <div className="text-center">
-            <button
-              onClick={handleGetStarted}
-              className="bg-gradient-to-r from-blue-600 to-purple-700 hover:from-blue-700 hover:to-purple-800 text-white font-bold text-xl px-12 py-4 rounded-xl transition-all duration-200 transform hover:scale-105 shadow-2xl hover:shadow-blue-500/30"
-            >
-              Get Started
-            </button>
-            <p className="text-gray-600 mt-4 text-sm font-medium">
-              Start managing your library experience with ORBIT
+            <p className="text-lg sm:text-xl lg:text-2xl text-gray-700 mb-3 sm:mb-4 font-light">
+              Integrated Library Facility Management System
             </p>
+            <p className="text-base sm:text-lg text-gray-600 max-w-3xl mx-auto leading-snug">
+              Easily find and reserve library rooms and facilities — manage your bookings in one place.
+            </p>
+          </div>
+
+          <div className="max-w-6xl mx-auto">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 sm:gap-8 mb-8 sm:mb-12 lg:mb-16">
+              <div className="bg-white border border-gray-200 rounded-2xl p-6 sm:p-8 text-center transform transition-all duration-300 hover:scale-105 hover:shadow-2xl shadow-lg">
+                <div className="inline-flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 bg-gradient-to-br from-pink-600 to-rose-700 rounded-full mb-4 sm:mb-6 shadow-xl">
+                  <Users className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
+                </div>
+                <h3 className="text-lg sm:text-xl font-bold mb-3 sm:mb-4 text-gray-900">User-Friendly Interface</h3>
+                <p className="text-sm sm:text-base text-gray-600 leading-relaxed">
+                  Easy-to-use system designed specifically for library users
+                </p>
+              </div>
+
+              <div className="bg-white border border-gray-200 rounded-2xl p-6 sm:p-8 text-center transform transition-all duration-300 hover:scale-105 hover:shadow-2xl shadow-lg mx-auto">
+                <div className="inline-flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 bg-gradient-to-br from-pink-500 to-rose-600 rounded-full mb-4 sm:mb-6 shadow-xl">
+                  <Calendar className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
+                </div>
+                <h3 className="text-lg sm:text-xl font-bold mb-3 sm:mb-4 text-gray-900">Facility Booking</h3>
+                <p className="text-sm sm:text-base text-gray-600 leading-relaxed">
+                  Quickly reserve rooms and manage bookings
+                </p>
+              </div>
+
+              <div className="bg-white border border-gray-200 rounded-2xl p-6 sm:p-8 text-center transform transition-all duration-300 hover:scale-105 hover:shadow-2xl shadow-lg">
+                <div className="inline-flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 bg-gradient-to-br from-pink-500 to-rose-600 rounded-full mb-4 sm:mb-6 shadow-xl">
+                  <Shield className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
+                </div>
+                <h3 className="text-lg sm:text-xl font-bold mb-3 sm:mb-4 text-gray-900">Secure UIC-only Access</h3>
+                <p className="text-sm sm:text-base text-gray-600 leading-relaxed">
+                  Sign in with your UIC account for authorized and secure access to system features.
+                </p>
+              </div>
+            </div>
+
+            <div className="text-center">
+              <button
+                onClick={handleGetStarted}
+                className="bg-gradient-to-r from-pink-600 to-rose-700 hover:from-pink-700 hover:to-rose-800 text-white font-bold text-lg sm:text-xl px-8 sm:px-12 py-3 sm:py-4 rounded-xl transition-all duration-200 transform hover:scale-105 shadow-2xl hover:shadow-pink-500/30"
+              >
+                Get Started
+              </button>
+              <p className="text-sm sm:text-base text-gray-600 mt-3 sm:mt-4 font-medium">
+                Sign in with your UIC account to access the system
+              </p>
+            </div>
           </div>
         </div>
       </div>
-      
-      <Footer />
     </div>
   );
 }

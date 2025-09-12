@@ -8,7 +8,6 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
-import DeveloperCredit from "@/components/DeveloperCredit";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import BanUserModal from "@/components/modals/BanUserModal";
 import UserEmailDisplay from "@/components/UserEmailDisplay";
@@ -37,7 +36,7 @@ import {
   MapPin,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { User, OrzSession, TimeExtensionRequest, FacilityBooking, SystemAlert, ActivityLog, Facility } from "../../../../shared/schema";
+import { User, FacilityBooking, SystemAlert, ActivityLog, Facility } from "../../../../shared/schema";
 
 // --- Type Definitions ---
 interface Stats {
@@ -85,33 +84,14 @@ export default function AdminDashboard() {
     enabled: !!user && user.role === "admin",
   });
 
-  const { 
-    data: activeSessions, 
-    isLoading: sessionsLoading, 
-    isError: sessionsError 
-  } = useQuery<OrzSession[]>({
-    queryKey: ["/api/admin/sessions"],
-    queryFn: async () => {
-      const response = await apiRequest("GET", "/api/admin/sessions");
-      return response.json();
-    },
-    refetchInterval: 5000, // Refetch every 5 seconds
-    enabled: !!user && user.role === "admin",
-  });
+  // ORZ sessions removed — provide safe defaults so admin dashboard still renders
+  const activeSessions: any[] = [];
+  const sessionsLoading = false;
+  const sessionsError = false;
 
-  const { 
-    data: endedSessions, 
-    isLoading: endedSessionsLoading, 
-    isError: endedSessionsError 
-  } = useQuery<OrzSession[]>({
-    queryKey: ["/api/admin/sessions/history"],
-    queryFn: async () => {
-      const response = await apiRequest("GET", "/api/admin/sessions/history");
-      return response.json();
-    },
-    refetchInterval: 10000, // Refetch every 10 seconds
-    enabled: !!user && user.role === "admin",
-  });
+  const endedSessions: any[] = [];
+  const endedSessionsLoading = false;
+  const endedSessionsError = false;
 
   const { 
     data: pendingBookings, 
@@ -127,22 +107,10 @@ export default function AdminDashboard() {
     enabled: !!user && user.role === "admin",
   });
 
-  const { 
-    data: pendingExtensions, 
-    isLoading: extensionsLoading, 
-    isError: extensionsError 
-  } = useQuery<TimeExtensionRequest[]>({
-    queryKey: ["/api/orz/time-extension/pending"],
-    queryFn: async () => {
-      const response = await apiRequest(
-        "GET",
-        "/api/orz/time-extension/pending"
-      );
-      return response.json();
-    },
-    refetchInterval: 10000, // Refetch every 10 seconds
-    enabled: !!user && user.role === "admin",
-  });
+  // Time extension feature removed — use empty list
+  const pendingExtensions: any[] = [];
+  const extensionsLoading = false;
+  const extensionsError = false;
 
   const { 
     data: alerts, 
@@ -297,47 +265,18 @@ export default function AdminDashboard() {
     },
   });
 
+  // Approve/deny extension mutations replaced with no-ops because ORZ was removed
   const approveExtensionMutation = useMutation({
-    mutationFn: async ({ requestId }: { requestId: string }) => {
-      const result = await apiRequest(
-        "POST",
-        `/api/orz/time-extension/${requestId}/approve`,
-        { adminResponse: "Approved" }
-      );
-      return result.json();
-    },
+    mutationFn: async () => ({}),
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["/api/orz/time-extension/pending"],
-      });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/activity"] });
-      toast({
-        title: "Extension Approved",
-        description: "The time extension has been approved.",
-        variant: "default",
-      });
     },
   });
 
   const denyExtensionMutation = useMutation({
-    mutationFn: async ({ requestId }: { requestId: string }) => {
-      const result = await apiRequest("POST", `/api/orz/time-extension/${requestId}/deny`, {
-        adminResponse: "Denied",
-      });
-      return result.json();
-    },
+    mutationFn: async () => ({}),
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["/api/orz/time-extension/pending"],
-      });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/activity"] });
-      toast({
-        title: "Extension Denied",
-        description: "The time extension has been denied.",
-        variant: "default",
-      });
     },
   });
 
@@ -486,7 +425,7 @@ export default function AdminDashboard() {
           {/* Development feature - promote to admin */}
           <button
             onClick={promoteToAdmin}
-            className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition-colors"
+            className="bg-pink-500 hover:bg-pink-600 text-white px-4 py-2 rounded-lg transition-colors"
           >
             🧪 Promote to Admin (Dev)
           </button>
@@ -500,7 +439,6 @@ export default function AdminDashboard() {
 
   const sidebarItems = [
     { id: "dashboard", label: "Overview", icon: BarChart3 },
-    { id: "orz-management", label: "Computer Station Management", icon: Dock },
     { id: "booking-management", label: "Facility Booking Management", icon: Calendar },
     { id: "user-management", label: "User Management", icon: Users },
     { id: "security", label: "Admin System Alerts", icon: Shield },
@@ -535,10 +473,8 @@ export default function AdminDashboard() {
     return facility?.name || `Unknown Facility (${facilityId})`;
   };
 
-  // Helper to determine computer station user status
-  const getOrzUserStatus = (userId: string) => {
-    return activeSessions?.some(session => session.userId === userId) ? "Active Computer Station User" : "";
-  };
+  // ORZ removed: no resource station user status
+  const getOrzUserStatus = (_userId: string) => "";
 
   // Helper to determine facility booking user status
   const getBookingUserStatus = (userId: string) => {
@@ -636,7 +572,7 @@ export default function AdminDashboard() {
   const formatAlertMessage = (message: string | null): string => {
     if (!message) return '';
     
-    // Handle session ID replacements for computer alerts
+    // Handle session ID replacements for alerts
     const uuidRegex = /Session ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/;
     const match = message.match(uuidRegex);
 
@@ -645,11 +581,11 @@ export default function AdminDashboard() {
       const session = [...(activeSessions || []), ...(endedSessions || [])].find(s => s.id === sessionId);
       if (session) {
         const userEmail = getUserEmail(session.userId);
-        return `The computer session for ${userEmail} was automatically logged out due to inactivity.`;
+        return `The session for ${userEmail} was automatically logged out due to inactivity.`;
       }
     }
 
-    // Handle "The computer session for this user was automatically logged out due to inactivity."
+    // Handle "The session for this user was automatically logged out due to inactivity."
     if (message.includes('The computer session for this user was automatically logged out due to inactivity')) {
       // Try to extract session ID from the original message or find a way to identify the user
       // For now, let's look for any session info in the message
@@ -898,7 +834,7 @@ export default function AdminDashboard() {
                   <p className="text-gray-600 mt-1">Monitor active sessions, time extensions, and completed sessions</p>
                 </div>
                 <div className="flex items-center gap-3">
-                  <div className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">
+                  <div className="bg-pink-100 text-pink-800 px-3 py-1 rounded-full text-sm font-medium">
                     {activeSessions?.length || 0} Active
                   </div>
                   <div className="bg-orange-100 text-orange-800 px-3 py-1 rounded-full text-sm font-medium">
@@ -934,12 +870,12 @@ export default function AdminDashboard() {
                       <div className="space-y-3">
                         {activeSessions
                           ?.slice(activeSessionsPage * itemsPerPage, (activeSessionsPage + 1) * itemsPerPage)
-                          .map((session: OrzSession) => (
-                          <div key={session.id} className="bg-white rounded-lg p-4 border border-gray-200 hover:border-blue-300 transition-colors duration-200">
+                          .map((session: any) => (
+                          <div key={session.id} className="bg-white rounded-lg p-4 border border-gray-200 hover:border-pink-200 transition-colors duration-200">
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-4">
-                                <div className="bg-blue-100 p-2 rounded-lg">
-                                  <Dock className="h-5 w-5 text-blue-600" />
+                                <div className="bg-pink-100 p-2 rounded-lg">
+                                  <Dock className="h-5 w-5 text-pink-600" />
                                 </div>
                                 <div>
                                   <h4 className="font-medium text-gray-900">
@@ -1015,7 +951,7 @@ export default function AdminDashboard() {
                       <div className="space-y-3">
                         {pendingExtensions
                           ?.slice(pendingExtensionsPage * itemsPerPage, (pendingExtensionsPage + 1) * itemsPerPage)
-                          .map((request: TimeExtensionRequest) => {
+                          .map((request: any) => {
                           const associatedSession = activeSessions?.find(
                             (session) => session.id === request.sessionId
                           );
@@ -1044,22 +980,14 @@ export default function AdminDashboard() {
                                   </div>
                                   <div className="flex items-center gap-2">
                                     <button
-                                      onClick={() =>
-                                        approveExtensionMutation.mutate({
-                                          requestId: request.id,
-                                        })
-                                      }
+                                      onClick={() => approveExtensionMutation.mutate(request.id)}
                                       className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors duration-200 flex items-center gap-1"
                                     >
                                       <CheckCircle className="h-4 w-4" />
                                       Approve
                                     </button>
                                     <button
-                                      onClick={() =>
-                                        denyExtensionMutation.mutate({
-                                          requestId: request.id,
-                                        })
-                                      }
+                                      onClick={() => denyExtensionMutation.mutate(request.id)}
                                       className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors duration-200 flex items-center gap-1"
                                     >
                                       <XCircle className="h-4 w-4" />
@@ -1121,7 +1049,7 @@ export default function AdminDashboard() {
                       <div className="space-y-3">
                         {endedSessions
                           ?.slice(endedSessionsPage * itemsPerPage, (endedSessionsPage + 1) * itemsPerPage)
-                          .map((session: OrzSession) => (
+                          .map((session: any) => (
                           <div key={session.id} className="bg-white rounded-lg p-4 border border-gray-200 hover:border-gray-300 transition-colors duration-200">
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-4">
@@ -1209,7 +1137,7 @@ export default function AdminDashboard() {
                   <div className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium">
                     {activeBookings?.length || 0} Active
                   </div>
-                  <div className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">
+                  <div className="bg-pink-100 text-pink-800 px-3 py-1 rounded-full text-sm font-medium">
                     {upcomingBookings?.length || 0} Upcoming
                   </div>
                   <div className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-medium">
@@ -1270,8 +1198,8 @@ export default function AdminDashboard() {
                                         <div className="flex items-center gap-1 cursor-help justify-end">
                                           {booking.purpose && booking.purpose.length > 30 ? (
                                             <>
-                                              <Eye className="h-3 w-3 text-blue-600" />
-                                              <span className="text-xs text-blue-600">View purpose</span>
+                                              <Eye className="h-3 w-3 text-pink-600" />
+                                              <span className="text-xs text-pink-600">View purpose</span>
                                             </>
                                           ) : (
                                             <div className="text-right">
@@ -1362,11 +1290,11 @@ export default function AdminDashboard() {
                         {upcomingBookings
                           ?.slice(upcomingBookingsPage * itemsPerPage, (upcomingBookingsPage + 1) * itemsPerPage)
                           .map((booking: FacilityBooking) => (
-                          <div key={booking.id} className="bg-white rounded-lg p-4 border border-gray-200 hover:border-blue-300 transition-colors duration-200">
+                          <div key={booking.id} className="bg-white rounded-lg p-4 border border-gray-200 hover:border-pink-200 transition-colors duration-200">
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-4">
-                                <div className="bg-blue-100 p-2 rounded-lg">
-                                  <Clock className="h-5 w-5 text-blue-600" />
+                                <div className="bg-pink-100 p-2 rounded-lg">
+                                  <Clock className="h-5 w-5 text-pink-600" />
                                 </div>
                                 <div className="flex-1">
                                   <h4 className="font-medium text-gray-900">{getUserEmail(booking.userId)}</h4>
@@ -1382,8 +1310,8 @@ export default function AdminDashboard() {
                                         <div className="flex items-center gap-1 cursor-help justify-end">
                                           {booking.purpose && booking.purpose.length > 30 ? (
                                             <>
-                                              <Eye className="h-3 w-3 text-blue-600" />
-                                              <span className="text-xs text-blue-600">View purpose</span>
+                                              <Eye className="h-3 w-3 text-pink-600" />
+                                              <span className="text-xs text-pink-600">View purpose</span>
                                             </>
                                           ) : (
                                             <div className="text-right">
@@ -1416,7 +1344,7 @@ export default function AdminDashboard() {
                                   <p className="text-sm font-medium text-gray-900">Ends</p>
                                   <p className="text-sm text-gray-600">{formatDateTime(booking.endTime)}</p>
                                 </div>
-                                <span className="px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                <span className="px-3 py-1 rounded-full text-xs font-medium bg-pink-100 text-pink-800">
                                   Scheduled
                                 </span>
                               </div>
@@ -1494,8 +1422,8 @@ export default function AdminDashboard() {
                                         <div className="flex items-center gap-1 cursor-help justify-end">
                                           {booking.purpose && booking.purpose.length > 30 ? (
                                             <>
-                                              <Eye className="h-3 w-3 text-blue-600" />
-                                              <span className="text-xs text-blue-600">View purpose</span>
+                                              <Eye className="h-3 w-3 text-pink-600" />
+                                              <span className="text-xs text-pink-600">View purpose</span>
                                             </>
                                           ) : (
                                             <div className="text-right">
@@ -1638,8 +1566,8 @@ export default function AdminDashboard() {
                                         <div className="flex items-center gap-1 cursor-help justify-end">
                                           {booking.purpose && booking.purpose.length > 30 ? (
                                             <>
-                                              <Eye className="h-3 w-3 text-blue-600" />
-                                              <span className="text-xs text-blue-600">View purpose</span>
+                                              <Eye className="h-3 w-3 text-pink-600" />
+                                              <span className="text-xs text-pink-600">View purpose</span>
                                             </>
                                           ) : (
                                             <div className="text-right">
@@ -2491,16 +2419,16 @@ export default function AdminDashboard() {
 
               <button
                 onClick={() => setSelectedView("booking-management")}
-                className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-all duration-200 hover:border-blue-300 text-left group"
+                className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-all duration-200 hover:border-pink-200 text-left group"
               >
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600 group-hover:text-blue-700">Active Bookings</p>
-                    <p className="text-3xl font-bold text-blue-600 mt-1">{activeBookings?.length || 0}</p>
+                    <p className="text-sm font-medium text-gray-600 group-hover:text-pink-700">Active Bookings</p>
+                    <p className="text-3xl font-bold text-pink-600 mt-1">{activeBookings?.length || 0}</p>
                     <p className="text-xs text-gray-500 mt-1">Currently in progress</p>
                   </div>
-                  <div className="bg-blue-100 p-3 rounded-full group-hover:bg-blue-200 transition-colors duration-200">
-                    <Calendar className="h-6 w-6 text-blue-600" />
+                  <div className="bg-pink-100 p-3 rounded-full group-hover:bg-pink-200 transition-colors duration-200">
+                    <Calendar className="h-6 w-6 text-pink-600" />
                   </div>
                 </div>
               </button>
@@ -2885,7 +2813,6 @@ export default function AdminDashboard() {
           }}
         />
       )}
-      <DeveloperCredit />
     </div>
   );
 }

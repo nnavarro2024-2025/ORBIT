@@ -9,7 +9,7 @@ import { supabase } from "@/lib/supabase";
 import Landing from "@/pages/Landing";
 import Login from "@/pages/Login";
 import BannedUser from "@/pages/BannedUser";
-import OrzDashboard from "@/pages/student/OrzDashboard";
+// ORZ feature removed
 import BookingDashboard from "@/pages/student/BookingDashboard";
 import AdminDashboard from "@/pages/admin/AdminDashboard";
 
@@ -42,7 +42,6 @@ function Router() {
     <>
       <Route path="/" component={Landing} />
       <Route path="/login/:subsystem?" component={Login} />
-      <Route path="/orz" component={() => <ProtectedRoute component={OrzDashboard} />} />
       <Route path="/booking" component={() => <ProtectedRoute component={BookingDashboard} />} />
       <Route path="/admin" component={() => <ProtectedRoute component={AdminDashboard} />} />
     </>

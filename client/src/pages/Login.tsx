@@ -3,7 +3,7 @@ import { useRoute } from "wouter";
 import { BookOpen, Dock, Calendar, Check } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/useAuth";
-import Footer from "@/components/Footer";
+
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
@@ -361,7 +361,7 @@ export default function Login() {
         </DialogContent>
       </Dialog>
       
-      <Footer />
+      
     </>
   );
 }

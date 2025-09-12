@@ -2,8 +2,9 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { randomUUID } from "crypto";
 import { storage } from "./storage";
+import { db } from "./db";
 import { setupAuth, isAuthenticated, isAuthenticatedAndActive } from "./supabaseAuth";
-import { sessionService } from "./services/sessionService";
+// ORZ session service removed
 import { emailService } from "./services/emailService";
 import { userService } from "./services/userService"; // Import the new userService
 import { supabaseAdmin } from "./supabaseAdmin";
@@ -11,12 +12,75 @@ import {
   insertFacilityBookingSchema,
   insertTimeExtensionRequestSchema,
   createFacilityBookingSchema,
+  facilityBookings,
 } from "../shared/schema";
+import { eq, and, or, gt, asc } from "drizzle-orm";
+
+// Library working hours validation
+function isWithinLibraryHours(date: Date): boolean {
+  const hours = date.getHours();
+  const minutes = date.getMinutes();
+  const timeInMinutes = hours * 60 + minutes;
+  
+  // 7:30 AM = 7 * 60 + 30 = 450 minutes
+  // 5:00 PM = 17 * 60 = 1020 minutes
+  const libraryOpenTime = 7 * 60 + 30; // 7:30 AM
+  const libraryCloseTime = 17 * 60; // 5:00 PM
+  
+  return timeInMinutes >= libraryOpenTime && timeInMinutes <= libraryCloseTime;
+}
+
+function formatLibraryHours(): string {
+  return "7:30 AM - 5:00 PM";
+}
 
   // =========================
   // 🧪 Create sample data for testing
   // =========================
   async function createSampleData() {
+    // Create test users in Supabase if they don't exist
+    try {
+      // Test regular user
+      const { data: testUser, error: testUserError } = await supabaseAdmin.auth.admin.createUser({
+        email: 'test@uic.edu.ph',
+        password: '123',
+        email_confirm: true,
+        user_metadata: {
+          name: 'Test User',
+          role: 'user'
+        }
+      });
+
+      if (testUserError && !testUserError.message.includes('already exists')) {
+        console.log('❌ Error creating test user:', testUserError.message);
+      } else if (!testUserError) {
+        console.log('✅ Test user created: test@uic.edu.ph / password: 123');
+      }
+
+      // Test admin user
+      const { data: adminUser, error: adminUserError } = await supabaseAdmin.auth.admin.createUser({
+        email: 'admin@uic.edu.ph', 
+        password: '123',
+        email_confirm: true,
+        user_metadata: {
+          name: 'Admin User',
+          role: 'admin'
+        },
+        app_metadata: {
+          role: 'admin'
+        }
+      });
+
+      if (adminUserError && !adminUserError.message.includes('already exists')) {
+        console.log('❌ Error creating admin user:', adminUserError.message);
+      } else if (!adminUserError) {
+        console.log('✅ Admin user created: admin@uic.edu.ph / password: 123');
+      }
+
+    } catch (error) {
+      console.log('⚠️ Test users creation skipped (may already exist)');
+    }
+
     // Create sample computer stations
     const existingStations = await storage.getAllComputerStations();
     
@@ -38,7 +102,7 @@ import {
     if (facilities.length === 0) {
       const sampleFacilities = [
         { name: "Collaraborative Learning Room 1", description: "Quiet study space with 4 tables", capacity: 8 },
-        { name: "Collaraborative Learning Room 2", description: "Computer lab with 10 workstations", capacity: 10 },
+        { name: "Collaraborative Learning Room 2", description: "Computer lab with workstations", capacity: 8 },
         { name: "Board Room", description: "Conference room for group meetings", capacity: 12 },
       ];
       
@@ -117,8 +181,8 @@ async function updateLastActivity(req: any, res: any, next: any) {
       const activeOrzSession = await storage.getActiveOrzSession(userId);
 
       if (activeOrzSession) {
-        // Only update activity if an ORZ session exists.
-        await sessionService.updateActivity(userId);
+        // ORZ feature removed - previously updated session activity here.
+        // No-op now.
       }
     } catch (error) {
       if (process.env.NODE_ENV === 'development') {
@@ -236,13 +300,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const existingUser = await storage.getUser(user.id);
 
+      // Check Supabase app_metadata for admin role, fallback to existing role or default to student
+      let userRole: "admin" | "student" | "faculty" = "student";
+      if (user.app_metadata?.role === "admin") {
+        userRole = "admin";
+      } else if (existingUser?.role) {
+        userRole = existingUser.role;
+      }
+
       const userRecord = {
         id: user.id,
         email: user.email!,
         firstName: user.user_metadata?.first_name || "",
         lastName: user.user_metadata?.last_name || "",
         profileImageUrl: user.user_metadata?.avatar_url || "",
-        role: existingUser?.role || "student", // Preserve role
+        role: userRole, // Use the determined role
         status: existingUser?.status || "active",
         createdAt: existingUser?.createdAt || new Date(user.created_at),
         updatedAt: new Date(),
@@ -313,81 +385,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // -------------------------
-  // 💻 ORZ SESSION ROUTES
-  // -------------------------
-  app.post("/api/orz/sessions", isAuthenticated, updateLastActivity, async (req: any, res) => {
-    try {
-      const session = await sessionService.startSession(req.user.claims.sub, req.body.stationId);
-      res.json(session);
-    } catch (error) {
-      res.status(400).json({ message: (error as Error).message });
-    }
-  });
-
-  app.get("/api/orz/sessions/active", isAuthenticatedAndActive, async (req: any, res) => {
-    try {
-      const session = await storage.getActiveOrzSession(req.user.claims.sub);
-      // If no active session, return null or an empty object, not a 401
-      if (!session) {
-        return res.json(null); // Or { activeSession: false }
-      }
-      res.json(session);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch active session" });
-    }
-  });
-
-  app.post("/api/orz/sessions/:sessionId/activity", isAuthenticated, requireActiveOrzSession, updateLastActivity, async (req: any, res) => {
-    try {
-      // This route is specifically for ORZ session activity, so it should still use sessionId
-      // The general updateLastActivity middleware handles overall user activity
-      await sessionService.updateActivity(req.user.claims.sub); // Changed to use userId
-      res.json({ success: true });
-    }  catch (error) {
-      res.status(500).json({ message: "Failed to update activity" });
-    }
-  });
-
-  app.post("/api/orz/sessions/:sessionId/end", isAuthenticated, requireActiveOrzSession, updateLastActivity, async (req: any, res) => {
-    try {
-      await sessionService.endSession(req.params.sessionId);
-      res.json({ success: true });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to end session" });
-    }
-  });
-
-  app.get("/api/orz/sessions/history", isAuthenticatedAndActive, async (req: any, res) => {
-    try {
-      const sessions = await storage.getOrzSessionsByUser(req.user.claims.sub);
-      res.json(sessions);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch session history" });
-    }
-  });
-
-  app.get("/api/orz/stations", isAuthenticated, async (req: any, res) => {
-    try {
-      const stations = await storage.getAllComputerStations();
-      res.json(stations);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch computer stations" });
-    }
-  });
-
-  // -------------------------
-  // ⏱️ TIME EXTENSION
-  // -------------------------
-  app.post("/api/orz/time-extension", isAuthenticated, requireActiveOrzSession, updateLastActivity, async (req: any, res) => {
-    try {
-      const data = insertTimeExtensionRequestSchema.parse({ ...req.body, userId: req.user.claims.sub });
-      const request = await storage.createTimeExtensionRequest(data);
-      res.json(request);
-    } catch (error) {
-      res.status(400).json({ message: (error as Error).message });
-    }
-  });
+  // ORZ session and time-extension endpoints removed
 
   // -------------------------
   // 🏢 FACILITY BOOKINGS
@@ -402,6 +400,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userId,
       });
 
+      // Validate library working hours
+      if (!isWithinLibraryHours(data.startTime)) {
+        return res.status(400).json({ 
+          message: `Start time must be within library working hours (${formatLibraryHours()})` 
+        });
+      }
+
+      if (!isWithinLibraryHours(data.endTime)) {
+        return res.status(400).json({ 
+          message: `End time must be within library working hours (${formatLibraryHours()})` 
+        });
+      }
+
+      // Check if user already has overlapping bookings (prevent duplicates)
+      const userOverlappingBookings = await storage.checkUserOverlappingBookings(
+        userId,
+        data.startTime,
+        data.endTime
+      );
+
+      if (userOverlappingBookings.length > 0) {
+        const overlapping = userOverlappingBookings[0];
+        return res.status(409).json({ 
+          message: `You already have a booking during this time period. Existing booking: ${new Date(overlapping.startTime).toLocaleString()} - ${new Date(overlapping.endTime).toLocaleString()}. Please cancel your existing booking first or choose a different time.`,
+          existingBooking: {
+            id: overlapping.id,
+            startTime: overlapping.startTime,
+            endTime: overlapping.endTime,
+            facilityId: overlapping.facilityId,
+            status: overlapping.status
+          }
+        });
+      }
+
+      // Check if user already has any active booking for this facility (prevent facility spam)
+      const userFacilityBookings = await storage.checkUserFacilityBookings(
+        userId,
+        data.facilityId
+      );
+
+      if (userFacilityBookings.length > 0) {
+        const existingBooking = userFacilityBookings[0];
+        return res.status(409).json({ 
+          message: `You already have an active booking for this facility. Please cancel your existing booking first before making a new request for the same facility. Existing booking: ${new Date(existingBooking.startTime).toLocaleString()} - ${new Date(existingBooking.endTime).toLocaleString()}`,
+          existingBooking: {
+            id: existingBooking.id,
+            startTime: existingBooking.startTime,
+            endTime: existingBooking.endTime,
+            facilityId: existingBooking.facilityId,
+            status: existingBooking.status
+          }
+        });
+      }
+
       // Check if facility is available for booking
       const facility = await storage.getFacility(data.facilityId);
       if (!facility) {
@@ -410,6 +462,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       if (!facility.isActive) {
         return res.status(400).json({ message: "This facility is currently unavailable for booking. Please select another facility." });
+      }
+
+      // Check if number of participants exceeds facility capacity
+      if (data.participants > facility.capacity) {
+        return res.status(400).json({ 
+          message: `Number of participants (${data.participants}) exceeds facility capacity (${facility.capacity}). Please reduce the number of participants or choose a larger facility.`,
+          facilityCapacity: facility.capacity,
+          requestedParticipants: data.participants
+        });
+      }
+
+      // Check for time conflicts with existing bookings
+      const conflictingBookings = await storage.checkBookingConflicts(
+        data.facilityId,
+        data.startTime,
+        data.endTime
+      );
+
+      if (conflictingBookings.length > 0) {
+        return res.status(409).json({ 
+          message: "This time slot is already booked for the selected facility. Please choose a different time or facility.",
+          conflictingBookings: conflictingBookings.map(booking => ({
+            startTime: booking.startTime,
+            endTime: booking.endTime,
+            status: booking.status
+          }))
+        });
       }
 
       const booking = await storage.createFacilityBooking(data);
@@ -447,6 +526,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { bookingId } = req.params;
       const { purpose, startTime, endTime, facilityId } = req.body;
+      const userId = req.user.claims.sub;
 
       // Basic validation for proposed changes
       if (!purpose || !startTime || !endTime) {
@@ -461,6 +541,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid start or end time format." });
       }
 
+      // Validate library working hours
+      if (!isWithinLibraryHours(parsedStartTime)) {
+        return res.status(400).json({ 
+          message: `Start time must be within library working hours (${formatLibraryHours()})` 
+        });
+      }
+
+      if (!isWithinLibraryHours(parsedEndTime)) {
+        return res.status(400).json({ 
+          message: `End time must be within library working hours (${formatLibraryHours()})` 
+        });
+      }
+
+      // Check if user has overlapping bookings (excluding current booking)
+      const userOverlappingBookings = await storage.checkUserOverlappingBookings(
+        userId,
+        parsedStartTime,
+        parsedEndTime,
+        bookingId
+      );
+
+      if (userOverlappingBookings.length > 0) {
+        const overlapping = userOverlappingBookings[0];
+        return res.status(409).json({ 
+          message: `You already have another booking during this time period. Existing booking: ${new Date(overlapping.startTime).toLocaleString()} - ${new Date(overlapping.endTime).toLocaleString()}. Please choose a different time.`,
+          existingBooking: {
+            id: overlapping.id,
+            startTime: overlapping.startTime,
+            endTime: overlapping.endTime,
+            facilityId: overlapping.facilityId,
+            status: overlapping.status
+          }
+        });
+      }
+
+      // Check if user already has any active booking for this facility (excluding current booking)
+      const userFacilityBookings = await storage.checkUserFacilityBookings(
+        userId,
+        parseInt(facilityId),
+        bookingId
+      );
+
+      if (userFacilityBookings.length > 0) {
+        const existingBooking = userFacilityBookings[0];
+        return res.status(409).json({ 
+          message: `You already have an active booking for this facility. Please cancel your existing booking first before making another request for the same facility. Existing booking: ${new Date(existingBooking.startTime).toLocaleString()} - ${new Date(existingBooking.endTime).toLocaleString()}`,
+          existingBooking: {
+            id: existingBooking.id,
+            startTime: existingBooking.startTime,
+            endTime: existingBooking.endTime,
+            facilityId: existingBooking.facilityId,
+            status: existingBooking.status
+          }
+        });
+      }
+
+      // Check for time conflicts with existing bookings (excluding the current booking)
+      const conflictingBookings = await storage.checkBookingConflicts(
+        parseInt(facilityId),
+        parsedStartTime,
+        parsedEndTime,
+        bookingId
+      );
+
+      if (conflictingBookings.length > 0) {
+        return res.status(409).json({ 
+          message: "This time slot is already booked for the selected facility. Please choose a different time.",
+          conflictingBookings: conflictingBookings.map(booking => ({
+            startTime: booking.startTime,
+            endTime: booking.endTime,
+            status: booking.status
+          }))
+        });
+      }
+
       await storage.updateFacilityBooking(bookingId, {
         purpose,
         facilityId: parseInt(facilityId), // Parse facilityId to integer
@@ -473,6 +628,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error updating booking:", error);
       res.status(500).json({ message: "Failed to update booking." });
+    }
+  });
+
+  // Get facility booking status (conflicts and current bookings)
+  app.get("/api/facilities/:facilityId/bookings", isAuthenticatedAndActive, async (req: any, res) => {
+    try {
+      const { facilityId } = req.params;
+      const now = new Date();
+      
+      // Get all active bookings for this facility
+      const activeBookings = await db.select().from(facilityBookings).where(
+        and(
+          eq(facilityBookings.facilityId, parseInt(facilityId)),
+          or(
+            eq(facilityBookings.status, "approved"),
+            eq(facilityBookings.status, "pending")
+          ),
+          gt(facilityBookings.endTime, now) // Only future or current bookings
+        )
+      ).orderBy(asc(facilityBookings.startTime));
+
+      res.json(activeBookings);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch facility bookings" });
+    }
+  });
+
+  // NEW: Public endpoint to get all approved facility bookings (for availability checking)
+  app.get("/api/bookings/all", isAuthenticatedAndActive, async (req: any, res) => {
+    try {
+      const now = new Date();
+      
+      // Get all approved bookings that are current or future
+      // Only return essential information for privacy
+      const bookings = await db.select({
+        id: facilityBookings.id,
+        facilityId: facilityBookings.facilityId,
+        startTime: facilityBookings.startTime,
+        endTime: facilityBookings.endTime,
+        status: facilityBookings.status,
+        createdAt: facilityBookings.createdAt
+      }).from(facilityBookings).where(
+        and(
+          or(
+            eq(facilityBookings.status, "approved"),
+            eq(facilityBookings.status, "pending")
+          ),
+          gt(facilityBookings.endTime, now) // Only current and future bookings
+        )
+      ).orderBy(asc(facilityBookings.startTime));
+
+      res.json(bookings);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch facility bookings" });
     }
   });
 
@@ -738,7 +947,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Extend the actual session
       
-      await sessionService.extendSession(timeExtensionRequest.sessionId, timeExtensionRequest.requestedMinutes);
+  // ORZ feature removed - previously extended session duration here.
+  // No-op now.
       
 
       // Fetch the associated ORZ session

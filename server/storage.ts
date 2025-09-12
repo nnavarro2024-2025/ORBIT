@@ -1,7 +1,7 @@
 import {
   users,
-  orzSessions,
-  timeExtensionRequests,
+  // orzSessions, // ORZ removed
+  // timeExtensionRequests, // ORZ removed
   facilityBookings,
   facilities,
   computerStations,
@@ -9,10 +9,7 @@ import {
   activityLogs,
   type User,
   type UpsertUser,
-  type OrzSession,
-  type InsertOrzSession,
-  type TimeExtensionRequest,
-  type InsertTimeExtensionRequest,
+  // ORZ types removed
   type FacilityBooking,
   type InsertFacilityBooking,
   type Facility,
@@ -24,7 +21,7 @@ import {
   userStatusEnum,
 } from "../shared/schema";
 import { db } from "./db";
-import { eq, and, desc, asc, gte, lte, count, sql, isNotNull } from "drizzle-orm";
+import { eq, and, desc, asc, gte, lte, count, sql, isNotNull, or, lt, gt, ne } from "drizzle-orm";
 import { z } from "zod";
 
 export interface IStorage {
@@ -43,23 +40,9 @@ export interface IStorage {
   updateUserRole(userId: string, role: typeof userRoleEnum.enumValues[number]): Promise<void>;
   updateUser(userId: string, updates: Partial<User>): Promise<User>;
   
-  // ORZ Session operations
-  createOrzSession(session: InsertOrzSession): Promise<OrzSession>;
-  getActiveOrzSession(userId: string): Promise<OrzSession | undefined>;
-  updateOrzSession(sessionId: string, updates: Partial<OrzSession>): Promise<void>;
-  endOrzSession(sessionId: string): Promise<void>;
-  endAllUserSessions(userId: string): Promise<void>;
-  getOrzSessionsByUser(userId: string): Promise<OrzSession[]>;
-  getAllActiveSessions(): Promise<OrzSession[]>;
-  getAllEndedSessions(): Promise<OrzSession[]>;
-  getOrzSession(id: string): Promise<OrzSession | undefined>; // Added this line
+  // ORZ Session operations removed
   
-  // Time extension operations
-  createTimeExtensionRequest(request: InsertTimeExtensionRequest): Promise<TimeExtensionRequest>;
-  getTimeExtensionRequest(id: string): Promise<TimeExtensionRequest | undefined>;
-  updateTimeExtensionRequest(id: string, updates: Partial<TimeExtensionRequest>): Promise<void>;
-  getPendingTimeExtensionRequests(): Promise<TimeExtensionRequest[]>;
-  deletePendingTimeExtensionRequestsBySession(sessionId: string): Promise<void>;
+  // Time extension operations removed
   
   // Computer station operations
   getAllComputerStations(): Promise<ComputerStation[]>;
@@ -80,6 +63,7 @@ export interface IStorage {
   
   
   getFacilityBookingsByUser(userId: string): Promise<FacilityBooking[]>;
+  checkUserOverlappingBookings(userId: string, startTime: Date, endTime: Date, excludeBookingId?: string): Promise<FacilityBooking[]>;
   cancelAllUserBookings(userId: string, adminId: string, reason: string): Promise<number>;
   getPendingFacilityBookings(): Promise<FacilityBooking[]>;
   getFacilityBookingsByDateRange(start: Date, end: Date): Promise<FacilityBooking[]>;
@@ -94,7 +78,7 @@ export interface IStorage {
   getActivityLogs(limit?: number): Promise<ActivityLog[]>;
   
   // Statistics
-  getOrzUsageStats(): Promise<any>;
+  getOrzUsageStats(): Promise<any>; // returns empty data now that ORZ is removed
   getFacilityUsageStats(): Promise<any>;
   getAdminDashboardStats(): Promise<any>;
 }
@@ -162,72 +146,67 @@ class DatabaseStorage implements IStorage {
     return updatedUser;
   }
 
-  // ORZ Session operations
-  async createOrzSession(session: InsertOrzSession): Promise<OrzSession> {
-    const [newSession] = await db.insert(orzSessions).values(session as any).returning();
-    return newSession;
+  // ORZ Session operations removed - provide safe fallbacks
+  async createOrzSession(session: any): Promise<any> {
+    // ORZ feature removed; return a placeholder object
+    return null as any;
   }
 
-  async getActiveOrzSession(userId: string): Promise<OrzSession | undefined> {
-    const [session] = await db
-      .select()
-      .from(orzSessions)
-      .where(and(eq(orzSessions.userId, userId), eq(orzSessions.isActive, true)));
-    return session;
+  async getActiveOrzSession(userId: string): Promise<any | undefined> {
+    // ORZ feature removed; always return undefined
+    return undefined;
   }
 
-  async updateOrzSession(sessionId: string, updates: Partial<OrzSession>): Promise<void> {
-    await db.update(orzSessions).set(updates).where(eq(orzSessions.id, sessionId));
+  async updateOrzSession(sessionId: string, updates: Partial<any>): Promise<void> {
+    // No-op
+    return;
   }
 
   async endOrzSession(sessionId: string): Promise<void> {
-    await db.update(orzSessions).set({ isActive: false, endTime: new Date() }).where(eq(orzSessions.id, sessionId));
+    // No-op
+    return;
   }
 
   async endAllUserSessions(userId: string): Promise<void> {
-    await db.update(orzSessions)
-      .set({ isActive: false, endTime: new Date() })
-      .where(and(eq(orzSessions.userId, userId), eq(orzSessions.isActive, true)));
+    // No-op
+    return;
   }
 
-  async getOrzSessionsByUser(userId: string): Promise<OrzSession[]> {
-    return db.select().from(orzSessions).where(eq(orzSessions.userId, userId)).orderBy(desc(orzSessions.createdAt));
+  async getOrzSessionsByUser(userId: string): Promise<any[]> {
+    return [];
   }
 
-  async getAllActiveSessions(): Promise<OrzSession[]> {
-    return db.select().from(orzSessions).where(eq(orzSessions.isActive, true)).orderBy(desc(orzSessions.createdAt));
+  async getAllActiveSessions(): Promise<any[]> {
+    return [];
   }
 
-  async getAllEndedSessions(): Promise<OrzSession[]> {
-    return db.select().from(orzSessions).where(eq(orzSessions.isActive, false)).orderBy(desc(orzSessions.createdAt));
+  async getAllEndedSessions(): Promise<any[]> {
+    return [];
   }
 
-  async getOrzSession(id: string): Promise<OrzSession | undefined> {
-    const [session] = await db.select().from(orzSessions).where(eq(orzSessions.id, id));
-    return session;
+  async getOrzSession(id: string): Promise<any | undefined> {
+    return undefined;
   }
 
-  // Time extension operations
-  async createTimeExtensionRequest(request: InsertTimeExtensionRequest): Promise<TimeExtensionRequest> {
-    const [newRequest] = await db.insert(timeExtensionRequests).values(request as any).returning();
-    return newRequest;
+  // Time extension operations removed - return safe defaults
+  async createTimeExtensionRequest(request: any): Promise<any> {
+    return null as any;
   }
 
-  async getTimeExtensionRequest(id: string): Promise<TimeExtensionRequest | undefined> {
-    const [request] = await db.select().from(timeExtensionRequests).where(eq(timeExtensionRequests.id, id));
-    return request;
+  async getTimeExtensionRequest(id: string): Promise<any | undefined> {
+    return undefined;
   }
 
-  async updateTimeExtensionRequest(id: string, updates: Partial<TimeExtensionRequest>): Promise<void> {
-    await db.update(timeExtensionRequests).set(updates).where(eq(timeExtensionRequests.id, id));
+  async updateTimeExtensionRequest(id: string, updates: Partial<any>): Promise<void> {
+    return;
   }
 
-  async getPendingTimeExtensionRequests(): Promise<TimeExtensionRequest[]> {
-    return db.select().from(timeExtensionRequests).where(eq(timeExtensionRequests.status, "pending")).orderBy(desc(timeExtensionRequests.createdAt));
+  async getPendingTimeExtensionRequests(): Promise<any[]> {
+    return [];
   }
 
   async deletePendingTimeExtensionRequestsBySession(sessionId: string): Promise<void> {
-    await db.delete(timeExtensionRequests).where(and(eq(timeExtensionRequests.sessionId, sessionId), eq(timeExtensionRequests.status, "pending")));
+    return;
   }
 
   // Computer station operations
@@ -285,6 +264,115 @@ class DatabaseStorage implements IStorage {
 
   async getFacilityBookingsByUser(userId: string): Promise<FacilityBooking[]> {
     return db.select().from(facilityBookings).where(eq(facilityBookings.userId, userId)).orderBy(desc(facilityBookings.createdAt));
+  }
+
+  async checkBookingConflicts(facilityId: number, startTime: Date, endTime: Date, excludeBookingId?: string): Promise<FacilityBooking[]> {
+    let query = db.select().from(facilityBookings)
+      .where(
+        and(
+          eq(facilityBookings.facilityId, facilityId),
+          // Only check approved bookings that are not cancelled
+          or(
+            eq(facilityBookings.status, "approved"),
+            eq(facilityBookings.status, "pending")
+          ),
+          // Check for time overlap: new booking overlaps with existing if:
+          // new start < existing end AND new end > existing start
+          and(
+            lt(facilityBookings.startTime, endTime),
+            gt(facilityBookings.endTime, startTime)
+          )
+        )
+      );
+
+    if (excludeBookingId) {
+      query = db.select().from(facilityBookings).where(
+        and(
+          eq(facilityBookings.facilityId, facilityId),
+          or(
+            eq(facilityBookings.status, "approved"),
+            eq(facilityBookings.status, "pending")
+          ),
+          and(
+            lt(facilityBookings.startTime, endTime),
+            gt(facilityBookings.endTime, startTime)
+          ),
+          ne(facilityBookings.id, excludeBookingId)
+        )
+      );
+    }
+
+    return query;
+  }
+
+  async checkUserOverlappingBookings(userId: string, startTime: Date, endTime: Date, excludeBookingId?: string): Promise<FacilityBooking[]> {
+    let query = db.select().from(facilityBookings)
+      .where(
+        and(
+          eq(facilityBookings.userId, userId),
+          // Only check active bookings (approved or pending)
+          or(
+            eq(facilityBookings.status, "approved"),
+            eq(facilityBookings.status, "pending")
+          ),
+          // Check for time overlap: new booking overlaps with existing if:
+          // new start < existing end AND new end > existing start
+          and(
+            lt(facilityBookings.startTime, endTime),
+            gt(facilityBookings.endTime, startTime)
+          )
+        )
+      );
+
+    if (excludeBookingId) {
+      query = db.select().from(facilityBookings).where(
+        and(
+          eq(facilityBookings.userId, userId),
+          or(
+            eq(facilityBookings.status, "approved"),
+            eq(facilityBookings.status, "pending")
+          ),
+          and(
+            lt(facilityBookings.startTime, endTime),
+            gt(facilityBookings.endTime, startTime)
+          ),
+          ne(facilityBookings.id, excludeBookingId)
+        )
+      );
+    }
+
+    return query;
+  }
+
+  async checkUserFacilityBookings(userId: string, facilityId: number, excludeBookingId?: string): Promise<FacilityBooking[]> {
+    let query = db.select().from(facilityBookings)
+      .where(
+        and(
+          eq(facilityBookings.userId, userId),
+          eq(facilityBookings.facilityId, facilityId),
+          // Only check active bookings (approved or pending)
+          or(
+            eq(facilityBookings.status, "approved"),
+            eq(facilityBookings.status, "pending")
+          )
+        )
+      );
+
+    if (excludeBookingId) {
+      query = db.select().from(facilityBookings).where(
+        and(
+          eq(facilityBookings.userId, userId),
+          eq(facilityBookings.facilityId, facilityId),
+          or(
+            eq(facilityBookings.status, "approved"),
+            eq(facilityBookings.status, "pending")
+          ),
+          ne(facilityBookings.id, excludeBookingId)
+        )
+      );
+    }
+
+    return query;
   }
 
   async cancelAllUserBookings(userId: string, adminId: string, reason: string): Promise<number> {
@@ -356,10 +444,8 @@ class DatabaseStorage implements IStorage {
 
   async getAdminDashboardStats(): Promise<any> {
     try {
-      const [activeUsers] = await db
-        .select({ count: count() })
-        .from(orzSessions)
-        .where(eq(orzSessions.isActive, true));
+  // ORZ removed -> no active ORZ session metric. Default to 0.
+  const activeUsers = { count: 0 } as any;
 
       const [pendingBookings] = await db
         .select({ count: count() })

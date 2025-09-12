@@ -1,9 +1,21 @@
 import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Settings, User as UserIcon, ArrowLeft } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogTrigger,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogAction,
+  AlertDialogCancel,
+} from "@/components/ui/alert-dialog";
+import { supabase } from "@/lib/supabase";
 import {
   Sheet,
   SheetContent,
@@ -12,7 +24,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/components/ui/accordion";
+// Removed accordion import - settings UI simplified and handled inline
 
 interface ProfileModalProps {
   isOpen: boolean;
@@ -24,11 +36,13 @@ const DEFAULT_PROFILE_IMAGE = "https://placehold.co/150x150/E0E0E0/FFFFFF/png?te
 export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
   const { user } = useAuth();
   const { toast } = useToast();
-  const queryClient = useQueryClient();
 
   const [firstName, setFirstName] = useState(user?.firstName || "");
   const [lastName, setLastName] = useState(user?.lastName || "");
   const [profileImageUrlInput, setProfileImageUrlInput] = useState(user?.profileImageUrl || "");
+  const [localImageFile, setLocalImageFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(user?.profileImageUrl || null);
+  // removed emailNotifications state; settings simplified per user request
   const [showSettings, setShowSettings] = useState(false); // State to toggle between profile info and settings
 
   const updateProfileMutation = useMutation({
@@ -36,9 +50,13 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
     onSuccess: () => {
       toast({
         title: "Profile Updated",
-        description: "Your profile information has been updated.",
+        description: "Your profile information has been updated. Please refresh the page to see changes.",
       });
-      queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+      // Close the modal after successful update
+  onClose();
+  // Refresh the page so useAuth re-fetches the updated profile
+  // This is the simplest approach to ensure the UI shows the new avatar immediately
+  window.location.reload();
     },
     onError: (error: any) => {
       toast({
@@ -51,13 +69,18 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
 
   // Removed updateUserSettingsMutation as it was only for theme/emailNotifications
 
-  const handleUpdateProfile = () => {
-    updateProfileMutation.mutate({ firstName, lastName, profileImageUrl: profileImageUrlInput });
+  // Upload/update logic is now executed directly in the confirmation dialog action to avoid duplicate handlers
+
+  const handleFileChange = (file?: File) => {
+    if (!file) return;
+    setLocalImageFile(file);
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    // clear manual URL input when uploading a file
+    setProfileImageUrlInput('');
   };
 
-  const handleToggleSettings = () => {
-    setShowSettings(!showSettings);
-  };
+  const handleToggleSettings = () => setShowSettings(!showSettings);
 
   return (
     <Sheet open={isOpen} onOpenChange={onClose}>
@@ -94,11 +117,12 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
               {!showSettings ? (
                 <div className="flex flex-col items-center space-y-6 p-6 bg-gray-50 rounded-xl border border-gray-200">
                   <Avatar className="h-24 w-24 border-4 border-blue-200 shadow-lg">
-                    <AvatarImage src={user.profileImageUrl || DEFAULT_PROFILE_IMAGE} alt="User Avatar" />
-                    <AvatarFallback className="text-4xl bg-blue-500 text-white font-bold">
+                    <AvatarImage src={previewUrl || user.profileImageUrl || DEFAULT_PROFILE_IMAGE} alt="User Avatar" />
+                    <AvatarFallback className="text-4xl bg-pink-500 text-white font-bold">
                       {`${user.firstName?.[0] || ''}${user.lastName?.[0] || ''}`.toUpperCase() || 'U'}
                     </AvatarFallback>
                   </Avatar>
+                  {/* Profile preview - uploads are available in User Settings only */}
                   <div className="text-center space-y-2">
                     <h3 className="text-2xl font-bold text-gray-900">
                       {user.firstName || user.lastName
@@ -112,7 +136,7 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
                   <div className="w-full space-y-3 pt-4 border-t border-gray-300">
                     <div className="flex justify-between items-center text-sm">
                       <span className="font-semibold text-gray-700">Role:</span>
-                      <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full font-medium">{user.role || 'N/A'}</span>
+                      <span className="bg-pink-100 text-pink-800 px-3 py-1 rounded-full font-medium">{user.role || 'N/A'}</span>
                     </div>
                     <div className="flex justify-between items-center text-sm">
                       <span className="font-semibold text-gray-700">Member Since:</span>
@@ -122,56 +146,107 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
                 </div>
               ) : (
                 <div className="space-y-6 w-full mt-6">
-                  {/* Profile Information */}
-                  <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
-                    <Accordion type="multiple" className="w-full">
-                      <AccordionItem value="profile-information" className="border-none">
-                        <AccordionTrigger className="px-6 py-4 text-lg font-bold text-gray-900 hover:bg-gray-50 rounded-t-xl">
-                          Profile Information
-                        </AccordionTrigger>
-                        <AccordionContent className="px-6 pb-6">
-                          <div className="space-y-4">
-                            <div>
-                              <label className="block text-sm font-semibold text-gray-700 mb-2">First Name</label>
-                              <input
-                                type="text"
-                                value={firstName}
-                                onChange={(e) => setFirstName(e.target.value)}
-                                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                                placeholder="Enter your first name"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-sm font-semibold text-gray-700 mb-2">Last Name</label>
-                              <input
-                                type="text"
-                                value={lastName}
-                                onChange={(e) => setLastName(e.target.value)}
-                                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                                placeholder="Enter your last name"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-sm font-semibold text-gray-700 mb-2">Profile Image URL</label>
-                              <input
-                                type="text"
-                                value={profileImageUrlInput}
-                                onChange={(e) => setProfileImageUrlInput(e.target.value)}
-                                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                                placeholder="Enter profile image URL"
-                              />
-                            </div>
-                            <button
-                              onClick={handleUpdateProfile}
-                              disabled={updateProfileMutation.isPending}
-                              className="w-full px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+                    <div className="flex flex-col items-center space-y-4">
+                      <Avatar className="h-24 w-24 border-4 border-blue-200 shadow-lg">
+                        <AvatarImage src={previewUrl || user.profileImageUrl || DEFAULT_PROFILE_IMAGE} alt="User Avatar" />
+                        <AvatarFallback className="text-4xl bg-pink-500 text-white font-bold">
+                          {`${user.firstName?.[0] || ''}${user.lastName?.[0] || ''}`.toUpperCase() || 'U'}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex items-center space-x-2 pt-2">
+                        <label className="cursor-pointer inline-flex items-center px-3 py-1 bg-white border rounded text-sm">
+                          Upload
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="sr-only"
+                            onChange={(e) => handleFileChange(e.target.files?.[0])}
+                          />
+                        </label>
+                        <button
+                          className="px-3 py-1 bg-white border rounded text-sm"
+                          onClick={() => { setPreviewUrl(user?.profileImageUrl || null); setLocalImageFile(null); setProfileImageUrlInput(''); }}
+                        >
+                          Reset
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 space-y-4">
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">First Name</label>
+                        <input
+                          type="text"
+                          value={firstName}
+                          onChange={(e) => setFirstName(e.target.value)}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                          placeholder="Enter your first name"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">Last Name</label>
+                        <input
+                          type="text"
+                          value={lastName}
+                          onChange={(e) => setLastName(e.target.value)}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                          placeholder="Enter your last name"
+                        />
+                      </div>
+                      {/* Removed direct Profile Image URL input to avoid duplication; upload via file input only */}
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <button
+                            disabled={updateProfileMutation.isPending}
+                            className="w-full px-6 py-3 bg-pink-600 hover:bg-pink-700 text-white font-semibold rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {updateProfileMutation.isPending ? "Updating..." : "Update Profile"}
+                          </button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Confirm Profile Update</AlertDialogTitle>
+                            <AlertDialogDescription>Are you sure you want to save these changes to your profile?</AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction
+                              onClick={() => {
+                                // Execute upload and update logic
+                                const uploadAndUpdate = async () => {
+                                  try {
+                                    let finalUrl = profileImageUrlInput || undefined;
+                                    if (localImageFile) {
+                                      const fileExt = localImageFile.name.split('.').pop();
+                                      const filePath = `avatars/${user.id}-${Date.now()}.${fileExt}`;
+                                      const { error } = await supabase.storage.from('avatars').upload(filePath, localImageFile, { upsert: true });
+                                      if (error) {
+                                        console.error('Supabase storage upload error:', error);
+                                        // Provide a clearer, actionable message for common bucket issues
+                                        const msg = (error.message || '').toLowerCase();
+                                        if (msg.includes('bucket') || msg.includes('not found') || msg.includes('does not exist')) {
+                                          throw new Error(`Bucket 'avatars' not found. Please create the 'avatars' bucket in your Supabase project or update the bucket name in client/src/components/modals/ProfileModal.tsx. (Supabase error: ${error.message || JSON.stringify(error)})`);
+                                        }
+                                        throw new Error(error.message || 'Failed to upload avatar');
+                                      }
+                                      const { data: publicData } = supabase.storage.from('avatars').getPublicUrl(filePath);
+                                      finalUrl = publicData.publicUrl;
+                                    }
+                                    await updateProfileMutation.mutateAsync({ firstName, lastName, profileImageUrl: finalUrl });
+                                  } catch (err: any) {
+                                    toast({ title: 'Upload Failed', description: err.message || 'Could not upload image', variant: 'destructive' });
+                                  }
+                                };
+                                uploadAndUpdate();
+                              }}
                             >
-                              {updateProfileMutation.isPending ? "Updating..." : "Update Profile"}
-                            </button>
-                          </div>
-                        </AccordionContent>
-                      </AccordionItem>
-                    </Accordion>
+                              Confirm
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
                   </div>
                 </div>
               )}
