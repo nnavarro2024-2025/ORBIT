@@ -5,8 +5,10 @@ import { useLocation } from "wouter";
 
 type SidebarItem = {
   id: string;
-  label: string;
-  icon: React.ElementType;
+  label?: string;
+  icon?: React.ElementType;
+  // optional type to support dividers or groups
+  type?: 'item' | 'divider';
 };
 
 type SidebarProps = {
@@ -44,21 +46,31 @@ export default function Sidebar({ items, activeItem, onItemClick }: SidebarProps
       </div>
       <nav className="flex-grow">
         <ul>
-          {items.map((item) => (
-            <li key={item.id}>
-              <button
-                onClick={() => onItemClick(item.id)}
-                className={`w-full text-left flex items-center px-4 py-3 rounded-lg transition-colors mb-1 ${
-                  activeItem === item.id
-                    ? "bg-pink-50 text-pink-700 font-semibold"
-                    : "hover:bg-pink-50"
-                }`}
-              >
-                <item.icon className="h-5 w-5 mr-3" />
-                <span>{item.label}</span>
-              </button>
-            </li>
-          ))}
+          {items.map((item) => {
+            if (item.type === 'divider') {
+              return (
+                <li key={item.id} className="my-3" aria-hidden>
+                  <div className="h-px bg-gray-100 mx-4" />
+                </li>
+              );
+            }
+
+            return (
+              <li key={item.id}>
+                <button
+                  onClick={() => onItemClick(item.id)}
+                  className={`w-full text-left flex items-center px-4 py-3 rounded-lg transition-colors mb-1 ${
+                    activeItem === item.id
+                      ? "bg-pink-50 text-pink-700 font-semibold"
+                      : "hover:bg-pink-50"
+                  }`}
+                >
+                  {item.icon && <item.icon className="h-5 w-5 mr-3" />}
+                  <span>{item.label}</span>
+                </button>
+              </li>
+            );
+          })}
         </ul>
       </nav>
       <div className="mt-4 pt-4 border-t">

@@ -33,11 +33,7 @@ export default function Landing() {
                   />
                 </div>
                 <p className="text-lg sm:text-xl lg:text-2xl text-gray-700 mb-3 sm:mb-4 font-light">Integrated Library Facility Management System</p>
-                <div className="bg-white border border-gray-200 rounded-lg px-4 sm:px-6 py-2 sm:py-3 inline-block shadow-lg">
-                  <p className="text-sm sm:text-base text-gray-900 font-medium">
-                    Welcome back, Test User
-                  </p>
-                </div>
+                {/* Removed admin 'Welcome back' greeting as requested */}
               </div>
 
               <div className="max-w-6xl mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">

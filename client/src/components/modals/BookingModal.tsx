@@ -61,6 +61,8 @@ const getFacilityDescriptionByName = (name?: string) => {
   return 'Comfortable study space suitable for individual or small group use.';
 };
 
+const PREVIEW_LIMIT = 10; // upper bound for small previews inside modals
+
 // Custom Number Input with Controls
 interface NumberInputWithControlsProps {
   value: number;
@@ -627,7 +629,7 @@ export default function BookingModal({
                           </p>
                           {status.type === 'upcoming' && (status as any).bookings && (
                             <div className="mt-1 space-y-1">
-                              {(status as any).bookings.slice(0, 3).map((booking: any, index: number) => (
+                              {(status as any).bookings.slice(0, Math.min(PREVIEW_LIMIT, (status as any).bookings.length)).map((booking: any, index: number) => (
                                 <p key={index} className="text-xs text-yellow-700">
                                   {new Date(booking.startTime).toLocaleDateString('en-US', {
                                     weekday: 'short',
@@ -644,9 +646,9 @@ export default function BookingModal({
                                   })}
                                 </p>
                               ))}
-                              {(status as any).bookings.length > 3 && (
+                              {(status as any).bookings.length > PREVIEW_LIMIT && (
                                 <p className="text-xs text-yellow-600">
-                                  +{(status as any).bookings.length - 3} more booking{(status as any).bookings.length - 3 > 1 ? 's' : ''}
+                                  +{(status as any).bookings.length - PREVIEW_LIMIT} more booking{(status as any).bookings.length - PREVIEW_LIMIT > 1 ? 's' : ''}
                                 </p>
                               )}
                             </div>
@@ -675,7 +677,7 @@ export default function BookingModal({
                             You cannot create additional requests for the same facility.
                           </p>
                           <div className="space-y-1">
-                            {userBookings.slice(0, 2).map((booking: any, index: number) => (
+                            {userBookings.slice(0, Math.min(PREVIEW_LIMIT, userBookings.length)).map((booking: any, index: number) => (
                               <div key={index} className="bg-orange-100 rounded p-2">
                                 <p className="text-xs text-orange-800">
                                   {booking.status === "approved" ? "✅ Approved" : "⏳ Pending"} • {new Date(booking.startTime).toLocaleDateString('en-US', {
@@ -694,9 +696,9 @@ export default function BookingModal({
                                 </p>
                               </div>
                             ))}
-                            {userBookings.length > 2 && (
+                            {userBookings.length > PREVIEW_LIMIT && (
                               <p className="text-xs text-orange-600">
-                                +{userBookings.length - 2} more booking{userBookings.length - 2 > 1 ? 's' : ''}
+                                +{userBookings.length - PREVIEW_LIMIT} more booking{userBookings.length - PREVIEW_LIMIT > 1 ? 's' : ''}
                               </p>
                             )}
                           </div>
@@ -887,7 +889,7 @@ export default function BookingModal({
                         Your selected time overlaps with {conflicts.length} existing booking{conflicts.length > 1 ? 's' : ''}:
                       </p>
                       <div className="space-y-2">
-                        {conflicts.slice(0, 2).map((booking: any, index: number) => (
+                        {conflicts.slice(0, Math.min(PREVIEW_LIMIT, conflicts.length)).map((booking: any, index: number) => (
                           <div key={index} className="bg-red-100 rounded p-2">
                             <p className="text-xs text-red-800">
                               {new Date(booking.startTime).toLocaleDateString('en-US', {
@@ -906,9 +908,9 @@ export default function BookingModal({
                             </p>
                           </div>
                         ))}
-                        {conflicts.length > 2 && (
+                        {conflicts.length > PREVIEW_LIMIT && (
                           <p className="text-xs text-red-600">
-                            +{conflicts.length - 2} more conflict{conflicts.length - 2 > 1 ? 's' : ''}
+                            +{conflicts.length - PREVIEW_LIMIT} more conflict{conflicts.length - PREVIEW_LIMIT > 1 ? 's' : ''}
                           </p>
                         )}
                       </div>

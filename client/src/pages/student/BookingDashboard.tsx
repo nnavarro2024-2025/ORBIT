@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest } from "@/lib/queryClient";
@@ -7,8 +7,9 @@ import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
 import BookingModal from "@/components/modals/BookingModal";
 import EditBookingModal from "@/components/modals/EditBookingModal";
-import { Plus, Calendar, History, Settings, Home, ChevronLeft, ChevronRight, Eye, Users, MapPin, AlertTriangle } from "lucide-react";
+import { Plus, Calendar, Home, ChevronLeft, ChevronRight, Eye, Users, MapPin, AlertTriangle, BarChart3, Settings } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useLocation } from 'wouter';
 import {
   Dialog,
   DialogContent,
@@ -20,7 +21,8 @@ import { Button } from "@/components/ui/button";
 import { format } from 'date-fns';
 
 export default function BookingDashboard() {
-  useAuth(); // Keep auth hook for authentication check
+  const { user } = useAuth(); // Keep auth hook for authentication check and role
+  const [, setLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [showBookingModal, setShowBookingModal] = useState(false);
@@ -28,6 +30,49 @@ export default function BookingDashboard() {
   const [showEditBookingModal, setShowEditBookingModal] = useState(false);
   const [editingBooking, setEditingBooking] = useState<any>(null);
   const [selectedView, setSelectedView] = useState("dashboard");
+  // Sidebar items (include admin-only links)
+  let sidebarItems: any[] = [];
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { makeSidebar } = require('@/lib/sidebarItems');
+    const lastItem = (user && user.role === 'admin') ? { id: 'admin-dashboard', label: 'Admin Dashboard', icon: BarChart3 } : undefined;
+    sidebarItems = makeSidebar(!!(user && user.role === 'admin'), lastItem, 'booking');
+  } catch (e) {
+    // fallback - only add divider and admin link if the current user is an admin
+    sidebarItems = [
+      { id: 'dashboard', label: 'Dashboard', icon: Home },
+      { id: 'new-booking', label: 'New Booking', icon: BarChart3 },
+      { id: 'my-bookings', label: 'My Bookings', icon: Calendar },
+      { id: 'available-rooms', label: 'Available Rooms', icon: Home },
+      { id: 'settings', label: 'Booking Settings', icon: Settings },
+    ];
+    if (user && user.role === 'admin') {
+      sidebarItems.push({ id: 'divider-1', type: 'divider' });
+      sidebarItems.push({ id: 'admin-dashboard', label: 'Admin Dashboard', icon: BarChart3 });
+    }
+  }
+
+  // set initial selected view from URL hash (e.g. /booking#dashboard)
+  useEffect(() => {
+    const hash = window.location.hash?.replace('#', '');
+    if (hash) setSelectedView(hash);
+  }, []);
+
+  const handleSidebarClick = (id: string) => {
+    if (id === 'admin-dashboard') {
+      setLocation('/admin');
+      return;
+    }
+    if (id === 'booking-dashboard') {
+      setLocation('/booking#dashboard');
+      return;
+    }
+    if (id === 'new-booking') {
+      openBookingModal();
+      return;
+    }
+    setSelectedView(id);
+  };
   const [myBookingsPage, setMyBookingsPage] = useState(0);
   const itemsPerPage = 10;
   
@@ -314,21 +359,7 @@ export default function BookingDashboard() {
     return currentTimeInMinutes < libraryOpenTime || currentTimeInMinutes > libraryCloseTime;
   };
 
-  const sidebarItems = [
-    { id: "dashboard", label: "Dashboard", icon: Home },
-    { id: "new-booking", label: "New Booking", icon: Plus },
-    { id: "my-bookings", label: "My Bookings", icon: History },
-    { id: "available-rooms", label: "Available Rooms", icon: Calendar },
-    { id: "booking-settings", label: "Booking Settings", icon: Settings }, // New item for booking settings
-  ];
-
-  const handleSidebarClick = (itemId: string) => {
-    if (itemId === "new-booking") {
-      openBookingModal();
-    } else {
-      setSelectedView(itemId);
-    }
-  };
+  // ...existing code for sidebar is defined earlier
 
   const getStats = () => {
     const now = new Date();
@@ -964,7 +995,7 @@ export default function BookingDashboard() {
               >
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600 group-hover:text-pink-700">Upcoming Bookings</p>
+                    <p className="text-sm font-medium text-gray-600 group-hover:text-pink-700">Pending Bookings</p>
                     <p className="text-3xl font-bold text-pink-600 mt-1">{stats.upcoming}</p>
                     <p className="text-xs text-gray-500 mt-1">Approved and scheduled</p>
                   </div>
@@ -980,7 +1011,7 @@ export default function BookingDashboard() {
               >
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600 group-hover:text-orange-700">Pending Requests</p>
+                    <p className="text-sm font-medium text-gray-600 group-hover:text-orange-700">Booking Requests</p>
                     <p className="text-3xl font-bold text-orange-600 mt-1">{stats.pending}</p>
                     <p className="text-xs text-gray-500 mt-1">Awaiting approval</p>
                   </div>
@@ -996,8 +1027,15 @@ export default function BookingDashboard() {
             {/* Available Rooms */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-8">
               <div className="flex items-center justify-between mb-6">
-                <div>
+                <div className="flex items-center gap-3">
                   <h3 className="text-lg font-bold text-gray-900">Available Rooms</h3>
+                  <button
+                    onClick={() => openBookingModal()}
+                    className="inline-flex items-center gap-2 px-2 py-1 bg-pink-600 hover:bg-pink-700 text-white rounded text-sm"
+                  >
+                    <Plus className="h-4 w-4" />
+                    New Booking
+                  </button>
                   <div className="text-gray-600 text-sm mt-1">
                     {facilities.length === 0 ? (
                       "No facilities found"
@@ -1062,7 +1100,7 @@ export default function BookingDashboard() {
               })() ? null : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {facilities
-                    .slice(0, 6)
+                    .slice(0, itemsPerPage)
                     .map((facility) => {
                     const bookingStatus = getFacilityBookingStatus(facility.id);
                     const isAvailableForBooking = facility.isActive && bookingStatus.status === "available";
@@ -1206,7 +1244,7 @@ export default function BookingDashboard() {
               ) : (
                 <div className="space-y-4">
                   {userBookings
-                    .slice(0, 5)
+                    .slice(0, itemsPerPage)
                     .map((booking) => (
                     <div key={booking.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors duration-200">
                       <div className="flex items-center gap-4 flex-1">
