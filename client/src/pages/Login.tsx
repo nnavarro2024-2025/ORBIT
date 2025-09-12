@@ -22,11 +22,12 @@ export default function Login() {
   const [confirmAction, setConfirmAction] = useState<"manual" | "oauth" | null>(null);
 
   useEffect(() => {
-    // When authentication completes, redirect regular users to the booking dashboard.
-    // Admins should be able to choose their destination, so we don't auto-redirect them.
+    // Redirect authenticated users to the appropriate dashboard.
     if (isAuthenticated && user) {
       try {
-        if (user.role !== "admin") {
+        if (user.role === "admin") {
+          window.location.href = "/admin";
+        } else {
           window.location.href = "/booking";
         }
       } catch (e) {
