@@ -340,6 +340,17 @@ export default function BookingDashboard() {
       new Date(booking.endTime) > now
     );
 
+    // If facility has been set to inactive by an admin, always show unavailable regardless of library hours
+    const facility = facilities.find((f) => f.id === facilityId);
+    if (facility && facility.isActive === false) {
+      return {
+        status: "unavailable",
+        label: "Unavailable",
+        booking: null,
+        badgeClass: "bg-red-100 text-red-800"
+      };
+    }
+
     // Check if facility is currently booked (active session)
     const currentBooking = facilityBookings.find(booking => {
       const start = new Date(booking.startTime);
@@ -356,7 +367,7 @@ export default function BookingDashboard() {
       };
     }
 
-    // If outside library hours, mark as unavailable
+    // If outside library hours, mark as closed (unless already caught by admin-unavailable above)
     if (!isWithinLibraryHours) {
       return {
         status: "closed",
@@ -468,11 +479,14 @@ export default function BookingDashboard() {
   const getFacilityDescriptionByName = (name?: string) => {
     if (!name) return '';
     const lower = name.toLowerCase();
-    if (lower.includes('collaborative learning room 1') || lower.includes('collaborative learning room 2')) {
-      return 'Collaborative space designed for group study, discussions, and project work.';
+    if (lower.includes('collaborative learning room 1')) {
+      return 'Quiet study space with 4 tables';
+    }
+    if (lower.includes('collaborative learning room 2')) {
+      return 'Computer lab with workstations';
     }
     if (lower.includes('board room') || lower.includes('boardroom')) {
-      return 'Formal boardroom suitable for meetings, presentations, and committee sessions.';
+      return 'Conference room for group meetings';
     }
     return 'Comfortable study space for individual or small group use.';
   };
@@ -1119,13 +1133,15 @@ export default function BookingDashboard() {
               <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-3">
                   <h3 className="text-lg font-bold text-gray-900">Available Rooms</h3>
-                  <button
-                    onClick={() => openBookingModal()}
-                    className="inline-flex items-center gap-2 px-2 py-1 bg-pink-600 hover:bg-pink-700 text-white rounded text-sm"
-                  >
-                    <Plus className="h-4 w-4" />
-                    New Booking
-                  </button>
+                  {!isLibraryClosedNow() && (
+                    <button
+                      onClick={() => openBookingModal()}
+                      className="inline-flex items-center gap-2 px-2 py-1 bg-pink-600 hover:bg-pink-700 text-white rounded text-sm"
+                    >
+                      <Plus className="h-4 w-4" />
+                      New Booking
+                    </button>
+                  )}
                   <div className="text-gray-600 text-sm mt-1">
                     {facilities.length === 0 ? (
                       "No facilities found"
@@ -1231,7 +1247,7 @@ export default function BookingDashboard() {
                           {facility.name}
                         </h4>
                         <p className={`text-sm mb-2 line-clamp-2 ${isAvailableForBooking ? 'text-gray-600' : 'text-gray-400'}`}>
-                          {getFacilityDescriptionByName(facility.name)}
+                          {facility.isActive ? getFacilityDescriptionByName(facility.name) : (facility.unavailableReason || 'This room has been marked unavailable by staff.')}
                         </p>
 
                         {/* Show booking details for non-available rooms */}

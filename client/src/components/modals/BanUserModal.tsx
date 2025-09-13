@@ -30,18 +30,22 @@ export default function BanUserModal({
   const [customDate, setCustomDate] = useState("");
 
   const handleSubmit = () => {
-    if (user) {
-      if (duration === "custom") {
-        onBanUser(user.id, reason, duration, customDate);
-      } else {
-        onBanUser(user.id, reason, duration);
-      }
-      // Reset form
-      setReason("");
-      setDuration("permanent");
-      setCustomDate("");
-      onClose();
+    if (!user) return;
+
+    // Basic client-side validation to prevent server 400s
+    if (!reason || reason.trim().length === 0) return;
+    if (duration === "custom" && !customDate) return;
+
+    if (duration === "custom") {
+      onBanUser(user.id, reason, duration, customDate);
+    } else {
+      onBanUser(user.id, reason, duration);
     }
+    // Reset form
+    setReason("");
+    setDuration("permanent");
+    setCustomDate("");
+    onClose();
   };
 
   const handleClose = () => {
@@ -104,7 +108,12 @@ export default function BanUserModal({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={handleClose}>Cancel</Button>
-          <Button onClick={handleSubmit}>Ban User</Button>
+          <Button
+            onClick={handleSubmit}
+            disabled={!reason || (duration === 'custom' && !customDate)}
+          >
+            Ban User
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -4,6 +4,7 @@ import type { Request, Response, NextFunction } from "express";
 import path from "path";
 import { createServer, Server } from "http";
 import { registerRoutes } from "./routes"; // your routes
+import { pool } from "./db";
 
 async function startServer() {
   // Dynamic imports for CommonJS modules in ES module environment
@@ -29,6 +30,19 @@ async function startServer() {
   // Body parsing middleware
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
+
+  // Apply small, safe schema fixes in development to avoid startup crashes
+  // This is intentionally conservative: it only adds columns if they don't exist
+  // and is gated to development to avoid surprising production schema changes.
+  if (process.env.NODE_ENV === "development") {
+    try {
+      await pool.query(`ALTER TABLE facilities ADD COLUMN IF NOT EXISTS unavailable_reason TEXT;`);
+      await pool.query(`ALTER TABLE facility_bookings ADD COLUMN IF NOT EXISTS equipment JSONB;`);
+      console.log("✅ Applied development-safe schema updates (unavailable_reason, equipment)");
+    } catch (err) {
+      console.error("⚠️ Failed to apply development-safe schema updates:", err);
+    }
+  }
 
   // Register your API routes
   const server: Server = await registerRoutes(app);

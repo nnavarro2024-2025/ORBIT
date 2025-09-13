@@ -11,6 +11,7 @@ import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import BanUserModal from "@/components/modals/BanUserModal";
+import UnavailableReasonModal from "@/components/modals/UnavailableReasonModal";
 import UserEmailDisplay from "@/components/UserEmailDisplay";
 import {
   Shield,
@@ -156,10 +157,23 @@ export default function AdminDashboard() {
   // Modal state
   const [isBanUserModalOpen, setIsBanUserModalOpen] = useState(false);
   const [userToBan, setUserToBan] = useState<User | null>(null);
+  const [isUnavailableModalOpen, setIsUnavailableModalOpen] = useState(false);
+  const [facilityForUnavailable, setFacilityForUnavailable] = useState<any | null>(null);
 
   // Wire real data using react-query and the project's apiRequest helper
   useAuth(); // ensure user is authenticated
-  useToast();
+  const { toast } = useToast();
+
+  // Helper to determine if library is currently closed (same hours as booking validation)
+  const isLibraryClosedNow = () => {
+    const now = new Date();
+    const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
+    const currentTimeInMinutes = currentHour * 60 + currentMinute;
+    const libraryOpenTime = 7 * 60 + 30; // 7:30 AM
+    const libraryCloseTime = 17 * 60; // 5:00 PM
+    return currentTimeInMinutes < libraryOpenTime || currentTimeInMinutes > libraryCloseTime;
+  };
   const queryClient = useQueryClient();
 
   // Admin stats
@@ -298,8 +312,12 @@ export default function AdminDashboard() {
   });
 
   const banUserMutation = useMutation({
-    mutationFn: async ({ userId, reason }: any) => {
-      const res = await apiRequest('POST', `/api/admin/users/${userId}/ban`, { reason });
+    mutationFn: async ({ userId, reason, duration, customDate }: any) => {
+      // duration is required by the server (permanent | 7days | 30days | custom)
+      const payload: any = { reason, duration };
+      if (duration === 'custom' && customDate) payload.customDate = customDate;
+
+      const res = await apiRequest('POST', `/api/admin/users/${userId}/ban`, payload);
       return res.json?.();
     },
     onSuccess: () => {
@@ -322,8 +340,11 @@ export default function AdminDashboard() {
   });
 
   const toggleFacilityAvailabilityMutation = useMutation({
-    mutationFn: async ({ facilityId, available }: any) => {
-      const res = await apiRequest('PUT', `/api/admin/facilities/${facilityId}/availability`, { available });
+    mutationFn: async ({ facilityId, available, reason }: any) => {
+      // The server expects `isActive` boolean in the payload. Include optional reason when disabling.
+      const payload: any = { isActive: available };
+      if (!available && reason) payload.reason = reason;
+      const res = await apiRequest('PUT', `/api/admin/facilities/${facilityId}/availability`, payload);
       return res.json?.();
     },
     onSuccess: () => {
@@ -354,8 +375,36 @@ export default function AdminDashboard() {
   const bookingsError = !!(allBookingsError || pendingBookingsError);
 
   // Helper to toggle facility availability using the mutation
-  const toggleFacilityAvailability = async (facilityId: any, available: boolean) => {
-    toggleFacilityAvailabilityMutation.mutate({ facilityId, available });
+  const toggleFacilityAvailability = async (facility: any | number, available: boolean) => {
+    // Accept either facility object or facility id. We want the object to build a prefilled reason.
+    let facilityObj: any | undefined = undefined;
+    if (typeof facility === 'object') facilityObj = facility;
+    else {
+      // try to resolve from facilities list
+      facilityObj = facilities?.find((f: any) => f.id === facility);
+    }
+
+    // If making unavailable, prompt for a reason so it can be shown to users. Prefill with a sensible default.
+    let reason: string | undefined = undefined;
+    if (!available) {
+      // Do not allow making unavailable during open library hours — avoid booking conflicts
+      if (!isLibraryClosedNow()) {
+        toast({
+          title: 'Cannot set unavailable now',
+          description: 'Facilities can only be marked unavailable when the library is closed to avoid conflicts with active bookings. Please disable after hours or cancel active bookings first.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      // open unavailable reason modal instead of prompt
+      setFacilityForUnavailable(facilityObj ?? { id: facility });
+      setIsUnavailableModalOpen(true);
+      return;
+    }
+
+    const facilityId = facilityObj?.id ?? facility;
+    toggleFacilityAvailabilityMutation.mutate({ facilityId, available, reason });
   };
 
   // Icon aliases used in this file
@@ -528,6 +577,13 @@ export default function AdminDashboard() {
       .replace(/\(ID: [0-9a-f-]+\)/g, '')
       .replace(/\(ID removed\)/g, '')
       .trim();
+  };
+
+  const handleUnavailableConfirm = (reason?: string) => {
+    if (!facilityForUnavailable) return;
+    toggleFacilityAvailabilityMutation.mutate({ facilityId: facilityForUnavailable.id, available: false, reason });
+    setFacilityForUnavailable(null);
+    setIsUnavailableModalOpen(false);
   };
 
   // Small presentational helpers to standardize card headers and empty states
@@ -1721,7 +1777,7 @@ export default function AdminDashboard() {
                                   {facility.isActive ? 'Available' : 'Unavailable'}
                                 </span>
                                 <button
-                                  onClick={() => toggleFacilityAvailability(facility.id, !facility.isActive)}
+                                  onClick={() => toggleFacilityAvailability(facility, !facility.isActive)}
                                   disabled={toggleFacilityAvailabilityMutation.isPending}
                                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
                                     facility.isActive
@@ -1987,17 +2043,22 @@ export default function AdminDashboard() {
         </div>
         <div className="flex-1 p-8">{renderContent()}</div>
       </div>
-    {userToBan && (
-        <BanUserModal
-          isOpen={isBanUserModalOpen}
-          onClose={() => setIsBanUserModalOpen(false)}
-          user={userToBan}
-          onBanUser={(userId, reason, duration, customDate) => {
-            banUserMutation.mutate({ userId, reason, duration, customDate });
-            setIsBanUserModalOpen(false);
-          }}
-        />
-      )}
+      <BanUserModal
+        isOpen={isBanUserModalOpen}
+        onClose={() => setIsBanUserModalOpen(false)}
+        user={userToBan}
+        onBanUser={(userId, reason, duration, customDate) => {
+          banUserMutation.mutate({ userId, reason, duration, customDate });
+          setIsBanUserModalOpen(false);
+        }}
+      />
+
+      <UnavailableReasonModal
+        isOpen={isUnavailableModalOpen}
+        onClose={() => { setIsUnavailableModalOpen(false); setFacilityForUnavailable(null); }}
+        facility={facilityForUnavailable}
+        onConfirm={handleUnavailableConfirm}
+      />
     </div>
   );
 }

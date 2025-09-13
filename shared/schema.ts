@@ -72,6 +72,7 @@ export const facilities = pgTable("facilities", {
   capacity: integer("capacity").notNull(),
   imageUrl: varchar("image_url"),
   isActive: boolean("is_active").default(true).notNull(),
+  unavailableReason: text("unavailable_reason"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -84,6 +85,7 @@ export const facilityBookings = pgTable("facility_bookings", {
   endTime: timestamp("end_time").notNull(),
   purpose: text("purpose").notNull(),
   participants: integer("participants").notNull(),
+  equipment: jsonb("equipment"),
   status: varchar("status").default("pending").notNull(), // pending, approved, denied, cancelled
   adminId: varchar("admin_id").references(() => users.id),
   adminResponse: text("admin_response"),
@@ -188,6 +190,7 @@ export const insertFacilityBookingSchema = z.object({
   endTime: z.date(),
   purpose: z.string(),
   participants: z.number().positive(),
+  equipment: z.any().optional(),
   status: z.enum(["pending", "approved", "denied", "cancelled"]).default("pending"),
   adminId: z.string().optional(),
   adminResponse: z.string().optional(),

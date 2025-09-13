@@ -448,6 +448,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      // Validate same calendar day: start and end must fall on the same date (no multi-day bookings)
+      const startDate = new Date(data.startTime);
+      const endDate = new Date(data.endTime);
+      if (startDate.getFullYear() !== endDate.getFullYear() || startDate.getMonth() !== endDate.getMonth() || startDate.getDate() !== endDate.getDate()) {
+        return res.status(400).json({ message: 'Bookings must start and end on the same calendar day. For multi-day events please create separate bookings for each day.' });
+      }
+
       // Check if user already has overlapping bookings (prevent duplicates)
       const userOverlappingBookings = await storage.checkUserOverlappingBookings(
         userId,
@@ -622,6 +629,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ 
           message: `End time must be within library working hours (${formatLibraryHours()})` 
         });
+      }
+
+      // Validate same calendar day for updates as well
+      if (parsedStartTime.getFullYear() !== parsedEndTime.getFullYear() || parsedStartTime.getMonth() !== parsedEndTime.getMonth() || parsedStartTime.getDate() !== parsedEndTime.getDate()) {
+        return res.status(400).json({ message: 'Bookings must start and end on the same calendar day. Please split multi-day bookings into separate requests.' });
       }
 
       // Check if user has overlapping bookings (excluding current booking)
@@ -1572,7 +1584,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/admin/facilities/:facilityId/availability", isAuthenticated, requireAdmin, async (req: any, res) => {
     try {
       const { facilityId } = req.params;
-      const { isActive } = req.body;
+  const { isActive, reason } = req.body;
 
       if (typeof isActive !== 'boolean') {
         return res.status(400).json({ message: "isActive must be a boolean value." });
@@ -1583,7 +1595,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Facility not found." });
       }
 
-      await storage.updateFacility(parseInt(facilityId), { isActive });
+  // Persist isActive and optional reason (clear reason when enabling)
+      // If trying to make unavailable, prevent during library open hours to avoid conflicts with active bookings
+      if (!isActive) {
+        const now = new Date();
+        const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
+        const libraryOpenTime = 7 * 60 + 30;
+        const libraryCloseTime = 17 * 60;
+        const isLibraryClosed = currentTimeInMinutes < libraryOpenTime || currentTimeInMinutes > libraryCloseTime;
+        if (!isLibraryClosed) {
+          return res.status(400).json({ message: 'Cannot mark facility unavailable during library open hours. Please perform this action after hours.' });
+        }
+      }
+
+      await storage.updateFacility(parseInt(facilityId), { isActive, unavailableReason: isActive ? null : reason || null });
 
       // Get admin user data for logging
       const adminUser = await storage.getUser(req.user.claims.sub);
@@ -1594,11 +1619,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         id: randomUUID(),
         userId: req.user.claims.sub,
         action: `Facility ${isActive ? 'Enabled' : 'Disabled'}`,
-        details: `${isActive ? 'Made available' : 'Made unavailable'} facility "${facility.name}" by ${adminEmail}`,
+        details: `${isActive ? 'Made available' : `Made unavailable (Reason: ${reason || 'No reason provided'})`} facility "${facility.name}" by ${adminEmail}`,
         ipAddress: req.ip,
         userAgent: req.get('User-Agent'),
         createdAt: new Date(),
       });
+
+      // Create a global system alert so staff and admins are notified of the availability change
+      try {
+        await storage.createSystemAlert({
+          id: randomUUID(),
+          type: 'facility',
+          severity: isActive ? 'low' : 'medium',
+          title: isActive ? 'Facility Made Available' : 'Facility Made Unavailable',
+          message: isActive
+            ? `${facility.name} has been made available by ${adminEmail}.`
+            : `${facility.name} has been made unavailable by ${adminEmail}. Reason: ${reason || 'No reason provided'}`,
+          userId: null, // global/admin visible
+          isRead: false,
+          createdAt: new Date(),
+        });
+      } catch (alertErr) {
+        console.warn('[Alerts] Failed to create facility availability alert', alertErr);
+      }
 
       res.json({ 
         success: true, 

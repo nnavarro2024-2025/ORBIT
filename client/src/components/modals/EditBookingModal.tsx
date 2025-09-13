@@ -235,6 +235,16 @@ export default function EditBookingModal({
       });
     }
 
+    // Validate same calendar day (no multi-day bookings)
+    if (startTime && endTime) {
+      if (startTime.getFullYear() !== endTime.getFullYear() || startTime.getMonth() !== endTime.getMonth() || startTime.getDate() !== endTime.getDate()) {
+        validationErrors.push({
+          title: "Single-Day Booking Required",
+          description: "Start and end must be on the same calendar day. Please split multi-day events into separate bookings.",
+        });
+      }
+    }
+
     // Validate facility and capacity
     if (facilityId) {
       const facility = facilities.find(f => f.id === parseInt(facilityId));

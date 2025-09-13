@@ -267,6 +267,22 @@ export default function BookingModal({
   const bookingSchema = createBookingSchema();
   type BookingFormData = z.infer<typeof bookingSchema>;
 
+  // Equipment checklist state
+  const EQUIPMENT_OPTIONS = [
+    { key: 'whiteboard', label: 'Whiteboard & Markers' },
+    { key: 'projector', label: 'Projector' },
+    { key: 'extension_cord', label: 'Extension Cord' },
+    { key: 'hdmi', label: 'HDMI Cable' },
+    { key: 'extra_chairs', label: 'Extra Chairs' },
+    { key: 'others', label: 'Others' },
+  ];
+  const [equipmentState, setEquipmentState] = useState<Record<string, boolean>>(() => {
+    const init: Record<string, boolean> = {};
+    EQUIPMENT_OPTIONS.forEach(o => init[o.key] = false);
+    return init;
+  });
+  const [equipmentOtherText, setEquipmentOtherText] = useState('');
+
   const form = useForm<BookingFormData>({
     resolver: zodResolver(bookingSchema),
     mode: 'onChange',
@@ -326,6 +342,10 @@ export default function BookingModal({
         facilityId: parseInt(data.facilityId),
         startTime: data.startTime.toISOString(),
         endTime: data.endTime.toISOString(),
+        equipment: {
+          items: Object.keys(equipmentState).filter(k => equipmentState[k]),
+          others: equipmentOtherText.trim() || null,
+        },
       };
       const response = await apiRequest("POST", "/api/bookings", bookingData);
       return response.json();
@@ -459,6 +479,16 @@ export default function BookingModal({
       validationErrors.push({
         title: "Invalid Time Selection",
         description: "End time must be after start time.",
+      });
+    }
+
+    // Validate same calendar day (no multi-day bookings)
+    const sDate = data.startTime;
+    const eDate = data.endTime;
+    if (sDate.getFullYear() !== eDate.getFullYear() || sDate.getMonth() !== eDate.getMonth() || sDate.getDate() !== eDate.getDate()) {
+      validationErrors.push({
+        title: "Single-Day Booking Required",
+        description: "Start and end must be on the same calendar day. Please split multi-day events into separate bookings.",
       });
     }
 
@@ -739,13 +769,10 @@ export default function BookingModal({
                 control={form.control}
                 name="participants"
                 render={({ field }) => {
-                  // Problem 1 & 2 Fix: Calculate facility and maxCap once to avoid repetition
                   const facilityId = form.watch("facilityId");
-                  // Problem 5 Fix: Only lookup facility if facilityId exists and is valid
                   const currentFacility = facilityId ? allFacilities.find(f => f.id === parseInt(facilityId)) : null;
-                  // Problem 4 Fix: Ensure currentFacility is properly handled when undefined
                   const maxCapacity = getFacilityMaxCapacity(currentFacility);
-                  
+
                   return (
                     <FormItem>
                       <FormLabel>Number of Participants</FormLabel>
@@ -767,7 +794,99 @@ export default function BookingModal({
                   );
                 }}
               />
-                          </div>
+
+              {/* Equipment checklist — span both form columns so the three equipment columns have room */}
+              <div className="mt-2 md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-3">Additional Equipment or Needs</label>
+
+                {/* Use md breakpoint for three balanced columns inside the wider area */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {/* Column 1 - Left */}
+                  <div className="space-y-3">
+                    <label className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={!!equipmentState['whiteboard']}
+                        onChange={(e) => setEquipmentState(prev => ({ ...prev, ['whiteboard']: e.target.checked }))}
+                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <span className="text-sm text-gray-700">Whiteboard &amp; Markers</span>
+                    </label>
+
+                    <label className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={!!equipmentState['projector']}
+                        onChange={(e) => setEquipmentState(prev => ({ ...prev, ['projector']: e.target.checked }))}
+                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <span className="text-sm text-gray-700">Projector</span>
+                    </label>
+
+                    <label className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={!!equipmentState['extension_cord']}
+                        onChange={(e) => setEquipmentState(prev => ({ ...prev, ['extension_cord']: e.target.checked }))}
+                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <span className="text-sm text-gray-700">Extension Cord</span>
+                    </label>
+                  </div>
+
+                  {/* Column 2 - Middle */}
+                  <div className="space-y-3">
+                    <label className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={!!equipmentState['hdmi']}
+                        onChange={(e) => setEquipmentState(prev => ({ ...prev, ['hdmi']: e.target.checked }))}
+                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <span className="text-sm text-gray-700">HDMI Cable</span>
+                    </label>
+
+                    <label className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={!!equipmentState['extra_chairs']}
+                        onChange={(e) => setEquipmentState(prev => ({ ...prev, ['extra_chairs']: e.target.checked }))}
+                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <span className="text-sm text-gray-700">Extra Chairs</span>
+                    </label>
+                  </div>
+
+                  {/* Column 3 - Right (Others + textarea always present) */}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={!!equipmentState['others']}
+                        onChange={(e) => setEquipmentState(prev => ({ ...prev, ['others']: e.target.checked }))}
+                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <span className="text-sm text-gray-700">Others</span>
+                    </div>
+
+                    <div className="mt-2 md:mt-1">
+                      <Input
+                        value={equipmentOtherText}
+                        onChange={(e: any) => {
+                          const val = e.target.value;
+                          setEquipmentOtherText(val);
+                          // Auto-toggle the 'others' checkbox based on input content
+                          setEquipmentState(prev => ({ ...prev, ['others']: val.trim().length > 0 }));
+                        }}
+                        placeholder="Describe other needs"
+                        aria-label="Other equipment details"
+                        className="w-full"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
 
             <div className="grid md:grid-cols-2 gap-6">
               {/* Start Date + Time split */}
