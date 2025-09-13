@@ -7,7 +7,7 @@ import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
 import BookingModal from "@/components/modals/BookingModal";
 import EditBookingModal from "@/components/modals/EditBookingModal";
-import { Plus, Calendar, Home, ChevronLeft, ChevronRight, Eye, Users, MapPin, AlertTriangle, BarChart3, Settings } from "lucide-react";
+import { Plus, Calendar, Home, ChevronLeft, ChevronRight, Eye, Users, MapPin, AlertTriangle, BarChart3, Settings, Clock, CheckCircle } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLocation } from 'wouter';
 import {
@@ -44,7 +44,7 @@ export default function BookingDashboard() {
       { id: 'new-booking', label: 'New Booking', icon: BarChart3 },
       { id: 'my-bookings', label: 'My Bookings', icon: Calendar },
       { id: 'available-rooms', label: 'Available Rooms', icon: Home },
-      { id: 'settings', label: 'Booking Settings', icon: Settings },
+      { id: 'booking-settings', label: 'Booking Settings', icon: Settings },
     ];
     if (user && user.role === 'admin') {
       sidebarItems.push({ id: 'divider-1', type: 'divider' });
@@ -69,6 +69,10 @@ export default function BookingDashboard() {
     }
     if (id === 'new-booking') {
       openBookingModal();
+      return;
+    }
+    if (id === 'booking-settings') {
+      setSelectedView('booking-settings');
       return;
     }
     setSelectedView(id);
@@ -135,21 +139,35 @@ export default function BookingDashboard() {
             }
           })();
         }
-
-        toast({
-          title: "Booking Updated",
-          description: "Your booking has been updated successfully.",
-        });
       } catch (e) {
-        console.warn('Failed to update booking cache', e);
-        queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
+        console.warn('[BookingDashboard] updateBookingMutation.onSuccess handler failed', e);
       }
-      // Ensure the bookings list is refreshed (defensive) so UI always reflects server state
-      try { queryClient.invalidateQueries({ queryKey: ["/api/bookings"] }); } catch (e) {}
     },
     onError: (error: any) => {
-      // Handle specific conflict error
-      if (error.message && error.message.includes("time slot is already booked")) {
+      // Handle specific conflict error, prefer structured payload when available
+      // Prefer structured payload; if missing, try to parse it from the error message
+      let payload = error && error.payload ? error.payload : null;
+      if (!payload && error?.message) {
+        try {
+          const candidate = error.message.replace(/^\d+:\s*/, '');
+          payload = JSON.parse(candidate);
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      if (payload && payload.conflictingBookings) {
+        const facilityName = error.payload.facility?.name || `Facility ${error.payload.facility?.id || ''}`;
+        const conflicts = Array.isArray(payload.conflictingBookings) ? payload.conflictingBookings : [];
+        const conflictText = conflicts.length > 0
+          ? conflicts.map((c: any) => `${new Date(c.startTime).toLocaleString()} - ${new Date(c.endTime).toLocaleString()}`).join('; ')
+          : '';
+        toast({
+          title: 'Time Slot Unavailable',
+          description: `${facilityName} has a conflicting booking${conflictText ? `: ${conflictText}` : ''}`,
+          variant: 'destructive'
+        });
+      } else if (error.message && error.message.includes("time slot is already booked")) {
         toast({
           title: "Time Slot Unavailable",
           description: "This time slot is already booked. Please choose a different time.",
@@ -165,13 +183,12 @@ export default function BookingDashboard() {
     },
   });
 
+  
+
   const cancelBookingMutation = useMutation({
     mutationFn: (bookingId: string) => apiRequest("POST", `/api/bookings/${bookingId}/cancel`),
     onSuccess: () => {
-      toast({
-        title: "Booking Cancelled",
-        description: "Your booking has been cancelled.",
-      });
+      // Cache invalidation handled here; toast is shown per-mutation in the confirm flow
       // Give admin dashboard a nudge by invalidating potential shared caches
       queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/alerts"] });
@@ -194,7 +211,24 @@ export default function BookingDashboard() {
 
   const confirmCancelBooking = () => {
     if (bookingToCancel) {
-      cancelBookingMutation.mutate(bookingToCancel.id);
+      const bookingSnapshot = bookingToCancel;
+      cancelBookingMutation.mutate(bookingToCancel.id, {
+        onSuccess: () => {
+          // Show context-aware toast: 'Ended' for active bookings, otherwise 'Cancelled'
+          const start = new Date(bookingSnapshot.startTime);
+          const end = new Date(bookingSnapshot.endTime);
+          const now = new Date();
+          const isActive = bookingSnapshot.status === 'approved' ? (start <= now && now <= end) : (start <= now && now <= end);
+          if (isActive) {
+            toast({ title: 'Booking Ended', description: 'Your active booking has been ended.' });
+          } else {
+            toast({ title: 'Booking Cancelled', description: 'Your booking has been cancelled.' });
+          }
+        },
+        onError: (error: any) => {
+          toast({ title: 'Cancellation Failed', description: error?.message || 'An error occurred while cancelling the booking.', variant: 'destructive' });
+        }
+      });
       setShowCancelModal(false);
       setBookingToCancel(null);
     }
@@ -281,9 +315,28 @@ export default function BookingDashboard() {
     const isWithinLibraryHours = currentTimeInMinutes >= libraryOpenTime && currentTimeInMinutes <= libraryCloseTime;
     
     // Get all active bookings for this facility
-    const facilityBookings = allBookings.filter(booking => 
-      booking.facilityId === facilityId && 
-      (booking.status === "approved" || booking.status === "pending") &&
+    // NOTE: For privacy, pending bookings should only be visible to admins and the booking owner.
+    // allBookings contains the global view (approved bookings). userBookings contains the current user's bookings
+    // Merge them so that the owner can see their own pending requests while other users do not see them.
+    const mergedBookings = [...allBookings, ...userBookings];
+    // Deduplicate by booking id (prefer the first occurrence)
+    const seen = new Set<string | number>();
+    const deduped = [] as any[];
+    for (const b of mergedBookings) {
+      if (b && b.id != null && !seen.has(b.id)) {
+        seen.add(b.id);
+        deduped.push(b);
+      }
+    }
+
+    const facilityBookings = deduped.filter(booking => 
+      booking.facilityId === facilityId &&
+      // include approved bookings for everyone
+      (
+        booking.status === "approved" ||
+        // include pending only if the current user is admin or the owner of the pending request
+        (booking.status === "pending" && (user?.role === 'admin' || booking.userId === user?.id))
+      ) &&
       new Date(booking.endTime) > now
     );
 
@@ -461,9 +514,26 @@ export default function BookingDashboard() {
     return status === 'Pending Request';
   };
 
+  // Client-side rule matching server: allow cancelling when
+  // - booking.status === 'pending'
+  // - or booking.status === 'approved' and (start > now || (start <= now && now <= end))
   const canCancelBooking = (booking: any): boolean => {
-    const status = getBookingStatus(booking).label;
-    return status === 'Pending' || status === 'Pending Request';
+    if (!booking) return false;
+    try {
+      const now = new Date();
+      const start = new Date(booking.startTime);
+      const end = new Date(booking.endTime);
+      if (booking.status === 'pending') return true;
+      if (booking.status === 'approved') {
+        // upcoming approved
+        if (start > now) return true;
+        // active/in-progress approved
+        if (start <= now && now <= end) return true;
+      }
+      return false;
+    } catch (e) {
+      return false;
+    }
   };
 
   const renderContent = () => {
@@ -627,15 +697,17 @@ export default function BookingDashboard() {
                                 Edit
                               </button>
                             )}
-                            {canCancelBooking(booking) && (
+                            {/* Single action button: Cancel (or End when active) */}
+                            {canCancelBooking(booking) && booking.userId === user?.id && (
                               <button
                                 onClick={() => handleCancelBooking(booking)}
-                                className="px-3 py-1.5 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors duration-200"
+                                disabled={cancelBookingMutation.status === 'pending'}
+                                className={`px-3 py-1.5 text-white text-sm font-medium rounded-lg transition-colors duration-200 ${cancelBookingMutation.status === 'pending' ? 'bg-red-400 cursor-wait' : 'bg-red-600 hover:bg-red-700'}`}
                               >
-                                Cancel
+                                {getBookingStatus(booking).label === 'Active' ? 'End Booking' : 'Cancel'}
                               </button>
                             )}
-                            {!canEditBooking(booking) && !canCancelBooking(booking) && (
+                            {!canEditBooking(booking) && !canCancelBooking(booking) && !(booking.userId === user?.id && getBookingStatus(booking).label === 'Active') && (
                               <span className="text-gray-400 text-sm">No actions available</span>
                             )}
                           </div>
@@ -721,19 +793,37 @@ export default function BookingDashboard() {
                       onClick={() => isAvailableForBooking && openBookingModal(facility.id)}
                     >
                       <div className="aspect-video bg-gradient-to-br from-pink-100 to-rose-100 flex items-center justify-center relative">
-                        {!isAvailableForBooking && (
+                          {isAvailableForBooking ? (
                             <div className="absolute inset-0 bg-black bg-opacity-40 flex items-center justify-center">
-                            <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                              !facility.isActive ? 'bg-red-500 text-white' :
-                              bookingStatus.status === 'closed' ? 'bg-gray-700 text-white' :
-                              bookingStatus.status === 'booked' ? 'bg-red-500 text-white' :
-                              bookingStatus.status === 'scheduled' ? 'bg-yellow-500 text-white' :
-                              'bg-pink-500 text-white'
-                            }`}>
-                              {!facility.isActive ? 'Unavailable' : bookingStatus.label}
-                            </span>
-                          </div>
-                        )}
+                              <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                                !facility.isActive ? 'bg-red-500 text-white' :
+                                bookingStatus.status === 'closed' ? 'bg-gray-700 text-white' :
+                                bookingStatus.status === 'booked' ? 'bg-red-500 text-white' :
+                                bookingStatus.status === 'scheduled' ? 'bg-yellow-500 text-white' :
+                                'bg-pink-500 text-white'
+                              }`}>
+                                {!facility.isActive ? 'Unavailable' : bookingStatus.label}
+                              </span>
+
+                              {/* End/Cancel button for bookings the user may cancel (matches server rules) */}
+                              {bookingStatus.booking && bookingStatus.booking.userId === user?.id && canCancelBooking(bookingStatus.booking) && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleCancelBooking({
+                                      id: bookingStatus.booking.id,
+                                      facilityName: facility.name,
+                                      startTime: bookingStatus.booking.startTime,
+                                      endTime: bookingStatus.booking.endTime,
+                                    });
+                                  }}
+                                  className="ml-3 inline-flex items-center gap-1 px-2 py-1 bg-red-600 text-white text-xs font-medium rounded"
+                                >
+                                  End
+                                </button>
+                              )}
+                            </div>
+                          ) : null}
                         {(facility.imageUrl || getFacilityImageByName(facility.name)) ? (
                           <img
                             src={facility.imageUrl || getFacilityImageByName(facility.name)}
@@ -984,7 +1074,7 @@ export default function BookingDashboard() {
                     <p className="text-xs text-gray-500 mt-1">Currently in progress</p>
                   </div>
                   <div className="bg-green-100 p-3 rounded-full group-hover:bg-green-200 transition-colors duration-200">
-                    <span className="text-2xl text-green-600 leading-none">📅</span>
+                    <CheckCircle className="h-6 w-6 text-green-600" />
                   </div>
                 </div>
               </button>
@@ -1000,7 +1090,7 @@ export default function BookingDashboard() {
                     <p className="text-xs text-gray-500 mt-1">Approved and scheduled</p>
                   </div>
                   <div className="bg-pink-100 p-3 rounded-full group-hover:bg-pink-200 transition-colors duration-200">
-                    <span className="text-2xl text-pink-600 leading-none">🕒</span>
+                    <Clock className="h-6 w-6 text-yellow-600" />
                   </div>
                 </div>
               </button>
@@ -1016,7 +1106,7 @@ export default function BookingDashboard() {
                     <p className="text-xs text-gray-500 mt-1">Awaiting approval</p>
                   </div>
                   <div className="bg-orange-100 p-3 rounded-full group-hover:bg-orange-200 transition-colors duration-200">
-                    <span className="text-2xl text-orange-600 leading-none">⏳</span>
+                    <Calendar className="h-6 w-6 text-purple-600" />
                   </div>
                 </div>
               </button>
@@ -1214,7 +1304,7 @@ export default function BookingDashboard() {
             </div>
 
             {/* Recent Bookings */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
               <div className="flex items-center justify-between mb-6">
                 <div>
                   <h3 className="text-lg font-bold text-gray-900">Recent Bookings</h3>
@@ -1242,23 +1332,23 @@ export default function BookingDashboard() {
                   </button>
                 </div>
               ) : (
-                <div className="space-y-4">
+                  <div className="space-y-2">
                   {userBookings
                     .slice(0, itemsPerPage)
                     .map((booking) => (
-                    <div key={booking.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors duration-200">
-                      <div className="flex items-center gap-4 flex-1">
-                        <div className="bg-white p-2 rounded-lg shadow-sm">
-                          <Calendar className="h-5 w-5 text-gray-600" />
+                    <div key={booking.id} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors duration-200">
+                      <div className="flex items-center gap-3 flex-1">
+                        <div className="bg-white p-1.5 rounded-lg shadow-sm">
+                          <Calendar className="h-4 w-4 text-gray-600" />
                         </div>
                         <div className="flex-1">
-                          <h4 className="font-medium text-gray-900">{getFacilityDisplay(booking.facilityId)}</h4>
-                          <p className="text-sm text-gray-600">
+                          <h4 className="font-medium text-gray-900 text-sm">{getFacilityDisplay(booking.facilityId)}</h4>
+                          <p className="text-xs text-gray-600">
                             {format(new Date(booking.startTime), 'EEE, MMM d')} • {format(new Date(booking.startTime), 'hh:mm a')}
                           </p>
                           {/* Show booking purpose and participants */}
                           {(booking.purpose || booking.participants) && (
-                            <div className="text-xs text-gray-500 mt-1" style={{
+                            <div className="text-[11px] text-gray-500 mt-1" style={{
                               wordWrap: 'break-word',
                               overflowWrap: 'anywhere',
                               wordBreak: 'break-word',
@@ -1365,21 +1455,21 @@ export default function BookingDashboard() {
       {/* Cancellation Confirmation Modal */}
       <Dialog open={showCancelModal} onOpenChange={setShowCancelModal}>
         <DialogContent className="max-w-md">
-          <DialogHeader>
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-red-100 rounded-full">
-                <AlertTriangle className="h-5 w-5 text-red-600" />
+            <DialogHeader>
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-red-100 rounded-full">
+                  <AlertTriangle className="h-5 w-5 text-red-600" />
+                </div>
+                <div>
+                  <DialogTitle className="text-lg font-semibold text-gray-900">
+                    {bookingToCancel && (new Date(bookingToCancel.startTime) <= new Date() && new Date() <= new Date(bookingToCancel.endTime)) ? 'End Booking' : 'Cancel Booking'}
+                  </DialogTitle>
+                  <DialogDescription className="text-sm text-gray-600 mt-1">
+                    {bookingToCancel && (new Date(bookingToCancel.startTime) <= new Date() && new Date() <= new Date(bookingToCancel.endTime)) ? 'Ending this active booking will immediately free the facility for others.' : 'This action cannot be undone.'}
+                  </DialogDescription>
+                </div>
               </div>
-              <div>
-                <DialogTitle className="text-lg font-semibold text-gray-900">
-                  Cancel Booking
-                </DialogTitle>
-                <DialogDescription className="text-sm text-gray-600 mt-1">
-                  This action cannot be undone
-                </DialogDescription>
-              </div>
-            </div>
-          </DialogHeader>
+            </DialogHeader>
           
           {bookingToCancel && (
             <div className="py-4">
@@ -1406,9 +1496,12 @@ export default function BookingDashboard() {
               </div>
               
               <p className="text-sm text-gray-700 mb-6">
-                Are you sure you want to cancel this booking? This action cannot be undone and may affect other users if they were waiting for this time slot.
+                {bookingToCancel && (new Date(bookingToCancel.startTime) <= new Date() && new Date() <= new Date(bookingToCancel.endTime)) ?
+                  'Are you sure you want to end this active booking? This will immediately free up the facility.' :
+                  'Are you sure you want to cancel this booking? This action cannot be undone and may affect other users waiting for this time slot.'
+                }
               </p>
-              
+
               <div className="flex gap-3">
                 <Button
                   onClick={cancelCancelBooking}
@@ -1420,9 +1513,9 @@ export default function BookingDashboard() {
                 <Button
                   onClick={confirmCancelBooking}
                   className="flex-1 bg-red-600 hover:bg-red-700 text-white"
-                  disabled={cancelBookingMutation.isPending}
+                  disabled={cancelBookingMutation.status === 'pending'}
                 >
-                  {cancelBookingMutation.isPending ? "Cancelling..." : "Yes, Cancel Booking"}
+                  {cancelBookingMutation.status === 'pending' ? (bookingToCancel && (new Date(bookingToCancel.startTime) <= new Date() && new Date() <= new Date(bookingToCancel.endTime)) ? 'Ending...' : 'Cancelling...') : (bookingToCancel && (new Date(bookingToCancel.startTime) <= new Date() && new Date() <= new Date(bookingToCancel.endTime)) ? 'Yes, End Booking' : 'Yes, Cancel Booking')}
                 </Button>
               </div>
             </div>

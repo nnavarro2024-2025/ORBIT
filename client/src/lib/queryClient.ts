@@ -35,8 +35,29 @@ export async function apiRequest(
   }
 
   if (!res.ok) {
-    const text = (await res.text()) || res.statusText;
-    throw new Error(`${res.status}: ${text}`);
+    // Try to parse structured JSON payload (e.g., { message, facility, conflictingBookings })
+    let payload: any = null;
+    let textBody: string | null = null;
+    try {
+      payload = await res.json();
+    } catch (e) {
+      // res.json failed (maybe body not JSON or already consumed). Try to read text and parse JSON out of it.
+      try {
+        textBody = await res.text();
+        try {
+          payload = JSON.parse(textBody);
+        } catch (pe) {
+          // not JSON
+        }
+      } catch (te) {
+        // ignore
+      }
+    }
+
+    const text = (payload && (payload.message || JSON.stringify(payload))) || textBody || (await res.text()) || res.statusText;
+    const err: any = new Error(`${res.status}: ${text}`);
+    if (payload) err.payload = payload;
+    throw err;
   }
 
   return res;

@@ -24,7 +24,7 @@ export function makeSidebar(isAdmin: boolean, lastItem?: RawItem, forPage: 'admi
       { id: 'new-booking', label: 'New Booking', icon: BarChart3 },
       { id: 'my-bookings', label: 'My Bookings', icon: Calendar },
       { id: 'available-rooms', label: 'Available Rooms', icon: Home },
-      { id: 'settings', label: 'Booking Settings', icon: Settings },
+      { id: 'booking-settings', label: 'Booking Settings', icon: Settings },
     ];
     if (isAdmin && lastItem) {
       bookingCore.push({ id: 'divider-1', type: 'divider' });

@@ -364,11 +364,35 @@ export default function BookingModal({
       }
       // Handle specific conflict error
       else if (error.message && error.message.includes("time slot is already booked")) {
-        toast({
-          title: "Time Slot Unavailable",
-          description: "This time slot is already booked. Please choose a different time or facility.",
-          variant: "destructive",
-        });
+        // Attempt to parse structured payload from server (409 responses)
+        let payload = error && error.payload ? error.payload : null;
+        // If payload missing, try to parse JSON embedded in the error message
+        if (!payload && error?.message) {
+          try {
+            const candidate = error.message.replace(/^\d+:\s*/, '');
+            payload = JSON.parse(candidate);
+          } catch (e) {
+            // ignore
+          }
+        }
+        if (payload && payload.facility) {
+          const facilityName = payload.facility.name || `Facility ${payload.facility.id}`;
+          const conflicts = Array.isArray(payload.conflictingBookings) ? payload.conflictingBookings : [];
+          const conflictText = conflicts.length > 0
+            ? conflicts.map((c: any) => `${new Date(c.startTime).toLocaleString()} - ${new Date(c.endTime).toLocaleString()}`).join('; ')
+            : '';
+          toast({
+            title: "Time Slot Unavailable",
+            description: `${facilityName} has a conflicting booking${conflictText ? `: ${conflictText}` : ''}`,
+            variant: "destructive",
+          });
+        } else {
+          toast({
+            title: "Time Slot Unavailable",
+            description: "This time slot is already booked. Please choose a different time or facility.",
+            variant: "destructive",
+          });
+        }
       }
       // Handle capacity validation error
       else if (error.message && error.message.includes("exceeds facility capacity")) {

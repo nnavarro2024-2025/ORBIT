@@ -14,7 +14,7 @@ import {
   createFacilityBookingSchema,
   facilityBookings,
 } from "../shared/schema";
-import { eq, and, or, gt, asc } from "drizzle-orm";
+import { eq, and, or, gt, lt, asc } from "drizzle-orm";
 
 // Library working hours validation
 function isWithinLibraryHours(date: Date): boolean {
@@ -508,21 +508,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Check for time conflicts with existing bookings
-      const conflictingBookings = await storage.checkBookingConflicts(
+      // Check for time conflicts with EXISTING APPROVED bookings only.
+      // Allow multiple pending requests for the same slot; only approved bookings block new requests.
+      const conflictingApproved = await storage.checkApprovedBookingConflicts(
         data.facilityId,
         data.startTime,
         data.endTime
       );
 
-      if (conflictingBookings.length > 0) {
+      if (conflictingApproved.length > 0) {
+        // Provide clearer conflict details (facility name + conflicting ranges)
+        const facilityInfo = await storage.getFacility(data.facilityId);
+        const conflicts = conflictingApproved.map(booking => ({
+          id: booking.id,
+          startTime: booking.startTime,
+          endTime: booking.endTime,
+          status: booking.status
+        }));
         return res.status(409).json({ 
-          message: "This time slot is already booked for the selected facility. Please choose a different time or facility.",
-          conflictingBookings: conflictingBookings.map(booking => ({
-            startTime: booking.startTime,
-            endTime: booking.endTime,
-            status: booking.status
-          }))
+          message: `This time slot for ${facilityInfo?.name || `Facility ${data.facilityId}`} is already booked. Please choose a different time or facility.`,
+          facility: { id: data.facilityId, name: facilityInfo?.name || null },
+          conflictingBookings: conflicts
         });
       }
 
@@ -531,6 +537,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (user?.email && facility) {
         await emailService.sendBookingConfirmation(booking, user, facility.name);
+      }
+      // Create booking request alerts: a global/admin alert and a user confirmation alert
+      try {
+        const facilityInfo = await storage.getFacility(data.facilityId);
+        // Global alert for admins (userId omitted so it's visible to admin queries)
+        await storage.createSystemAlert({
+          id: randomUUID(),
+          type: 'booking',
+          severity: 'low',
+          title: 'New Booking Request',
+          message: `${user?.email || `User ${userId}`} requested a booking for ${facilityInfo?.name || `Facility ${data.facilityId}`} from ${new Date(data.startTime).toLocaleString()} to ${new Date(data.endTime).toLocaleString()}.`,
+          userId: null,
+          isRead: false,
+          createdAt: new Date(),
+        });
+
+        // User-facing confirmation notification
+        await storage.createSystemAlert({
+          id: randomUUID(),
+          type: 'booking',
+          severity: 'low',
+          title: 'Booking Request Submitted',
+          message: `Your booking request for ${facilityInfo?.name || `Facility ${data.facilityId}`} on ${new Date(data.startTime).toLocaleString()} has been submitted and is pending approval.`,
+          userId: userId,
+          isRead: false,
+          createdAt: new Date(),
+        });
+      } catch (e) {
+        console.warn('[Alerts] Failed to create booking request alerts', e);
       }
       res.json(booking);
     } catch (error) {
@@ -641,13 +676,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
 
       if (conflictingBookings.length > 0) {
+        const facilityInfo = await storage.getFacility(parseInt(facilityId));
+        const conflicts = conflictingBookings.map(booking => ({
+          id: booking.id,
+          startTime: booking.startTime,
+          endTime: booking.endTime,
+          status: booking.status
+        }));
         return res.status(409).json({ 
           message: "This time slot is already booked for the selected facility. Please choose a different time.",
-          conflictingBookings: conflictingBookings.map(booking => ({
-            startTime: booking.startTime,
-            endTime: booking.endTime,
-            status: booking.status
-          }))
+          facility: { id: parseInt(facilityId), name: facilityInfo?.name || null },
+          conflictingBookings: conflicts
         });
       }
 
@@ -700,7 +739,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         )
       ).orderBy(asc(facilityBookings.startTime));
 
-      res.json(activeBookings);
+      // Enforce privacy: pending bookings should not be visible to other users.
+      // Admins can see all; regular users only see approved bookings or their own pending/approved bookings.
+      const requestingUserId = req.user.claims.sub;
+      const requestingUser = await storage.getUser(requestingUserId);
+      if (requestingUser?.role === 'admin') {
+        return res.json(activeBookings);
+      }
+
+      const filtered = activeBookings.filter((b: any) => {
+        if (b.status === 'approved') return true;
+        if (b.userId === requestingUserId) return true; // owners can see their pending requests
+        return false; // hide other users' pending bookings
+      });
+
+      res.json(filtered);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch facility bookings" });
     }
@@ -730,7 +783,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         )
       ).orderBy(asc(facilityBookings.startTime));
 
-      res.json(bookings);
+      // For privacy, only admins should see pending bookings across the system.
+      const requestingUserId = req.user.claims.sub;
+      const requestingUser = await storage.getUser(requestingUserId);
+      if (requestingUser?.role === 'admin') {
+        return res.json(bookings);
+      }
+
+      // Non-admins only get approved bookings when viewing all bookings
+      const approvedOnly = bookings.filter((b: any) => b.status === 'approved');
+      res.json(approvedOnly);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch facility bookings" });
     }
@@ -753,11 +815,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const now = new Date();
       const start = new Date(booking.startTime);
 
-      // Only allow cancelling pending requests or approved upcoming bookings
+      // Allow cancelling pending requests, upcoming approved bookings, and active (in-progress) approved bookings
+      const end = new Date(booking.endTime);
+      const isActive = booking.status === 'approved' && start <= now && now <= end;
       const canCancel =
-        booking.status === "pending" || (booking.status === "approved" && start > now);
+        booking.status === "pending" ||
+        (booking.status === "approved" && (start > now || isActive));
       if (!canCancel) {
-        return res.status(400).json({ message: "Only pending or upcoming approved bookings can be cancelled." });
+        return res.status(400).json({ message: "Only pending, upcoming, or active approved bookings can be cancelled." });
       }
 
       await storage.updateFacilityBooking(bookingId, {
@@ -846,8 +911,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/admin/alerts", isAuthenticated, requireAdmin, async (req: any, res) => {
     try {
+      // Fetch all alerts then return only the global/admin ones (userId == null)
       const alerts = await storage.getSystemAlerts();
-      res.json(alerts);
+      const adminAlerts = Array.isArray(alerts) ? alerts.filter(a => !a.userId) : [];
+      res.json(adminAlerts);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch system alerts" });
     }
@@ -861,6 +928,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ message: "Failed to mark alert as read" });
+    }
+  });
+
+  // User notifications - personal or global alerts accessible to authenticated users
+  app.get("/api/notifications", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const alerts = await storage.getSystemAlerts();
+      const userAlerts = Array.isArray(alerts) ? alerts.filter(a => !a.userId || a.userId === userId) : [];
+      res.json(userAlerts);
+    } catch (error) {
+      console.error('[NOTIFICATIONS] Failed to fetch notifications', error);
+      res.status(500).json({ message: 'Failed to fetch notifications' });
+    }
+  });
+
+  app.post("/api/notifications/:alertId/read", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const { alertId } = req.params;
+      const alerts = await storage.getSystemAlerts();
+      const alert = Array.isArray(alerts) ? alerts.find(a => a.id === alertId) : null;
+      if (!alert) return res.status(404).json({ message: 'Notification not found' });
+      if (alert.userId && alert.userId !== userId) return res.status(403).json({ message: 'Forbidden' });
+      await storage.markAlertAsRead(alertId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('[NOTIFICATIONS] Failed to mark notification read', error);
+      res.status(500).json({ message: 'Failed to mark notification as read' });
     }
   });
 
@@ -915,7 +1011,75 @@ export async function registerRoutes(app: Express): Promise<Server> {
         createdAt: new Date(),
       });
 
-      res.json({ success: true });
+      // Notify the booking owner about approval
+      let createdNotification: any = null;
+      try {
+        if (booking) {
+          const bookingUser = await storage.getUser(booking.userId);
+          const facility = await storage.getFacility(booking.facilityId);
+          createdNotification = await storage.createSystemAlert({
+            id: randomUUID(),
+            type: 'booking',
+            severity: 'low',
+            title: 'Booking Approved',
+            message: `Your booking for ${facility?.name || `Facility ${booking.facilityId}`} on ${booking.startTime.toLocaleString()} has been approved.`,
+            userId: booking.userId,
+            isRead: false,
+            createdAt: new Date(),
+          });
+        }
+      } catch (e) {
+        console.warn('[Alerts] Failed to create booking approval notification', e);
+      }
+
+      // Auto-deny other pending requests that overlap this approved booking window
+      try {
+        if (booking) {
+          // Resolve facility name once for clearer notifications
+          const facilityRecord = await storage.getFacility(booking.facilityId);
+          const facilityName = facilityRecord?.name || `Facility ${booking.facilityId}`;
+
+          // Find other pending bookings for the same facility that overlap the time window
+          const others = await db.select().from(facilityBookings).where(
+            and(
+              eq(facilityBookings.facilityId, booking.facilityId),
+              eq(facilityBookings.status, 'pending'),
+              or(
+                // other.start < booking.end AND other.end > booking.start => overlap
+                and(lt(facilityBookings.startTime, booking.endTime), gt(facilityBookings.endTime, booking.startTime))
+              )
+            )
+          );
+
+          for (const other of others) {
+            try {
+              await storage.updateFacilityBooking(other.id, {
+                status: 'denied',
+                adminResponse: 'Automatically denied: time slot already booked (another request was approved)',
+                updatedAt: new Date(),
+              });
+
+              // Notify that user about denial with a clear reason
+              await storage.createSystemAlert({
+                id: randomUUID(),
+                type: 'booking',
+                severity: 'low',
+                title: 'Booking Denied - Slot Taken',
+                message: `Your booking request for ${facilityName} from ${new Date(other.startTime).toLocaleString()} to ${new Date(other.endTime).toLocaleString()} was denied because another request for this time slot was approved.`,
+                userId: other.userId,
+                isRead: false,
+                createdAt: new Date(),
+              });
+            } catch (innerErr) {
+              console.warn('[Auto-Deny] Failed to deny or notify other pending booking', innerErr);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[Auto-Deny] Error while processing overlapping pending bookings', e);
+      }
+
+      res.json({ success: true, notification: createdNotification });
     } catch (error) {
       res.status(500).json({ message: "Failed to approve booking" });
     }
@@ -954,7 +1118,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         createdAt: new Date(),
       });
 
-      res.json({ success: true });
+      // Notify the booking owner about denial
+      let createdDenialNotification: any = null;
+      try {
+        if (booking) {
+          const bookingUser = await storage.getUser(booking.userId);
+          const facility = await storage.getFacility(booking.facilityId);
+          createdDenialNotification = await storage.createSystemAlert({
+            id: randomUUID(),
+            type: 'booking',
+            severity: 'low',
+            title: 'Booking Denied',
+            message: `Your booking for ${facility?.name || `Facility ${booking.facilityId}`} on ${booking.startTime.toLocaleString()} has been denied.`,
+            userId: booking.userId,
+            isRead: false,
+            createdAt: new Date(),
+          });
+        }
+      } catch (e) {
+        console.warn('[Alerts] Failed to create booking denial notification', e);
+      }
+
+      res.json({ success: true, notification: createdDenialNotification });
     } catch (error) {
       res.status(500).json({ message: "Failed to deny booking" });
     }

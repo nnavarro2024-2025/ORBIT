@@ -169,6 +169,8 @@ export default function AdminDashboard() {
       const res = await apiRequest('GET', '/api/admin/stats');
       return res.json();
     },
+    // Auto-refresh dashboard stats frequently so the admin overview stays up-to-date
+    refetchInterval: 5000,
   });
 
   // System alerts
@@ -178,6 +180,8 @@ export default function AdminDashboard() {
       const res = await apiRequest('GET', '/api/admin/alerts');
       return res.json();
     },
+    // Poll alerts so system alerts appear in near-real time for admins
+    refetchInterval: 5000,
   });
 
   // Activity logs
@@ -187,6 +191,7 @@ export default function AdminDashboard() {
       const res = await apiRequest('GET', '/api/admin/activity');
       return res.json();
     },
+    refetchInterval: 5000,
   });
 
   // All bookings (admin view)
@@ -196,6 +201,7 @@ export default function AdminDashboard() {
       const res = await apiRequest('GET', '/api/admin/bookings');
       return res.json();
     },
+    refetchInterval: 5000,
   });
 
   // Pending bookings (for booking requests tab)
@@ -205,6 +211,7 @@ export default function AdminDashboard() {
       const res = await apiRequest('GET', '/api/bookings/pending');
       return res.json();
     },
+    refetchInterval: 5000,
   });
 
   // Facilities
@@ -651,19 +658,19 @@ export default function AdminDashboard() {
               <Tabs value={bookingTab} onValueChange={(v) => setBookingTab(v)} className="space-y-6">
                 <TabsList className="grid w-full grid-cols-4">
                   <TabsTrigger value="active" className="flex items-center gap-2">
-                    <Activity className="h-4 w-4" />
+                    <CheckCircle className="h-4 w-4 text-green-600" />
                     Active Bookings
                   </TabsTrigger>
                   <TabsTrigger value="pendingList" className="flex items-center gap-2">
-                    <Calendar className="h-4 w-4" />
+                    <Clock className="h-4 w-4 text-yellow-600" />
                     Pending
                   </TabsTrigger>
                   <TabsTrigger value="requests" className="flex items-center gap-2">
-                    <Clock className="h-4 w-4" />
+                    <Calendar className="h-4 w-4 text-purple-600" />
                     Booking Requests
                   </TabsTrigger>
                   <TabsTrigger value="recent" className="flex items-center gap-2">
-                    <BarChart3 className="h-4 w-4" />
+                    <BarChart3 className="h-4 w-4 text-purple-600" />
                     History
                   </TabsTrigger>
                 </TabsList>
@@ -684,7 +691,7 @@ export default function AdminDashboard() {
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-4">
                                 <div className="bg-green-100 p-2 rounded-lg">
-                                  <Calendar className="h-5 w-5 text-green-600" />
+                                  <CheckCircle className="h-5 w-5 text-green-600" />
                                 </div>
                                 <div>
                                   <h4 className="font-medium text-gray-900">{getUserEmail(booking.userId)}</h4>
@@ -704,8 +711,8 @@ export default function AdminDashboard() {
                                         <div className="flex items-center gap-1 cursor-help justify-end">
                                           {booking.purpose && booking.purpose.length > 30 ? (
                                             <>
-                                              <Eye className="h-3 w-3 text-pink-600" />
-                                              <span className="text-xs text-pink-600">View purpose</span>
+                                              <Eye className="h-3 w-3" />
+                                              <span className="text-xs">View purpose</span>
                                             </>
                                           ) : (
                                             <div className="text-right">
@@ -777,7 +784,7 @@ export default function AdminDashboard() {
                     ) : (
                       <div className="text-center py-8">
                         <div className="bg-gray-100 rounded-full w-12 h-12 flex items-center justify-center mx-auto mb-3">
-                          <Calendar className="h-6 w-6 text-gray-400" />
+                          <CheckCircle className="h-6 w-6 text-gray-400" />
                         </div>
                         <p className="text-gray-600 text-sm">No active facility bookings</p>
                       </div>
@@ -1033,7 +1040,7 @@ export default function AdminDashboard() {
                     ) : (
                       <div className="text-center py-8">
                         <div className="bg-gray-100 rounded-full w-12 h-12 flex items-center justify-center mx-auto mb-3">
-                          <Clock className="h-6 w-6 text-gray-400" />
+                          <Calendar className="h-6 w-6 text-gray-400" />
                         </div>
                         <p className="text-gray-600 text-sm">No pending facility booking requests</p>
                       </div>
@@ -1061,9 +1068,9 @@ export default function AdminDashboard() {
                                       booking.status === 'denied' ? 'bg-red-100' : 'bg-green-100'
                                     }`}>
                                       {booking.status === 'denied' ? (
-                                        <XCircle className="h-4 w-4 text-red-600" />
+                                        <XCircle className="h-4 w-4" />
                                       ) : (
-                                        <CheckCircle className="h-4 w-4 text-green-600" />
+                                        <CheckCircle className="h-4 w-4" />
                                       )}
                                     </div>
                                     <div>
@@ -1197,11 +1204,11 @@ export default function AdminDashboard() {
               <Tabs value={userTab} onValueChange={(v: string) => setUserTab(v)} className="space-y-6">
                 <TabsList className="grid w-full grid-cols-2">
                   <TabsTrigger value="booking-users" className="flex items-center gap-2">
-                    <Users className="h-4 w-4" />
+                    <Users className="h-4 w-4 text-blue-600" />
                     Booking Users
                   </TabsTrigger>
                   <TabsTrigger value="banned-users" className="flex items-center gap-2">
-                    <UserX className="h-4 w-4" />
+                    <UserX className="h-4 w-4 text-red-600" />
                     Suspended
                   </TabsTrigger>
                 </TabsList>
@@ -1452,11 +1459,11 @@ export default function AdminDashboard() {
               <Tabs value={securityTab} onValueChange={(v: string) => setSecurityTab(v)} className="space-y-6">
                 <TabsList className="grid w-full grid-cols-2">
                   <TabsTrigger value="booking" onClick={() => setSecurityTab('booking')} className="flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4" />
+                    <AlertTriangle className="h-4 w-4 text-orange-600" />
                     Booking Alerts
                   </TabsTrigger>
                   <TabsTrigger value="users" onClick={() => setSecurityTab('users')} className="flex items-center gap-2">
-                    <Users className="h-4 w-4" />
+                    <Users className="h-4 w-4 text-blue-600" />
                     User Management
                   </TabsTrigger>
                 </TabsList>
@@ -1675,7 +1682,7 @@ export default function AdminDashboard() {
               <Tabs value={settingsTab} onValueChange={(v: string) => setSettingsTab(v)} className="space-y-6">
                 <TabsList className="grid w-full grid-cols-1">
                   <TabsTrigger value="facilities" className="flex items-center gap-2">
-                    <Settings className="h-4 w-4" />
+                    <Settings className="h-4 w-4 text-gray-600" />
                     Facility Management
                   </TabsTrigger>
                 </TabsList>
@@ -1758,7 +1765,7 @@ export default function AdminDashboard() {
                 count={activeBookings?.length || 0}
                 subtitle="Currently in progress"
                 onClick={() => { setSelectedView("booking-management"); setBookingTab('active'); }}
-                icon={<Activity className="h-6 w-6 text-green-600" />}
+                icon={<CheckCircle className="h-6 w-6 text-green-600" />}
               />
 
               <OverviewTile

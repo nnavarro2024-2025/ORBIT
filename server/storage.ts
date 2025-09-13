@@ -63,6 +63,8 @@ export interface IStorage {
   
   
   getFacilityBookingsByUser(userId: string): Promise<FacilityBooking[]>;
+  // Check only approved bookings for conflicts (used when creating new pending requests)
+  checkApprovedBookingConflicts(facilityId: number, startTime: Date, endTime: Date, excludeBookingId?: string): Promise<FacilityBooking[]>;
   checkUserOverlappingBookings(userId: string, startTime: Date, endTime: Date, excludeBookingId?: string): Promise<FacilityBooking[]>;
   cancelAllUserBookings(userId: string, adminId: string, reason: string): Promise<number>;
   getPendingFacilityBookings(): Promise<FacilityBooking[]>;
@@ -264,6 +266,38 @@ class DatabaseStorage implements IStorage {
 
   async getFacilityBookingsByUser(userId: string): Promise<FacilityBooking[]> {
     return db.select().from(facilityBookings).where(eq(facilityBookings.userId, userId)).orderBy(desc(facilityBookings.createdAt));
+  }
+
+  async checkApprovedBookingConflicts(facilityId: number, startTime: Date, endTime: Date, excludeBookingId?: string): Promise<FacilityBooking[]> {
+    let query = db.select().from(facilityBookings)
+      .where(
+        and(
+          eq(facilityBookings.facilityId, facilityId),
+          // Only check approved bookings
+          eq(facilityBookings.status, "approved"),
+          // Time overlap
+          and(
+            lt(facilityBookings.startTime, endTime),
+            gt(facilityBookings.endTime, startTime)
+          )
+        )
+      );
+
+    if (excludeBookingId) {
+      query = db.select().from(facilityBookings).where(
+        and(
+          eq(facilityBookings.facilityId, facilityId),
+          eq(facilityBookings.status, "approved"),
+          and(
+            lt(facilityBookings.startTime, endTime),
+            gt(facilityBookings.endTime, startTime)
+          ),
+          ne(facilityBookings.id, excludeBookingId)
+        )
+      );
+    }
+
+    return query;
   }
 
   async checkBookingConflicts(facilityId: number, startTime: Date, endTime: Date, excludeBookingId?: string): Promise<FacilityBooking[]> {
