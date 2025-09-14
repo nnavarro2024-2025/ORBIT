@@ -1019,7 +1019,7 @@ export default function BookingModal({
                 render={({ field }) => (
                   <div className="grid grid-cols-2 gap-3">
                     <FormItem>
-                      <FormLabel>End Date</FormLabel>
+                      <FormLabel className="text-gray-700">End Date</FormLabel>
                       <Popover>
                         <PopoverTrigger asChild>
                           <FormControl>
@@ -1242,9 +1242,31 @@ export default function BookingModal({
                   </div>
                 </div>
 
-                {/* Right-aligned placeholder (warnings moved to unified inline section below) */}
+                {/* Right-aligned helper: shows default message or an error indicator when issues exist */}
                 <div className="w-1/2 flex justify-end">
-                  <div className="text-sm text-transparent">&nbsp;</div>
+                  <div className="w-full max-w-md text-right text-sm">
+                    {(() => {
+                      const durationWarning = !isDurationValid(form.watch('startTime'), form.watch('endTime'))
+                        ? [{ title: 'Bookings must be at least 30 minutes long', description: 'Please adjust the times before saving.' }]
+                        : [];
+                      const warnings = durationWarning.concat(formValidationWarnings || []);
+                      const serverError = createBookingMutation?.error ? String((createBookingMutation.error as any)?.message || createBookingMutation.error) : null;
+
+                      if (warnings.length || serverError) {
+                        return (
+                          <div className="inline-flex items-start gap-2 text-right">
+                            <div className="text-red-600 mt-0.5">⚠️</div>
+                            <div className="text-right">
+                              <div className="font-medium text-red-700">Errors detected</div>
+                              <div className="text-red-600 text-xs">See details below</div>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      return <div className="text-gray-500">Validation or submission errors will appear below this area after you attempt to submit.</div>;
+                    })()}
+                  </div>
                 </div>
               </div>
 

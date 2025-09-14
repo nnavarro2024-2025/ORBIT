@@ -1004,12 +1004,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const isActiveBooking = startTime <= now && now <= endTime;
             const isScheduledBooking = startTime > now;
             if (isActiveBooking || isScheduledBooking) {
+              const alertTitle = isActiveBooking ? 'Booking Ended' : 'Booking Cancelled';
+              const alertVerb = isActiveBooking ? 'ended' : 'cancelled';
               await storage.createSystemAlert({
                 id: randomUUID(),
                 type: 'booking',
                 severity: 'low',
-                title: 'Booking Canceled / Ended',
-                message: `${user?.email || `User ${booking.userId}`} cancelled/ended their booking for ${facility?.name || `Facility ${booking.facilityId}`} (${new Date(booking.startTime).toLocaleString()} - ${new Date(booking.endTime).toLocaleString()}).`,
+                title: alertTitle,
+                message: `${user?.email || `User ${booking.userId}`} ${alertVerb} their booking for ${facility?.name || `Facility ${booking.facilityId}`} (${new Date(booking.startTime).toLocaleString()} - ${new Date(booking.endTime).toLocaleString()}).`,
                 userId: null,
                 isRead: false,
                 createdAt: new Date(),
@@ -1026,17 +1028,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Log activity for cancellation
       try {
         const facility = await storage.getFacility(booking.facilityId).catch(() => null);
+        const wasActive = (new Date(booking.startTime) <= now && now <= new Date(booking.endTime));
         await storage.createActivityLog({
           id: randomUUID(),
-          action: 'Booking Canceled',
-          details: `User canceled booking for ${facility?.name || `Facility ${booking.facilityId}`} (${new Date(booking.startTime).toLocaleString()} - ${new Date(booking.endTime).toLocaleString()})`,
+          action: wasActive ? 'Booking Ended' : 'Booking Cancelled',
+          details: `User ${wasActive ? 'ended' : 'cancelled'} booking for ${facility?.name || `Facility ${booking.facilityId}`} (${new Date(booking.startTime).toLocaleString()} - ${new Date(booking.endTime).toLocaleString()})`,
           userId: userId,
           ipAddress: req.ip,
           userAgent: req.get('User-Agent'),
           createdAt: new Date(),
         });
       } catch (e) {
-        console.warn('[Activity] Failed to log booking cancellation', e);
+        console.warn('[Activity] Failed to log booking cancellation/ending', e);
       }
 
       return res.json({ success: true });

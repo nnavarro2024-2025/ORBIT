@@ -142,6 +142,10 @@ export default function AdminDashboard() {
   const [bookingUsersPage, setBookingUsersPage] = useState(0);
   const [bannedUsersPage, setBannedUsersPage] = useState(0);
   const [activitiesPage, setActivitiesPage] = useState(0);
+  // per-tab pagination state for Admin Activity Logs
+  const [successPage, setSuccessPage] = useState(0);
+  const [historyPage, setHistoryPage] = useState(0);
+  const [systemPage, setSystemPage] = useState(0);
   const [itemsPerPage] = useState(10);
   // booking tab state intentionally unused here (Tabs handles internal state)
   const [securityTab, setSecurityTab] = useState<string>('booking');
@@ -993,6 +997,7 @@ export default function AdminDashboard() {
                           </div>
                         )}
                       </div>
+                      
                     ) : (
                       <div className="text-center py-8">
                         <div className="bg-gray-100 rounded-full w-12 h-12 flex items-center justify-center mx-auto mb-3">
@@ -1805,38 +1810,67 @@ export default function AdminDashboard() {
                     <h3 className="text-lg font-semibold text-gray-900">Successfully Booked</h3>
                     <p className="text-sm text-gray-600 mt-1">Completed bookings which were approved and had confirmed arrival.</p>
                     {successfullyBooked.length > 0 ? (
-                      <div className="space-y-2 mt-3">
-                        {successfullyBooked.slice(0, itemsPerPage).map((b: FacilityBooking) => (
-                          <div key={b.id} className="bg-white rounded-md p-3 border border-gray-200">
-                            <div className="flex items-center gap-4">
-                              {/* Left: user email + room + participants */}
-                              <div className="flex-1">
-                                <h4 className="font-medium text-sm text-gray-900">{getUserEmail(b.userId)}</h4>
-                                <p className="text-xs text-gray-600">{getFacilityName(b.facilityId)}</p>
-                                <p className="text-xs text-gray-500 mt-1">Participants: <span className="text-xs text-gray-700">{b.participants || 0}</span></p>
-                              </div>
-
-                              {/* Right: single-row compact layout: Purpose | Starts : Ends | Status */}
-                              <div className="flex-1 flex items-center">
-                                <div className="flex-1 flex items-center justify-end gap-3 text-xs text-gray-500 truncate">
-                                  <span className="text-xs text-gray-500">Purpose:</span>
-                                  <span className="text-sm text-gray-900 truncate max-w-[220px]">{b.purpose || ''}</span>
-                                  <span className="text-xs text-gray-400">|</span>
-                                  <span className="text-xs text-gray-500">Starts:</span>
-                                  <span className="text-xs text-gray-900">{formatDateTime(b.startTime)}</span>
-                                  <span className="text-xs text-gray-400">|</span>
-                                  <span className="text-xs text-gray-500">Ends:</span>
-                                  <span className="text-xs text-gray-900">{formatDateTime(b.endTime)}</span>
+                      <>
+                        <div className="space-y-2 mt-3">
+                          {successfullyBooked.slice(successPage * itemsPerPage, (successPage + 1) * itemsPerPage).map((b: FacilityBooking) => (
+                            <div key={b.id} className="bg-white rounded-md p-3 border border-gray-200">
+                              <div className="flex items-center gap-4">
+                                {/* Left: user email + room + participants */}
+                                <div className="flex-1">
+                                  <h4 className="font-medium text-sm text-gray-900">{getUserEmail(b.userId)}</h4>
+                                  <p className="text-xs text-gray-600">{getFacilityName(b.facilityId)}</p>
+                                  <p className="text-xs text-gray-500 mt-1">Participants: <span className="text-xs text-gray-700">{b.participants || 0}</span></p>
                                 </div>
-                                <div className="w-36 text-right ml-4 flex items-center justify-end gap-2">
-                                  <span className="text-xs text-gray-400">|</span>
-                                  <span className={`text-xs font-medium ${statusClass(b.status)} capitalize`}>Status: {String(b.status || '')}</span>
+
+                                {/* Right: single-row compact layout: Purpose | Starts : Ends | Status */}
+                                <div className="flex-1 flex items-center">
+                                  <div className="flex-1 flex items-center justify-end gap-3 text-xs text-gray-500 truncate">
+                                    <span className="text-xs text-gray-500">Purpose:</span>
+                                    <span className="text-sm text-gray-900 truncate max-w-[220px]">{b.purpose || ''}</span>
+                                    <span className="text-xs text-gray-400">|</span>
+                                    <span className="text-xs text-gray-500">Starts:</span>
+                                    <span className="text-xs text-gray-900">{formatDateTime(b.startTime)}</span>
+                                    <span className="text-xs text-gray-400">|</span>
+                                    <span className="text-xs text-gray-500">Ends:</span>
+                                    <span className="text-xs text-gray-900">{formatDateTime(b.endTime)}</span>
+                                  </div>
+                                  <div className="w-36 text-right ml-4 flex items-center justify-end gap-2">
+                                    <span className="text-xs text-gray-400">|</span>
+                                    <span className={`text-xs font-medium ${statusClass(b.status)} capitalize`}>Status: {String(b.status || '')}</span>
+                                  </div>
                                 </div>
                               </div>
                             </div>
+                          ))}
+                        </div>
+
+                        {successfullyBooked.length > itemsPerPage && (
+                          <div className="flex items-center justify-between pt-4 border-t border-gray-200">
+                            <p className="text-sm text-gray-600">
+                              Showing {successPage * itemsPerPage + 1} to {Math.min((successPage + 1) * itemsPerPage, successfullyBooked.length)} of {successfullyBooked.length} results
+                            </p>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => setSuccessPage(prev => Math.max(prev - 1, 0))}
+                                disabled={successPage === 0}
+                                className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                              >
+                                <ChevronLeft className="h-4 w-4" />
+                              </button>
+                              <span className="px-3 py-1 text-sm font-medium">
+                                {successPage + 1} of {Math.ceil(successfullyBooked.length / itemsPerPage)}
+                              </span>
+                              <button
+                                onClick={() => setSuccessPage(prev => (successfullyBooked && (prev + 1) * itemsPerPage < successfullyBooked.length ? prev + 1 : prev))}
+                                disabled={!successfullyBooked || (successPage + 1) * itemsPerPage >= successfullyBooked.length}
+                                className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                              >
+                                <ChevronRight className="h-4 w-4" />
+                              </button>
+                            </div>
                           </div>
-                        ))}
-                      </div>
+                        )}
+                      </>
                     ) : (
                       <EmptyState Icon={CheckCircle} message="No successful bookings found" />
                     )}
@@ -1848,38 +1882,67 @@ export default function AdminDashboard() {
                     <h3 className="text-lg font-semibold text-gray-900">Booking History</h3>
                     <p className="text-sm text-gray-600 mt-1">Past bookings including denied, cancelled or expired reservations for audit purposes.</p>
                     {bookingHistory.length > 0 ? (
-                      <div className="space-y-2 mt-3">
-                        {bookingHistory.slice(0, itemsPerPage).map((b: FacilityBooking) => (
-                          <div key={b.id} className="bg-white rounded-md p-3 border border-gray-200">
-                            <div className="flex items-center justify-between gap-3">
-                              {/* Left: user email + room + participants */}
-                              <div className="flex-1">
-                                <h4 className="font-medium text-sm text-gray-900">{getUserEmail(b.userId)}</h4>
-                                <p className="text-xs text-gray-600">{getFacilityName(b.facilityId)}</p>
-                                <p className="text-xs text-gray-500 mt-1">Participants: <span className="text-xs text-gray-700">{b.participants || 0}</span></p>
-                              </div>
-
-                              {/* Right: single-row compact layout: Purpose | Starts : Ends | Status */}
-                              <div className="flex-1 flex items-center">
-                                <div className="flex-1 flex items-center justify-end gap-3 text-xs text-gray-500 truncate">
-                                  <span className="text-xs text-gray-500">Purpose:</span>
-                                  <span className="text-sm text-gray-900 truncate max-w-[220px]">{b.purpose || ''}</span>
-                                  <span className="text-xs text-gray-400">|</span>
-                                  <span className="text-xs text-gray-500">Starts:</span>
-                                  <span className="text-xs text-gray-900">{formatDateTime(b.startTime)}</span>
-                                  <span className="text-xs text-gray-400">|</span>
-                                  <span className="text-xs text-gray-500">Ends:</span>
-                                  <span className="text-xs text-gray-900">{formatDateTime(b.endTime)}</span>
+                      <>
+                        <div className="space-y-2 mt-3">
+                          {bookingHistory.slice(historyPage * itemsPerPage, (historyPage + 1) * itemsPerPage).map((b: FacilityBooking) => (
+                            <div key={b.id} className="bg-white rounded-md p-3 border border-gray-200">
+                              <div className="flex items-center justify-between gap-3">
+                                {/* Left: user email + room + participants */}
+                                <div className="flex-1">
+                                  <h4 className="font-medium text-sm text-gray-900">{getUserEmail(b.userId)}</h4>
+                                  <p className="text-xs text-gray-600">{getFacilityName(b.facilityId)}</p>
+                                  <p className="text-xs text-gray-500 mt-1">Participants: <span className="text-xs text-gray-700">{b.participants || 0}</span></p>
                                 </div>
-                                <div className="w-36 text-right ml-4 flex items-center justify-end gap-2">
-                                  <span className="text-xs text-gray-400">|</span>
-                                  <span className={`text-xs font-medium ${statusClass(b.status)} capitalize`}>Status: {String(b.status || '')}</span>
+
+                                {/* Right: single-row compact layout: Purpose | Starts : Ends | Status */}
+                                <div className="flex-1 flex items-center">
+                                  <div className="flex-1 flex items-center justify-end gap-3 text-xs text-gray-500 truncate">
+                                    <span className="text-xs text-gray-500">Purpose:</span>
+                                    <span className="text-sm text-gray-900 truncate max-w-[220px]">{b.purpose || ''}</span>
+                                    <span className="text-xs text-gray-400">|</span>
+                                    <span className="text-xs text-gray-500">Starts:</span>
+                                    <span className="text-xs text-gray-900">{formatDateTime(b.startTime)}</span>
+                                    <span className="text-xs text-gray-400">|</span>
+                                    <span className="text-xs text-gray-500">Ends:</span>
+                                    <span className="text-xs text-gray-900">{formatDateTime(b.endTime)}</span>
+                                  </div>
+                                  <div className="w-36 text-right ml-4 flex items-center justify-end gap-2">
+                                    <span className="text-xs text-gray-400">|</span>
+                                    <span className={`text-xs font-medium ${statusClass(b.status)} capitalize`}>Status: {String(b.status || '')}</span>
+                                  </div>
                                 </div>
                               </div>
                             </div>
+                          ))}
+                        </div>
+
+                        {bookingHistory.length > itemsPerPage && (
+                          <div className="flex items-center justify-between pt-4 border-t border-gray-200">
+                            <p className="text-sm text-gray-600">
+                              Showing {historyPage * itemsPerPage + 1} to {Math.min((historyPage + 1) * itemsPerPage, bookingHistory.length)} of {bookingHistory.length} results
+                            </p>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => setHistoryPage(prev => Math.max(prev - 1, 0))}
+                                disabled={historyPage === 0}
+                                className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                              >
+                                <ChevronLeft className="h-4 w-4" />
+                              </button>
+                              <span className="px-3 py-1 text-sm font-medium">
+                                {historyPage + 1} of {Math.ceil(bookingHistory.length / itemsPerPage)}
+                              </span>
+                              <button
+                                onClick={() => setHistoryPage(prev => (bookingHistory && (prev + 1) * itemsPerPage < bookingHistory.length ? prev + 1 : prev))}
+                                disabled={!bookingHistory || (historyPage + 1) * itemsPerPage >= bookingHistory.length}
+                                className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                              >
+                                <ChevronRight className="h-4 w-4" />
+                              </button>
+                            </div>
                           </div>
-                        ))}
-                      </div>
+                        )}
+                      </>
                     ) : (
                       <EmptyState Icon={BarChart3} message="No booking history records" />
                     )}
@@ -1891,9 +1954,10 @@ export default function AdminDashboard() {
                     <h3 className="text-lg font-semibold text-gray-900">System Activity</h3>
                     <p className="text-sm text-gray-500 mt-1">Combined system alerts and activity logs for security and operational events.</p>
                     {systemActivity.length > 0 ? (
-                      <div className="space-y-2 mt-3">
-                        {systemActivity.slice(0, itemsPerPage).map((a: any, idx: number) => (
-                          (() => {
+                      <>
+                        <div className="space-y-2 mt-3">
+                          {systemActivity.slice(systemPage * itemsPerPage, (systemPage + 1) * itemsPerPage).map((a: any, idx: number) => (
+                            (() => {
                             // Resolve actor email: userId -> email in details -> usersMap lookup -> current user email
                             let actorEmail = '';
                             try {
@@ -2006,8 +2070,36 @@ export default function AdminDashboard() {
                               </div>
                             );
                           })()
-                        ))}
-                      </div>
+                          ))}
+                        </div>
+
+                        {systemActivity.length > itemsPerPage && (
+                          <div className="flex items-center justify-between pt-4 border-t border-gray-200">
+                            <p className="text-sm text-gray-600">
+                              Showing {systemPage * itemsPerPage + 1} to {Math.min((systemPage + 1) * itemsPerPage, systemActivity.length)} of {systemActivity.length} results
+                            </p>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => setSystemPage(prev => Math.max(prev - 1, 0))}
+                                disabled={systemPage === 0}
+                                className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                              >
+                                <ChevronLeft className="h-4 w-4" />
+                              </button>
+                              <span className="px-3 py-1 text-sm font-medium">
+                                {systemPage + 1} of {Math.ceil(systemActivity.length / itemsPerPage)}
+                              </span>
+                              <button
+                                onClick={() => setSystemPage(prev => (systemActivity && (prev + 1) * itemsPerPage < systemActivity.length ? prev + 1 : prev))}
+                                disabled={!systemActivity || (systemPage + 1) * itemsPerPage >= systemActivity.length}
+                                className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                              >
+                                <ChevronRight className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </>
                     ) : (
                       <EmptyState Icon={Activity} message="No system activity found" />
                     )}
