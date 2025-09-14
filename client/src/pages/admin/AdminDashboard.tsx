@@ -76,6 +76,16 @@ export default function AdminDashboard() {
   void setUsersData; void setActivities; void setFacilities; void setUser;
   const usersMap = useMemo(() => new Map<string, User>(), []);
 
+  // Keep a map of users for quick lookup (populated after queries update usersData)
+  useEffect(() => {
+    try {
+      usersMap.clear();
+      (usersData || []).forEach((u: User) => usersMap.set(String(u.id), u));
+    } catch (e) {
+      // ignore
+    }
+  }, [usersData]);
+
   function getUserEmail(id: any) {
     if (!id) return 'Unknown';
     return usersData?.find(u => u.id === id)?.email || String(id);
@@ -95,10 +105,6 @@ export default function AdminDashboard() {
     }
   }
 
-  function formatActivityDetails(activity: any) {
-    if (!activity) return '';
-    return activity.details || activity.message || '';
-  }
 
   // Render a colored badge for booking status
   function renderStatusBadge(statusRaw: any) {
@@ -519,7 +525,7 @@ export default function AdminDashboard() {
       }
     }
 
-    // Handle "User [UUID] has been unbanned by admin and account access restored" pattern
+  // Handle "User [UUID] has been unbanned by admin and account access restored" pattern
     if (message.includes('has been unbanned by admin and account access restored')) {
       // First try to match UUID pattern
       const userIdMatch = message.match(/User ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) has been unbanned/);
@@ -533,7 +539,7 @@ export default function AdminDashboard() {
           activity.details?.includes(userId)
         );
         
-        let adminEmail = 'admin';
+  let adminEmail = user?.email || 'admin';
         if (relatedActivity) {
           // First try to extract admin email from "by [email]" pattern
           const adminEmailMatch = relatedActivity.details?.match(/by ([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
@@ -569,7 +575,7 @@ export default function AdminDashboard() {
            Math.abs(new Date(activity.createdAt).getTime() - Date.now()) < 60000) // Within last minute as fallback
         );
         
-        let adminEmail = user?.email || 'admin';
+  let adminEmail = user?.email || 'admin';
         if (relatedActivity) {
           // First try to extract admin email from "by [email]" pattern
           const adminEmailMatch = relatedActivity.details?.match(/by ([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
@@ -595,7 +601,7 @@ export default function AdminDashboard() {
         Math.abs(new Date(activity.createdAt).getTime() - Date.now()) < 60000 // Within last minute
       );
       
-      let adminEmail = user?.email || 'admin';
+  let adminEmail = user?.email || 'admin';
       if (relatedActivity) {
         // First try to extract admin email from "by [email]" pattern
         const adminEmailMatch = relatedActivity.details?.match(/by ([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
@@ -615,10 +621,10 @@ export default function AdminDashboard() {
       return message.replace('by admin', `by ${adminEmail}`);
     }
 
-    // Handle user management messages - fix the format for unbanned users
+  // Handle user management messages - fix the format for unbanned users
     if (message.includes('unbanned user') && message.includes('by ')) {
       // Extract the admin email at the end
-      const byMatch = message.match(/by ([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+        const byMatch = message.match(/by ([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
       if (byMatch) {
         const adminEmail = byMatch[1];
         
@@ -658,12 +664,53 @@ export default function AdminDashboard() {
     }
 
     // General cleanup - remove session IDs and other technical details
-    return message
+    let cleaned = message
       .replace(/\(Session ID: [0-9a-f-]+\)/g, '')
       .replace(/\(ID: [0-9a-f-]+\)/g, '')
       .replace(/\(ID removed\)/g, '')
       .trim();
+
+    // Replace any UUID-like user IDs with an email if we know the user, otherwise remove them
+    try {
+      const uuidRegexGlobal = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/g;
+      cleaned = cleaned.replace(uuidRegexGlobal, (match) => {
+        const found = usersData?.find(u => u.id === match);
+        // If we know this UUID corresponds to a user, show their email; otherwise remove the raw id
+        return found ? found.email : '';
+      });
+    } catch (e) {
+      // ignore replacement errors
+    }
+
+    // Strip any standalone 'booking <uuid>' occurrences to avoid exposing booking ids
+    try {
+      cleaned = cleaned.replace(/booking\s+[0-9a-f-]{36}/gi, 'booking');
+    } catch (e) {}
+
+    // Finally normalize whitespace
+    return cleaned.replace(/\s{2,}/g, ' ').trim();
   };
+
+  // formatActivityDetails removed (unused) — formatting is handled inline where needed
+
+  // Helper to resolve an actor's display email from a userId or details blob
+  function getActorEmail(activityOrUserId: any) {
+    if (!activityOrUserId) return '';
+    // If passed an activity object, prefer userId then details
+    if (typeof activityOrUserId === 'object') {
+      const a = activityOrUserId;
+      if (a.userId) return getUserEmail(a.userId);
+      // try to extract email from details
+      const match = String(a.details || a.message || '').match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+      if (match) return match[1];
+      return '';
+    }
+
+    // If passed a user id string
+    return getUserEmail(activityOrUserId);
+  }
+  // avoid unused-variable TS warnings
+  void getActorEmail;
 
   const handleUnavailableConfirm = (reason?: string) => {
     if (!facilityForUnavailable) return;
@@ -688,6 +735,8 @@ export default function AdminDashboard() {
       </div>
     </div>
   );
+  // avoid unused-variable warning
+  void CardHeader;
 
   const EmptyState = ({ Icon, message }: { Icon: any; message: string }) => (
     <div className="text-center py-8">
@@ -778,7 +827,7 @@ export default function AdminDashboard() {
       case "booking-management":
         return (
           <div className="space-y-6">
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
               <div className="flex items-center justify-between mb-6">
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900">Facility Booking Management</h2>
@@ -826,7 +875,7 @@ export default function AdminDashboard() {
                           ?.slice(activeBookingsPage * itemsPerPage, (activeBookingsPage + 1) * itemsPerPage)
                           .map((booking: FacilityBooking) => (
                           <div key={booking.id} className="bg-white rounded-lg p-4 border border-gray-200 hover:border-green-300 transition-colors duration-200">
-                            <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-6">
                               <div className="flex items-center gap-4">
                                 <div className="bg-green-100 p-2 rounded-lg">
                                   <CheckCircle className="h-5 w-5 text-green-600" />
@@ -1222,7 +1271,7 @@ export default function AdminDashboard() {
 
         return (
           <div className="space-y-6">
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
               <div className="flex items-center justify-between mb-6">
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900">User Management</h2>
@@ -1477,11 +1526,11 @@ export default function AdminDashboard() {
 
         return (
           <div className="space-y-6">
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
               <div className="flex items-center justify-between mb-6">
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900">System Alerts</h2>
-                  <p className="text-gray-600 mt-1">Monitor system security alerts and notifications</p>
+                  <p className="text-gray-600 mt-1 text-sm">Monitor system security alerts and notifications</p>
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="bg-orange-100 text-orange-800 px-3 py-1 rounded-full text-sm font-medium">
@@ -1526,52 +1575,49 @@ export default function AdminDashboard() {
                         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
                         .map((alert: SystemAlert) => {
                           const isHighPriority = alert.severity === 'critical' || alert.severity === 'high';
-                          return (
-                            <div key={alert.id} className={`bg-white rounded-lg p-4 border transition-colors duration-200 ${
-                              isHighPriority ? 'border-red-200 hover:border-red-300' : 'border-gray-200 hover:border-gray-300'
-                            } ${alert.isRead ? 'opacity-60' : ''}`}>
-                              <div className="flex items-start gap-3">
-                                <div className={`p-2 rounded-lg flex-shrink-0 ${
-                                  isHighPriority ? 'bg-red-100' : 'bg-orange-100'
-                                }`}>
-                                  <AlertTriangle className={`h-5 w-5 ${
-                                    isHighPriority ? 'text-red-600' : 'text-orange-600'
-                                  }`} />
-                                </div>
-                                <div className="flex-grow">
-                                  <div className="flex items-start justify-between">
-                                    <div>
-                                      <h4 className="font-medium text-gray-900">{alert.title}</h4>
-                                      <p className="text-sm text-gray-600 mt-1">
-                                        {alert.isRead ? `READ: ${alert.message}` : alert.message}
-                                      </p>
-                                    </div>
-                                    <div className="flex items-center gap-2 ml-4">
-                                      <span className="text-xs text-gray-500">{formatDateTime(alert.createdAt)}</span>
-                                      {alert.isRead ? (
-                                        <span className="px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-600">
-                                          Read
-                                        </span>
-                                      ) : (
-                                        <button
-                                          className="px-2 py-1 rounded text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors duration-200"
-                                          onClick={async () => {
-                                            try {
-                                              await apiRequest('POST', `/api/admin/alerts/${alert.id}/read`);
-                                              queryClient.invalidateQueries({ queryKey: ['/api/admin/alerts'] });
-                                              queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] });
-                                            } catch (e) {}
-                                          }}
-                                        >
-                                          Mark as Read
-                                        </button>
-                                      )}
+                            return (
+                              <div key={alert.id} className={`bg-white rounded-md p-3 border border-gray-200 transition-colors duration-200 ${alert.isRead ? 'opacity-60' : ''}`}>
+                                <div className="flex items-start gap-3">
+                                  <div className={`p-2 rounded-lg flex-shrink-0 ${
+                                    isHighPriority ? 'bg-red-100' : 'bg-orange-100'
+                                  }`}>
+                                    <AlertTriangle className={`h-5 w-5 ${
+                                      isHighPriority ? 'text-red-600' : 'text-orange-600'
+                                    }`} />
+                                  </div>
+                                  <div className="flex-grow">
+                                    <div className="flex items-start justify-between">
+                                      <div className="pr-4">
+                                        <p className="font-medium text-sm text-gray-900">{alert.title}</p>
+                                        <p className="text-xs text-gray-600 mt-1">{alert.isRead ? `READ: ${alert.message}` : alert.message}</p>
+                                        {/* source not available on SystemAlert type */}
+                                      </div>
+                                      <div className="w-44 text-right text-xs text-gray-500 flex flex-col items-end gap-1">
+                                        <div className="w-full">{formatDateTime(alert.createdAt)}</div>
+                                        {alert.isRead ? (
+                                          <span className="px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-600">
+                                            Read
+                                          </span>
+                                        ) : (
+                                          <button
+                                            className="px-2 py-1 rounded text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors duration-200"
+                                            onClick={async () => {
+                                              try {
+                                                await apiRequest('POST', `/api/admin/alerts/${alert.id}/read`);
+                                                queryClient.invalidateQueries({ queryKey: ['/api/admin/alerts'] });
+                                                queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] });
+                                              } catch (e) {}
+                                            }}
+                                          >
+                                            Mark as Read
+                                          </button>
+                                        )}
+                                      </div>
                                     </div>
                                   </div>
                                 </div>
                               </div>
-                            </div>
-                          );
+                            );
                         })}
                     </div>
                     
@@ -1639,9 +1685,10 @@ export default function AdminDashboard() {
                                 </div>
                                 <div className="flex-grow">
                                   <div className="flex items-start justify-between">
-                                    <div>
-                                      <h4 className="font-medium text-gray-900">{alert.title}</h4>
-                                      <p className="text-sm text-gray-600 mt-1">{formattedMessage}</p>
+                                    <div className="pr-4">
+                                      <p className="font-medium text-sm text-gray-900">{alert.title}</p>
+                                      <p className="text-xs text-gray-600 mt-1">{formattedMessage}</p>
+                                      {/* source not available on SystemAlert type */}
                                       {isUnbanActivity && (
                                         <div className="mt-2 inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
                                           <UserCheck className="h-3 w-3" />
@@ -1655,8 +1702,8 @@ export default function AdminDashboard() {
                                         </div>
                                       )}
                                     </div>
-                                    <div className="flex items-center gap-2 ml-4">
-                                      <span className="text-xs text-gray-500">{formatDateTime(alert.createdAt)}</span>
+                                    <div className="w-44 text-right text-xs text-gray-500 flex flex-col items-end gap-1">
+                                      <div className="w-full">{formatDateTime(alert.createdAt)}</div>
                                       {alert.isRead ? (
                                         <span className="px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-600">
                                           Read
@@ -1706,18 +1753,29 @@ export default function AdminDashboard() {
         break;
 
       case "admin-activity-logs":
-        // Prepare lists for the activity logs view
+        // Prepare lists for the activity logs view (improved with richer details)
         const successfullyBooked = allBookings.filter(b => b.status === 'approved' && b.arrivalConfirmed && new Date(b.endTime) < new Date());
         const bookingHistory = allBookings.filter(b => ['denied', 'cancelled', 'expired', 'void'].includes(b.status) || (b.status === 'approved' && new Date(b.endTime) < new Date() && !b.arrivalConfirmed));
         const systemActivity = [ ...(activities || []), ...(alerts || []) ].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
+        // bookingDuration removed (unused) — compute inline if needed
+
+        const statusClass = (statusRaw: any) => {
+          const s = String(statusRaw || '').toLowerCase();
+          if (s === 'pending' || s === 'request' || s === 'requested') return 'text-yellow-600';
+          if (s === 'approved' || s === 'completed') return 'text-green-600';
+          if (s === 'denied' || s === 'cancelled' || s === 'canceled') return 'text-red-600';
+          if (s === 'expired' || s === 'void') return 'text-gray-600';
+          return 'text-gray-600';
+        };
+
         return (
           <div className="space-y-6">
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center justify-between mb-6">
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900">Admin Activity Logs</h2>
-                  <p className="text-gray-600 mt-1">Centralized booking and system logs</p>
+                  <p className="text-gray-600 mt-1 text-sm">Centralized booking and system logs — detailed view for auditing and troubleshooting</p>
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium">{successfullyBooked.length || 0} Successful</div>
@@ -1742,21 +1800,38 @@ export default function AdminDashboard() {
                   </TabsTrigger>
                 </TabsList>
 
-                <TabsContent value="success" className="space-y-4">
+                <TabsContent value="success" className="space-y-2">
                   <div className="bg-gray-50 rounded-lg p-6">
                     <h3 className="text-lg font-semibold text-gray-900">Successfully Booked</h3>
+                    <p className="text-sm text-gray-600 mt-1">Completed bookings which were approved and had confirmed arrival.</p>
                     {successfullyBooked.length > 0 ? (
-                      <div className="space-y-3 mt-4">
+                      <div className="space-y-2 mt-3">
                         {successfullyBooked.slice(0, itemsPerPage).map((b: FacilityBooking) => (
-                          <div key={b.id} className="bg-white rounded-lg p-4 border border-gray-200">
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <h4 className="font-medium text-gray-900">{getUserEmail(b.userId)}</h4>
-                                <p className="text-sm text-gray-600">{getFacilityName(b.facilityId)}</p>
+                          <div key={b.id} className="bg-white rounded-md p-3 border border-gray-200">
+                            <div className="flex items-center gap-4">
+                              {/* Left: user email + room + participants */}
+                              <div className="flex-1">
+                                <h4 className="font-medium text-sm text-gray-900">{getUserEmail(b.userId)}</h4>
+                                <p className="text-xs text-gray-600">{getFacilityName(b.facilityId)}</p>
+                                <p className="text-xs text-gray-500 mt-1">Participants: <span className="text-xs text-gray-700">{b.participants || 0}</span></p>
                               </div>
-                              <div className="text-right">
-                                <p className="text-sm text-gray-900">{formatDateTime(b.startTime)} → {formatDateTime(b.endTime)}</p>
-                                <p className="text-xs text-gray-500">Participants: {b.participants || 0}</p>
+
+                              {/* Right: single-row compact layout: Purpose | Starts : Ends | Status */}
+                              <div className="flex-1 flex items-center">
+                                <div className="flex-1 flex items-center justify-end gap-3 text-xs text-gray-500 truncate">
+                                  <span className="text-xs text-gray-500">Purpose:</span>
+                                  <span className="text-sm text-gray-900 truncate max-w-[220px]">{b.purpose || ''}</span>
+                                  <span className="text-xs text-gray-400">|</span>
+                                  <span className="text-xs text-gray-500">Starts:</span>
+                                  <span className="text-xs text-gray-900">{formatDateTime(b.startTime)}</span>
+                                  <span className="text-xs text-gray-400">|</span>
+                                  <span className="text-xs text-gray-500">Ends:</span>
+                                  <span className="text-xs text-gray-900">{formatDateTime(b.endTime)}</span>
+                                </div>
+                                <div className="w-36 text-right ml-4 flex items-center justify-end gap-2">
+                                  <span className="text-xs text-gray-400">|</span>
+                                  <span className={`text-xs font-medium ${statusClass(b.status)} capitalize`}>Status: {String(b.status || '')}</span>
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -1768,21 +1843,38 @@ export default function AdminDashboard() {
                   </div>
                 </TabsContent>
 
-                <TabsContent value="history" className="space-y-4">
+                <TabsContent value="history" className="space-y-2">
                   <div className="bg-gray-50 rounded-lg p-6">
                     <h3 className="text-lg font-semibold text-gray-900">Booking History</h3>
+                    <p className="text-sm text-gray-600 mt-1">Past bookings including denied, cancelled or expired reservations for audit purposes.</p>
                     {bookingHistory.length > 0 ? (
-                      <div className="space-y-3 mt-4">
+                      <div className="space-y-2 mt-3">
                         {bookingHistory.slice(0, itemsPerPage).map((b: FacilityBooking) => (
-                          <div key={b.id} className="bg-white rounded-lg p-4 border border-gray-200">
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <h4 className="font-medium text-gray-900">{getUserEmail(b.userId)}</h4>
-                                <p className="text-sm text-gray-600">{getFacilityName(b.facilityId)}</p>
+                          <div key={b.id} className="bg-white rounded-md p-3 border border-gray-200">
+                            <div className="flex items-center justify-between gap-3">
+                              {/* Left: user email + room + participants */}
+                              <div className="flex-1">
+                                <h4 className="font-medium text-sm text-gray-900">{getUserEmail(b.userId)}</h4>
+                                <p className="text-xs text-gray-600">{getFacilityName(b.facilityId)}</p>
+                                <p className="text-xs text-gray-500 mt-1">Participants: <span className="text-xs text-gray-700">{b.participants || 0}</span></p>
                               </div>
-                              <div className="text-right">
-                                <p className="text-sm text-gray-900">{formatDateTime(b.startTime)} → {formatDateTime(b.endTime)}</p>
-                                <p className="text-xs text-gray-500">Status: {b.status}</p>
+
+                              {/* Right: single-row compact layout: Purpose | Starts : Ends | Status */}
+                              <div className="flex-1 flex items-center">
+                                <div className="flex-1 flex items-center justify-end gap-3 text-xs text-gray-500 truncate">
+                                  <span className="text-xs text-gray-500">Purpose:</span>
+                                  <span className="text-sm text-gray-900 truncate max-w-[220px]">{b.purpose || ''}</span>
+                                  <span className="text-xs text-gray-400">|</span>
+                                  <span className="text-xs text-gray-500">Starts:</span>
+                                  <span className="text-xs text-gray-900">{formatDateTime(b.startTime)}</span>
+                                  <span className="text-xs text-gray-400">|</span>
+                                  <span className="text-xs text-gray-500">Ends:</span>
+                                  <span className="text-xs text-gray-900">{formatDateTime(b.endTime)}</span>
+                                </div>
+                                <div className="w-36 text-right ml-4 flex items-center justify-end gap-2">
+                                  <span className="text-xs text-gray-400">|</span>
+                                  <span className={`text-xs font-medium ${statusClass(b.status)} capitalize`}>Status: {String(b.status || '')}</span>
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -1797,20 +1889,123 @@ export default function AdminDashboard() {
                 <TabsContent value="system" className="space-y-4">
                   <div className="bg-gray-50 rounded-lg p-6">
                     <h3 className="text-lg font-semibold text-gray-900">System Activity</h3>
+                    <p className="text-sm text-gray-500 mt-1">Combined system alerts and activity logs for security and operational events.</p>
                     {systemActivity.length > 0 ? (
-                      <div className="space-y-3 mt-4">
+                      <div className="space-y-2 mt-3">
                         {systemActivity.slice(0, itemsPerPage).map((a: any, idx: number) => (
-                          <div key={a.id || idx} className="bg-white rounded-lg p-4 border border-gray-200">
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <p className="font-medium text-gray-900">{(a.title || a.action) ?? 'System Event'}</p>
-                                <p className="text-xs text-gray-600">{a.message || a.details || ''}</p>
+                          (() => {
+                            // Resolve actor email: userId -> email in details -> usersMap lookup -> current user email
+                            let actorEmail = '';
+                            try {
+                              if (a.userId) actorEmail = getUserEmail(a.userId);
+                              if (!actorEmail) {
+                                const details = String(a.details || a.message || '');
+                                const match = details.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+                                if (match) actorEmail = match[1];
+                              }
+                              if (!actorEmail) {
+                                const details = String(a.details || a.message || '');
+                                const adminIdMatch = details.match(/Admin\s+([0-9a-f-]{8,36})/i);
+                                if (adminIdMatch) {
+                                  const id = adminIdMatch[1];
+                                  const found = usersMap.get(id) || (usersData || []).find((u: User) => String(u.id) === String(id));
+                                  actorEmail = found?.email || '';
+                                }
+                              }
+                            } catch (e) { actorEmail = '' }
+
+                            if (!actorEmail) actorEmail = user?.email || '';
+
+                            const rawMsg = a.message || a.details || '';
+                            let formatted = formatAlertMessage(rawMsg);
+                            // Remove generic leading 'Admin' to avoid confusion when actor is shown separately
+                            try {
+                              formatted = formatted.replace(/^Admin\b[:\s,-]*/i, '');
+                            } catch (e) {}
+
+                            // Remove actorEmail occurrences from the formatted details so it doesn't appear twice
+                            if (actorEmail) {
+                              try {
+                                const esc = String(actorEmail).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                                formatted = String(formatted).replace(new RegExp(esc, 'gi'), '').replace(/\s{2,}/g, ' ').trim();
+                              } catch (e) {}
+                            }
+
+                            // Try to find the booking/user target email mentioned in the message
+                            let targetEmail = '';
+                            try {
+                              const m = (a.message || a.details || '').toString().match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+                              if (m) targetEmail = m[1];
+                            } catch (e) { /* ignore */ }
+
+                            // Try to extract a booking id from the message/details so we can look up booking info
+                            let extractedBookingId: string | null = null;
+                            try {
+                              const bidMatch = (a.message || a.details || '').toString().match(/booking\s+([0-9a-zA-Z-]{6,64})/i);
+                              if (bidMatch) extractedBookingId = bidMatch[1];
+                            } catch (e) { extractedBookingId = null; }
+
+                            // If we found a booking id, try to locate the booking to extract user/facility
+                            let lookedUpBooking: FacilityBooking | undefined;
+                            if (extractedBookingId) {
+                              try {
+                                lookedUpBooking = allBookings.find(b => String(b.id) === String(extractedBookingId));
+                              } catch (e) { lookedUpBooking = undefined; }
+                            }
+
+                            // Heuristics to make the sub-line read naturally:
+                            // - If the event is a 'request', ensure the requester (targetEmail) leads the line
+                            // - If the event is an admin action (approved/denied/confirmed), prepend actorEmail
+                            const title = String((a.title || a.action || '')).toLowerCase();
+                            const isRequest = title.includes('request') || title.includes('requested') || title.includes('new booking');
+                            const isApproved = title.includes('approve') || title.includes('approved');
+                            const isDenied = title.includes('deny') || title.includes('denied');
+                            const isCancelled = title.includes('cancel');
+                            const isArrival = title.includes('arrival') || title.includes('confirmed');
+
+                            // Build a readable sub-line
+                            let subLine = formatted;
+                              try {
+                              if (isRequest) {
+                                // For requests, prefer the requester at the start
+                                if (targetEmail && !/^\s*\S+@/.test(subLine)) {
+                                  subLine = `${targetEmail} ${subLine}`.trim();
+                                }
+                              } else if (isApproved || isDenied || isCancelled || isArrival) {
+                                // For admin actions, ensure actorEmail starts the sub-line
+                                if (isArrival && lookedUpBooking) {
+                                  // Build a clearer arrival message using the booking record when available
+                                  const who = getUserEmail(lookedUpBooking.userId);
+                                  const where = getFacilityName(lookedUpBooking.facilityId);
+                                  const when = `${formatDateTime(lookedUpBooking.startTime)} to ${formatDateTime(lookedUpBooking.endTime)}`;
+                                  subLine = `${actorEmail} confirmed arrival for ${who} at ${where} from ${when}`;
+                                } else if (actorEmail && !subLine.toLowerCase().startsWith(actorEmail.toLowerCase())) {
+                                  subLine = `${actorEmail} ${subLine}`.trim();
+                                }
+                              } else {
+                                // Default: if subLine doesn't include a person, prepend actor if available
+                                if (actorEmail && !/^\s*\S+@/.test(subLine)) {
+                                  subLine = `${actorEmail} ${subLine}`.trim();
+                                }
+                              }
+                            } catch (e) {}
+
+                            return (
+                              <div key={a.id || idx} className="bg-white rounded-md p-3 border border-gray-200">
+                                <div className="flex items-start justify-between gap-3">
+                                      <div className="flex-1 pr-4">
+                                        <p className="font-medium text-sm text-gray-900">{(a.title || a.action) ?? 'System Event'}</p>
+                                        <p className="text-xs text-gray-600 mt-1">{subLine}</p>
+                                        <div className="mt-1 text-xs text-gray-400">{a.source ? `Source: ${a.source}` : ''}</div>
+                                      </div>
+
+                                      <div className="w-44 text-right text-xs text-gray-500 flex flex-col items-end gap-1">
+                                        <div className="w-full">{a.createdAt ? formatDateTime(a.createdAt) : ''}</div>
+                                      </div>
+                                    </div>
                               </div>
-                              <div className="text-right text-xs text-gray-500">
-                                {a.createdAt ? formatDateTime(a.createdAt) : ''}
-                              </div>
-                            </div>
-                          </div>
+                            );
+                          })()
                         ))}
                       </div>
                     ) : (
@@ -1852,7 +2047,7 @@ export default function AdminDashboard() {
                     {facilities && facilities.length > 0 ? (
                       <div className="space-y-3">
                         {facilities.map((facility: Facility) => (
-                          <div key={facility.id} className="bg-white rounded-lg p-4 border border-gray-200 hover:border-gray-300 transition-colors duration-200">
+                          <div key={facility.id} className={`bg-white rounded-lg p-4 border border-gray-200 transition-colors duration-200 hover:${facility.isActive ? 'border-green-300' : 'border-red-300'}`}>
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-4">
                                 <div className={`p-2 rounded-lg ${facility.isActive ? 'bg-green-100' : 'bg-red-100'}`}>
@@ -1953,11 +2148,11 @@ export default function AdminDashboard() {
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 flex flex-col justify-between">
                 <div className="flex items-center justify-between mb-6">
                   <div>
-                    <h3 className="text-lg font-bold text-gray-900">Pending Bookings</h3>
+                    <h3 className="text-lg font-bold text-gray-900">Booking Requests</h3>
                     <p className="text-gray-600 text-sm mt-1">Facility booking requests requiring approval</p>
                   </div>
                   <div className="bg-pink-100 text-pink-800 px-3 py-1 rounded-full text-sm font-medium">
-                    {pendingBookings?.length || 0} pending
+                    {pendingBookings?.length || 0} requests
                   </div>
                 </div>
 
@@ -1979,7 +2174,7 @@ export default function AdminDashboard() {
 
                     <div className="pt-4 border-t border-gray-200 flex justify-end">
                       <button
-                        onClick={() => { setSelectedView('booking-management'); setBookingTab('pendingList'); }}
+                        onClick={() => { setSelectedView('booking-management'); setBookingTab('requests'); }}
                         className="inline-flex items-center gap-2 px-4 py-2 bg-pink-600 text-white rounded-lg text-sm hover:bg-pink-700 transition-colors duration-150"
                       >
                         View All
@@ -2055,11 +2250,11 @@ export default function AdminDashboard() {
             {/* Recent System Activity & Recent System Alerts (stacked) */}
             <div className="space-y-6">
               {/* Block 1: Recent System Alerts with two preview tabs */}
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
                 <div className="flex items-center justify-between mb-6">
                   <div>
-                    <h3 className="text-lg font-bold text-gray-900">Recent System Alerts</h3>
-                    <p className="text-gray-600 mt-1">Booking and user management alerts</p>
+                    <h3 className="text-2xl font-bold text-gray-900">Recent System Alerts</h3>
+                    <p className="text-gray-600 mt-1 text-sm">Booking and user management alerts</p>
                   </div>
                   <div className="bg-pink-100 text-pink-800 px-3 py-1 rounded-full text-sm font-medium">
                     {alerts?.length || 0} alerts
@@ -2092,7 +2287,7 @@ export default function AdminDashboard() {
                         const m = (a.message || '').toLowerCase();
                         return t.includes('booking') || m.includes('booking');
                       }).slice(0,5).map((alert: SystemAlert) => (
-                        <div key={alert.id} className="bg-gray-50 rounded-lg p-3 hover:bg-gray-100 transition-colors duration-150">
+                        <div key={alert.id} className="bg-white rounded-md p-3 border border-gray-200 hover:border-gray-300 transition-colors duration-150">
                           <div className="flex items-start justify-between">
                             <div>
                               <h4 className="font-medium text-gray-900 text-sm">{alert.title}</h4>
@@ -2110,7 +2305,7 @@ export default function AdminDashboard() {
                         const m = (a.message || '').toLowerCase();
                         return t.includes('user') || m.includes('banned') || m.includes('unbanned') || t.includes('suspension');
                       }).slice(0,5).map((alert: SystemAlert) => (
-                        <div key={alert.id} className="bg-gray-50 rounded-lg p-3 hover:bg-gray-100 transition-colors duration-150">
+                        <div key={alert.id} className="bg-white rounded-md p-3 border border-gray-200 hover:border-gray-300 transition-colors duration-150">
                           <div className="flex items-start justify-between">
                             <div>
                               <h4 className="font-medium text-gray-900 text-sm">{alert.title}</h4>
@@ -2149,19 +2344,129 @@ export default function AdminDashboard() {
                 {activities && activities.length > 0 ? (
                   <div className="space-y-2">
                     {activities.slice(0, 5).map((activity) => (
-                      <div key={activity.id} className="bg-gray-50 rounded-lg p-2 hover:bg-gray-100 transition-colors duration-150">
-                        <div className="flex items-start justify-between">
-                          <div className="flex items-center gap-2">
-                            <div className="bg-pink-100 p-1.5 rounded-lg">
-                              <Activity className="h-3.5 w-3.5 text-pink-600" />
+                      <div className="bg-white rounded-md p-3 border border-gray-200">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-3 flex-1">
+                            <div className="bg-pink-100 p-2 rounded-lg flex-shrink-0">
+                              <Activity className="h-5 w-5 text-pink-600" />
                             </div>
-                            <div>
-                              <h4 className="font-medium text-gray-900 text-sm">{activity.action}</h4>
-                              <p className="text-xs text-gray-600 mt-0.5">{formatActivityDetails(activity)} {activity.userId && `by ${getUserEmail(activity.userId)}`}</p>
+                            <div className="flex-1 pr-4">
+                              <p className="font-medium text-sm text-gray-900">{activity.action}</p>
+                              {(() => {
+                                // build a cleaned sub-line: prefer booking lookups and actor email, strip raw ids
+                                let actorEmail = '';
+                                try {
+                                  if (activity.userId) actorEmail = getUserEmail(activity.userId);
+                                  if (!actorEmail) {
+                                    const d = String(activity.details || '');
+                                    const m = d.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+                                    if (m) actorEmail = m[1];
+                                  }
+                                  if (!actorEmail) {
+                                    const d = String(activity.details || '');
+                                    const adminIdMatch = d.match(/Admin\s+([0-9a-f-]{8,36})/i);
+                                    if (adminIdMatch) {
+                                      const id = adminIdMatch[1];
+                                      const found = usersMap.get(id) || (usersData || []).find((u: User) => String(u.id) === String(id));
+                                      actorEmail = found?.email || '';
+                                    }
+                                  }
+                                } catch (e) { actorEmail = '' }
+                                if (!actorEmail) actorEmail = user?.email || '';
+
+                                const raw = activity.details || activity.action || '';
+                                let formatted = formatAlertMessage(raw);
+                                try { formatted = String(formatted).replace(/^Admin\b[:\s,-]*/i, ''); } catch (e) {}
+                                if (actorEmail) {
+                                  try {
+                                    const esc = String(actorEmail).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                                    formatted = String(formatted).replace(new RegExp(esc, 'gi'), '').replace(/\s{2,}/g, ' ').trim();
+                                  } catch (e) {}
+                                }
+
+                                let targetEmail = '';
+                                try {
+                                  const m = (activity.details || '').toString().match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+                                  if (m) targetEmail = m[1];
+                                } catch (e) { /* ignore */ }
+
+                                let extractedBookingId: string | null = null;
+                                try {
+                                  const bidMatch = (activity.details || '').toString().match(/booking\s+([0-9a-zA-Z-]{6,64})/i);
+                                  if (bidMatch) extractedBookingId = bidMatch[1];
+                                } catch (e) { extractedBookingId = null; }
+
+                                let lookedUpBooking: FacilityBooking | undefined;
+                                if (extractedBookingId) {
+                                  try { lookedUpBooking = allBookings.find(b => String(b.id) === String(extractedBookingId)); } catch (e) { lookedUpBooking = undefined; }
+                                }
+
+                                const title = String((activity.action || '')).toLowerCase();
+                                const isRequest = title.includes('request') || title.includes('requested') || title.includes('new booking');
+                                const isApproved = title.includes('approve') || title.includes('approved');
+                                const isDenied = title.includes('deny') || title.includes('denied');
+                                const isCancelled = title.includes('cancel');
+                                const isArrival = title.includes('arrival') || title.includes('confirmed');
+
+                                let subLine = formatted;
+                                try {
+                                  if (isRequest) {
+                                    if (targetEmail && !/^\s*\S+@/.test(subLine)) subLine = `${targetEmail} ${subLine}`.trim();
+                                  } else if (isApproved || isDenied || isCancelled || isArrival) {
+                                    if (isArrival) {
+                                      if (lookedUpBooking) {
+                                        const who = getUserEmail(lookedUpBooking.userId);
+                                        const where = getFacilityName(lookedUpBooking.facilityId);
+                                        const when = `${formatDateTime(lookedUpBooking.startTime)} to ${formatDateTime(lookedUpBooking.endTime)}`;
+                                        subLine = `${actorEmail} confirmed arrival for ${who} at ${where} from ${when}`;
+                                      } else if (targetEmail) {
+                                        subLine = `${actorEmail} confirmed arrival for ${targetEmail}`;
+                                      } else {
+                                        subLine = `${actorEmail} confirmed arrival`;
+                                      }
+                                    } else if (isApproved) {
+                                      if (lookedUpBooking) {
+                                        const who = getUserEmail(lookedUpBooking.userId);
+                                        const where = getFacilityName(lookedUpBooking.facilityId);
+                                        const when = `${formatDateTime(lookedUpBooking.startTime)} to ${formatDateTime(lookedUpBooking.endTime)}`;
+                                        subLine = `${actorEmail} approved booking for ${who} at ${where} from ${when}`;
+                                      } else if (targetEmail) {
+                                          const clean = String(formatted).replace(/\bby\s+[\w.-]+@[\w.-]+/i, '').trim();
+                                          if (clean && /booking|approved|approved booking|approved for/i.test(clean)) {
+                                            subLine = `${actorEmail} ${clean}`.trim();
+                                          } else {
+                                            subLine = `${actorEmail} approved booking for ${targetEmail}${clean ? ` — ${clean}` : ''}`.trim();
+                                          }
+                                        } else {
+                                          subLine = `${actorEmail} ${formatted}`.trim();
+                                        }
+                                    } else if (isDenied || isCancelled) {
+                                      if (lookedUpBooking) {
+                                        const who = getUserEmail(lookedUpBooking.userId);
+                                        const where = getFacilityName(lookedUpBooking.facilityId);
+                                        subLine = `${actorEmail} ${isCancelled ? 'cancelled' : 'denied'} booking for ${who} at ${where}`;
+                                      } else if (targetEmail) {
+                                          const clean = String(formatted).replace(/\bby\s+[\w.-]+@[\w.-]+/i, '').trim();
+                                          if (clean && /booking|cancelled|denied|cancel/i.test(clean)) {
+                                            subLine = `${actorEmail} ${clean}`.trim();
+                                          } else {
+                                            subLine = `${actorEmail} ${isCancelled ? 'cancelled' : 'denied'} booking for ${targetEmail}${clean ? ` — ${clean}` : ''}`.trim();
+                                          }
+                                        } else {
+                                          subLine = `${actorEmail} ${formatted}`.trim();
+                                        }
+                                    }
+                                  } else {
+                                    if (actorEmail && !/^\s*\S+@/.test(subLine)) subLine = `${actorEmail} ${subLine}`.trim();
+                                  }
+                                } catch (e) {}
+
+                                return <p className="text-xs text-gray-600 mt-1 truncate">{subLine}</p>;
+                              })()}
                             </div>
                           </div>
-                          <div className="text-right">
-                            <span className="text-xs text-gray-500">{formatDateTime(activity.createdAt)}</span>
+                          <div className="w-44 text-right text-xs text-gray-500 flex flex-col items-end gap-1">
+                            <div className="w-full">{activity.createdAt ? formatDateTime(activity.createdAt) : ''}</div>
                           </div>
                         </div>
                       </div>
