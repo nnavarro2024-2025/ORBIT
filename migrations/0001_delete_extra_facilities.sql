@@ -1,1 +1,0 @@
-DELETE FROM facilities WHERE name NOT IN ('Collaraborative Learning Room 1', 'Collaraborative Learning Room 2', 'Board Room');--> statement-breakpoint

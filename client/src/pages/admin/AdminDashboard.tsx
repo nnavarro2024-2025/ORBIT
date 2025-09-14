@@ -209,6 +209,12 @@ export default function AdminDashboard() {
       setLocation('/booking#dashboard');
       return;
     }
+    // Special-case: when navigating to Admin Activity Logs, default to the Booking History tab
+    if (id === 'admin-activity-logs') {
+      setSettingsTab('history');
+      setSelectedView('admin-activity-logs');
+      return;
+    }
     setSelectedView(id);
   };
 
