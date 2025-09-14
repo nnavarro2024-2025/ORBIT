@@ -210,7 +210,15 @@ export default function Header() {
                   {alertsData.length > 6 && (
                     <div className="pt-2 border-t border-gray-100">
                       <button
-                        onClick={() => setLocation(isAdmin ? '/admin/alerts' : '/notifications')}
+                        onClick={() => {
+                          if (isAdmin) {
+                            setLocation('/admin/alerts');
+                          } else {
+                            // Use dedicated route `/notifications` which BookingDashboard listens to
+                            // This is more robust than relying on hash propagation through router navigation
+                            setLocation('/notifications');
+                          }
+                        }}
                         className="w-full text-left text-sm text-pink-600 hover:text-pink-700 px-2 py-2 rounded"
                       >
                         View all notifications

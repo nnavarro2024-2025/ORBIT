@@ -156,6 +156,8 @@ export default function AdminDashboard() {
   const [settingsTab, setSettingsTab] = useState<string>('facilities');
   // Preview tab for system alerts in the dashboard (booking | users)
   const [alertsPreviewTab, setAlertsPreviewTab] = useState<string>('booking');
+  
+  
   // silence unused setters where appropriate
   void setActiveBookingsPage; void setUpcomingBookingsPage; void setApprovedAndDeniedBookingsPage; void setPendingBookingsDashboardPage; void setPendingBookingsPage; void setBookingUsersPage; void setBannedUsersPage; void setActivitiesPage;
   // silence unused page variables to avoid tsc noUnusedLocals failures in iterative edits
@@ -166,7 +168,43 @@ export default function AdminDashboard() {
 
   // Sidebar
   const { user: authUser } = useAuth();
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
+
+  // If the route is '/admin/alerts', open the Admin System Alerts view and select the Booking tab.
+  useEffect(() => {
+    try {
+      const path = typeof location === 'string' ? location : (window?.location?.pathname || '');
+      if (path && path.startsWith('/admin/alerts')) {
+        setSelectedView('security');
+        setSecurityTab('booking');
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, [location]);
+
+  // If App set a one-time flag for admin alerts, open the Security->Booking tab once
+  // then replace the URL to the main admin overview so reloads land on the dashboard.
+  useEffect(() => {
+    try {
+      const flag = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('openAdminAlertsOnce') : null;
+      if (flag === '1') {
+        try { sessionStorage.removeItem('openAdminAlertsOnce'); } catch (_) {}
+        setSelectedView('security');
+        setSecurityTab('booking');
+        try {
+          const target = '/admin#overview';
+          if (window.location.pathname + window.location.hash !== target) {
+            window.history.replaceState({}, '', target);
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, []);
 
   // Build sidebar consistently using helper
   import("@/lib/sidebarItems").then(m => {

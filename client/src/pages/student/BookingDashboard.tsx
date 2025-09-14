@@ -70,12 +70,27 @@ export default function BookingDashboard() {
       { id: 'new-booking', label: 'New Booking', icon: BarChart3 },
       { id: 'my-bookings', label: 'My Bookings', icon: Calendar },
       { id: 'available-rooms', label: 'Available Rooms', icon: Home },
+      { id: 'activity-logs', label: 'Activity Logs', icon: BarChart3 },
       { id: 'booking-settings', label: 'Booking Settings', icon: Settings },
     ];
     if (user && user.role === 'admin') {
       sidebarItems.push({ id: 'divider-1', type: 'divider' });
       sidebarItems.push({ id: 'admin-dashboard', label: 'Admin Dashboard', icon: BarChart3 });
     }
+  }
+
+  // Post-process sidebarItems to ensure Activity Logs appears after Available Rooms
+  try {
+    const idxAvailable = sidebarItems.findIndex(it => it.id === 'available-rooms');
+    const idxActivity = sidebarItems.findIndex(it => it.id === 'activity-logs');
+    if (idxActivity !== -1 && idxAvailable !== -1 && idxActivity < idxAvailable) {
+      // move activity-logs to just after available-rooms
+      const [activityItem] = sidebarItems.splice(idxActivity, 1);
+      const insertAt = sidebarItems.findIndex(it => it.id === 'available-rooms');
+      sidebarItems.splice(insertAt + 1, 0, activityItem);
+    }
+  } catch (e) {
+    // noop
   }
 
   // set initial selected view from URL hash (e.g. /booking#dashboard)
@@ -115,13 +130,99 @@ export default function BookingDashboard() {
   };
   const [myBookingsPage, setMyBookingsPage] = useState(0);
   const itemsPerPage = 10;
+  // Activity logs inner tab state
+  const [activityTab, setActivityTab] = useState<'booking' | 'notifications'>('booking');
+  const [activityBookingPage, setActivityBookingPage] = useState(0);
+  const [activityNotificationsPage, setActivityNotificationsPage] = useState(0);
+
+  // Interpret URL hash forms like:
+  // - #activity-logs
+  // - #activity-logs:notifications
+  // - #activity-logs:booking
+  // Also handle legacy navigation that used /notifications by leaving that change in Header
+  useEffect(() => {
+    try {
+      const rawHash = window.location.hash?.replace('#', '') || '';
+      if (!rawHash) return;
+  // Accept either 'activity-logs', 'activity-logs:notifications' or 'activity-logs/notifications'
+  const normalized = rawHash.replace('/', ':');
+  const parts = normalized.split(':');
+      if (parts[0] === 'activity-logs') {
+        setSelectedView('activity-logs');
+        if (parts[1] === 'notifications') {
+          setActivityTab('notifications');
+          setActivityNotificationsPage(0);
+        } else if (parts[1] === 'booking') {
+          setActivityTab('booking');
+          setActivityBookingPage(0);
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, []);
+
+  // If the app was navigated from /notifications (App sets sessionStorage flag), open the
+  // notifications tab once and then move the URL to the main dashboard so future reloads
+  // land on /booking#dashboard for easier navigation.
+  useEffect(() => {
+    try {
+      const flag = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('openNotificationsOnce') : null;
+      if (flag === '1') {
+        // Clear the flag immediately
+        try { sessionStorage.removeItem('openNotificationsOnce'); } catch (_) {}
+        // Set the view to activity logs -> notifications
+        setSelectedView('activity-logs');
+        setActivityTab('notifications');
+        setActivityNotificationsPage(0);
+        // Replace URL to main dashboard so reload lands there instead of re-triggering notifications
+        try {
+          const target = '/booking#dashboard';
+          if (window.location.pathname + window.location.hash !== target) {
+            window.history.replaceState({}, '', target);
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, []);
+  
+  // Listen for hash changes while mounted so clicking header (which sets the hash) updates the view immediately
+  useEffect(() => {
+    const onHashChange = () => {
+      try {
+        const rawHash = window.location.hash?.replace('#', '') || '';
+        if (!rawHash) return;
+        const normalized = rawHash.replace('/', ':');
+        const parts = normalized.split(':');
+        if (parts[0] === 'activity-logs') {
+          setSelectedView('activity-logs');
+          if (parts[1] === 'notifications') {
+            setActivityTab('notifications');
+            setActivityNotificationsPage(0);
+          } else if (parts[1] === 'booking') {
+            setActivityTab('booking');
+            setActivityBookingPage(0);
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    };
+
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
   
   // State for cancellation modal
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [bookingToCancel, setBookingToCancel] = useState<any>(null);
 
   // State for email notifications (moved from ProfileModal)
-  const [emailNotifications, setEmailNotifications] = useState(true); // Assuming default true
+  // Email notifications UI removed per request
 
   const updateBookingMutation = useMutation({
     // Ensure the mutation returns the parsed JSON booking object
@@ -289,23 +390,6 @@ export default function BookingDashboard() {
   void handlePendingBookingAutoCancel;
 
   // Mutation for user settings (specifically for email notifications)
-  const updateUserSettingsMutation = useMutation({
-    mutationFn: (data: { emailNotifications?: boolean }) =>
-      apiRequest("PUT", "/api/user/settings", data),
-    onSuccess: () => {
-      toast({
-        title: "Booking Settings Updated",
-        description: "Your booking preferences have been saved.",
-      });
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Booking Settings Update Failed",
-        description: error.message || "An error occurred while updating your booking settings.",
-        variant: "destructive",
-      });
-    },
-  });
 
   const handleSaveEditBooking = (updatedBooking: any) => {
     // Use mutateAsync so callers can await completion and react to the result
@@ -313,11 +397,7 @@ export default function BookingDashboard() {
   };
 
   // Handler for email notifications change
-  const handleEmailNotificationsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const checked = e.target.checked;
-    setEmailNotifications(checked);
-    updateUserSettingsMutation.mutate({ emailNotifications: checked });
-  };
+  // Email notification setting removed
 
   // ✅ Default to empty arrays to avoid undefined errors
   const { data: facilities = [] } = useQuery<any[]>({
@@ -351,6 +431,32 @@ export default function BookingDashboard() {
   // ✅ Ensure userBookings is always an array
   const userBookings = Array.isArray(userBookingsData) ? userBookingsData : [];
   const allBookings = Array.isArray(allBookingsData) ? allBookingsData : [];
+
+  // Notifications for the current user (used in the Activity Logs -> Notification logs tab)
+  const { data: notificationsData = [] } = useQuery<any[]>({
+    queryKey: ['/api/notifications'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', '/api/notifications');
+      try { return await res.json(); } catch { return []; }
+    },
+    enabled: !!user,
+    staleTime: 30_000,
+  });
+
+  // React to top-level route '/notifications' so header links open this tab directly
+  const [location] = useLocation();
+  useEffect(() => {
+    try {
+      if (location && location.startsWith('/notifications')) {
+        setSelectedView('activity-logs');
+        setActivityTab('notifications');
+        // Reset pagination to first page when navigated directly
+        setActivityNotificationsPage(0);
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, [location]);
 
   // Function to get current booking status for a facility with library hours validation
   const getFacilityBookingStatus = (facilityId: number) => {
@@ -663,12 +769,12 @@ export default function BookingDashboard() {
                     .map((booking) => {
                     const status = getBookingStatus(booking);
                     const statusColors = {
-                      'Active': 'bg-green-100 text-green-800 border-green-200',
-                      'Pending': 'bg-yellow-100 text-yellow-800 border-yellow-200',
+                      'Active': 'bg-pink-100 text-pink-800 border-pink-200',
+                      'Pending': 'bg-pink-50 text-pink-700 border-pink-100',
                       'Pending Request': 'bg-pink-50 text-pink-700 border-pink-100',
                       'Done': 'bg-gray-100 text-gray-800 border-gray-200',
                       'Denied': 'bg-red-100 text-red-800 border-red-200',
-                      'Cancelled': 'bg-orange-100 text-orange-800 border-orange-200'
+                      'Cancelled': 'bg-gray-50 text-gray-700 border-gray-100'
                     };
 
                     return (
@@ -854,6 +960,94 @@ export default function BookingDashboard() {
                 </div>
               )}
             </div>
+        );
+
+      case "activity-logs":
+        return (
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h3 className="text-xl font-semibold text-gray-900">Activity Logs</h3>
+                <p className="text-sm text-gray-600 mt-1">View booking history and notification logs</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setActivityTab('booking')}
+                  className={`px-3 py-1 rounded ${activityTab === 'booking' ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
+                  Booking History
+                </button>
+                <button
+                  onClick={() => setActivityTab('notifications')}
+                  className={`px-3 py-1 rounded ${activityTab === 'notifications' ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
+                  Notification Logs
+                </button>
+              </div>
+            </div>
+
+            {activityTab === 'booking' ? (
+              <div className="space-y-4">
+                {userBookings.length === 0 ? (
+                  <div className="text-center py-8">
+                    <p className="text-gray-600 text-sm">No booking history</p>
+                  </div>
+                ) : (
+                  userBookings.slice(activityBookingPage * itemsPerPage, (activityBookingPage + 1) * itemsPerPage).map((booking: any) => (
+                    <div key={booking.id} className="bg-gray-50 rounded-lg p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="font-medium text-sm text-gray-900">{getFacilityDisplay(booking.facilityId)}</div>
+                          <div className="text-xs text-gray-600">{format(new Date(booking.startTime), 'EEE, MMM d • hh:mm a')} - {format(new Date(booking.endTime), 'hh:mm a')}</div>
+                        </div>
+                        <div className="text-sm text-gray-700">{booking.status}</div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {notificationsData.length === 0 ? (
+                  <div className="text-center py-8">
+                    <p className="text-gray-600 text-sm">No notifications</p>
+                  </div>
+                ) : (
+                  notificationsData.slice(activityNotificationsPage * itemsPerPage, (activityNotificationsPage + 1) * itemsPerPage).map((n: any) => (
+                    <div key={n.id} className={`p-3 rounded-md bg-white border ${n.isRead ? 'opacity-70' : ''}`}>
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <div className="font-medium text-sm text-gray-900">{n.title}</div>
+                          <div className="text-xs text-gray-600 mt-1">{n.message}</div>
+                        </div>
+                        <div className="text-xs text-gray-400">{new Date(n.createdAt).toLocaleString()}</div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+            {/* Pagination footer for Activity Logs */}
+            <div className="pt-4 border-t border-gray-100 mt-4 flex items-center justify-between">
+              {activityTab === 'booking' ? (
+                <p className="text-sm text-gray-600">Showing {activityBookingPage * itemsPerPage + 1} to {Math.min((activityBookingPage + 1) * itemsPerPage, userBookings.length)} of {userBookings.length} bookings</p>
+              ) : (
+                <p className="text-sm text-gray-600">Showing {activityNotificationsPage * itemsPerPage + 1} to {Math.min((activityNotificationsPage + 1) * itemsPerPage, notificationsData.length)} of {notificationsData.length} notifications</p>
+              )}
+
+              <div className="flex items-center gap-2">
+                {activityTab === 'booking' ? (
+                  <>
+                    <button onClick={() => setActivityBookingPage(p => Math.max(0, p - 1))} disabled={activityBookingPage === 0} className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50">Prev</button>
+                    <button onClick={() => setActivityBookingPage(p => ((p + 1) * itemsPerPage < userBookings.length ? p + 1 : p))} disabled={(activityBookingPage + 1) * itemsPerPage >= userBookings.length} className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50">Next</button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={() => setActivityNotificationsPage(p => Math.max(0, p - 1))} disabled={activityNotificationsPage === 0} className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50">Prev</button>
+                    <button onClick={() => setActivityNotificationsPage(p => ((p + 1) * itemsPerPage < notificationsData.length ? p + 1 : p))} disabled={(activityNotificationsPage + 1) * itemsPerPage >= notificationsData.length} className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50">Next</button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
         );
 
       case "available-rooms":
@@ -1092,65 +1286,59 @@ export default function BookingDashboard() {
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
             <div className="mb-6">
               <h3 className="text-xl font-bold text-gray-900">Booking Settings</h3>
-              <p className="text-gray-600 mt-1">Manage your booking preferences and notifications</p>
+              <p className="text-gray-600 mt-1">Manage your booking preferences and facility reservation settings</p>
             </div>
 
             <div className="space-y-6">
-              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <h4 className="font-medium text-gray-900">Email Notifications</h4>
-                    <p className="text-sm text-gray-600 mt-1">
-                      Receive email updates for booking confirmations, reminders, and status changes
-                    </p>
-                  </div>
-                  <div className="ml-4">
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={emailNotifications}
-                        onChange={handleEmailNotificationsChange}
-                        className="sr-only peer"
-                      />
-                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-pink-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-pink-600"></div>
-                    </label>
-                  </div>
-                </div>
-              </div>
+              {/* Email notifications control removed */}
 
               <div className="bg-pink-50 rounded-lg p-4 border border-pink-200">
                 <h4 className="font-medium text-pink-900 mb-2">Booking Guidelines</h4>
                 <div className="text-sm text-pink-800 space-y-3">
                   <div>
-                    <h5 className="font-semibold text-pink-900 mb-1">Booking Essentials</h5>
+                    <h5 className="font-semibold text-pink-900 mb-1">Overview</h5>
+                    <p>Use this system to reserve facilities for academic work, meetings, and approved events. Follow these guidelines to ensure fair access and a smooth experience for all users.</p>
+                  </div>
+
+                  <div>
+                    <h5 className="font-semibold text-pink-900 mb-1">Booking Windows & Lead Time</h5>
                     <ul className="space-y-1 ml-4 list-disc">
-                      <li>Make bookings at least 30 minutes before the start time.</li>
-                      <li>One active booking per facility at a time; you may book different facilities concurrently.</li>
-                      <li>Bookings are within school hours (7:30 AM – 5:00 PM). Requests outside these hours will be reviewed by school staff.</li>
+                      <li>Request bookings at least 30 minutes before the desired start time.</li>
+                      <li>Bookings are generally available during school hours: 7:30 AM – 5:00 PM. Requests outside these hours will be reviewed by staff.</li>
+                      <li>Some facilities may require additional lead time—check the facility details before requesting.</li>
                     </ul>
                   </div>
 
                   <div>
-                    <h5 className="font-semibold text-pink-900 mb-1">Group Size & Capacity</h5>
+                    <h5 className="font-semibold text-pink-900 mb-1">Eligibility & Capacity</h5>
                     <ul className="space-y-1 ml-4 list-disc">
-                      <li>Specify the correct number of participants when creating or editing a booking.</li>
-                      <li>Do not exceed the facility's maximum capacity (shown as “Max capacity”).</li>
-                      <li>All participants must be registered university users.</li>
+                      <li>Only registered university users may create bookings.</li>
+                      <li>Enter the expected number of participants and do not exceed the facility’s maximum capacity.</li>
+                      <li>If your event requires special equipment or setup, request it when creating the booking so staff can plan accordingly.</li>
                     </ul>
                   </div>
 
                   <div>
-                    <h5 className="font-semibold text-pink-900 mb-1">Conduct & Cancellations</h5>
+                    <h5 className="font-semibold text-pink-900 mb-1">Cancellations & Changes</h5>
                     <ul className="space-y-1 ml-4 list-disc">
-                      <li>Respect the library environment; keep noise to a minimum.</li>
-                      <li>Dispose of trash and leave the space tidy for the next user.</li>
-                      <li>Cancel at least 30 minutes before the booking start to avoid restrictions for no-shows.</li>
+                      <li>Cancel at least 30 minutes before the start time whenever possible to free space for others.</li>
+                      <li>To change a booking, edit the reservation—if the requested changes conflict with existing bookings, staff will contact you to reschedule.</li>
+                      <li>No-shows or repeated late cancellations may result in temporary booking restrictions.</li>
+                    </ul>
+                  </div>
+
+                  <div>
+                    <h5 className="font-semibold text-pink-900 mb-1">Conduct & Responsibilities</h5>
+                    <ul className="space-y-1 ml-4 list-disc">
+                      <li>Keep noise levels appropriate for a study environment and respect other users.</li>
+                      <li>Leave the space clean and return furniture/equipment to its original arrangement.</li>
+                      <li>Report any damage or issues to staff immediately via the contact details listed in the facility information.</li>
                     </ul>
                   </div>
 
                   <div className="bg-pink-100 p-3 rounded border border-pink-300 mt-4">
                     <p className="font-semibold text-pink-900">Tip</p>
-                    <p className="text-pink-800">Popular time slots fill quickly — plan and book early for best availability.</p>
+                    <p className="text-pink-800">Popular slots fill quickly. Book early and add a reminder to your calendar to avoid missing your reservation.</p>
                   </div>
                 </div>
               </div>
@@ -1165,16 +1353,16 @@ export default function BookingDashboard() {
             <div className="grid md:grid-cols-3 gap-6 mb-8">
               <button
                 onClick={() => setSelectedView("my-bookings")}
-                className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-all duration-200 hover:border-green-300 text-left group"
+                className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-all duration-200 hover:border-pink-300 text-left group"
               >
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600 group-hover:text-green-700">Active Bookings</p>
-                    <p className="text-3xl font-bold text-green-600 mt-1">{stats.active}</p>
+                    <p className="text-sm font-medium text-gray-600 group-hover:text-pink-700">Active Bookings</p>
+                    <p className="text-3xl font-bold text-pink-600 mt-1">{stats.active}</p>
                     <p className="text-xs text-gray-500 mt-1">Currently in progress</p>
                   </div>
-                  <div className="bg-green-100 p-3 rounded-full group-hover:bg-green-200 transition-colors duration-200">
-                    <CheckCircle className="h-6 w-6 text-green-600" />
+                  <div className="bg-pink-100 p-3 rounded-full group-hover:bg-pink-200 transition-colors duration-200">
+                    <CheckCircle className="h-6 w-6 text-pink-600" />
                   </div>
                 </div>
               </button>
@@ -1190,23 +1378,23 @@ export default function BookingDashboard() {
                     <p className="text-xs text-gray-500 mt-1">Approved and scheduled</p>
                   </div>
                   <div className="bg-pink-100 p-3 rounded-full group-hover:bg-pink-200 transition-colors duration-200">
-                    <Clock className="h-6 w-6 text-yellow-600" />
+                    <Clock className="h-6 w-6 text-pink-600" />
                   </div>
                 </div>
               </button>
 
               <button
                 onClick={() => setSelectedView("my-bookings")}
-                className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-all duration-200 hover:border-orange-300 text-left group"
+                className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-all duration-200 hover:border-pink-300 text-left group"
               >
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600 group-hover:text-orange-700">Booking Requests</p>
-                    <p className="text-3xl font-bold text-orange-600 mt-1">{stats.pending}</p>
+                    <p className="text-sm font-medium text-gray-600 group-hover:text-pink-700">Booking Requests</p>
+                    <p className="text-3xl font-bold text-pink-600 mt-1">{stats.pending}</p>
                     <p className="text-xs text-gray-500 mt-1">Awaiting approval</p>
                   </div>
-                  <div className="bg-orange-100 p-3 rounded-full group-hover:bg-orange-200 transition-colors duration-200">
-                    <Calendar className="h-6 w-6 text-purple-600" />
+                  <div className="bg-pink-100 p-3 rounded-full group-hover:bg-pink-200 transition-colors duration-200">
+                    <Calendar className="h-6 w-6 text-pink-600" />
                   </div>
                 </div>
               </button>
@@ -1405,11 +1593,11 @@ export default function BookingDashboard() {
               )}
             </div>
 
-            {/* Recent Bookings */}
+            {/* Recent Booking */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
               <div className="flex items-center justify-between mb-6">
                 <div>
-                  <h3 className="text-lg font-bold text-gray-900">Recent Bookings</h3>
+                  <h3 className="text-lg font-bold text-gray-900">Recent Booking</h3>
                   <p className="text-gray-600 text-sm mt-1">Your latest facility reservations</p>
                 </div>
                 <button
@@ -1436,7 +1624,7 @@ export default function BookingDashboard() {
               ) : (
                   <div className="space-y-2">
                   {userBookings
-                    .slice(0, itemsPerPage)
+                    .slice(0, 5)
                     .map((booking) => (
                     <div key={booking.id} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors duration-200">
                       <div className="flex items-center gap-3 flex-1">
@@ -1497,9 +1685,9 @@ export default function BookingDashboard() {
                         {(() => {
                           const status = getBookingStatus(booking);
                           const statusColors = {
-                            'Active': 'bg-green-100 text-green-800',
-                            'Pending': 'bg-yellow-100 text-yellow-800',
-                            'Pending Request': 'bg-blue-100 text-blue-800',
+                            'Active': 'bg-pink-100 text-pink-800',
+                            'Pending': 'bg-pink-50 text-pink-700',
+                            'Pending Request': 'bg-pink-50 text-pink-700',
                             'Done': 'bg-gray-100 text-gray-800',
                             'Denied': 'bg-red-100 text-red-800'
                           };

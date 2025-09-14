@@ -220,22 +220,36 @@ export default function Login() {
           <div className="space-y-4 text-sm text-gray-700">
             <p className="font-semibold">Introduction</p>
             <p>
-              ORBIT is provided to authorized members of the University of the Immaculate Conception ("UIC") to manage facility reservations and related services. These Terms describe acceptable use, data practices, and enforcement procedures. By using ORBIT you agree to comply with these Terms and any applicable institutional policies.
+              ORBIT is provided to authorized members of the University of the Immaculate Conception ("UIC") to request and manage facility reservations and related services. These Terms explain acceptable use, what data we collect and why, and how we handle violations. By using ORBIT you agree to follow these Terms and any applicable university policies.
             </p>
 
-            <h4 className="font-semibold">1. Eligibility</h4>
-            <p>Access is limited to holders of valid UIC accounts. Sharing credentials or using another person's account is prohibited.</p>
+            <h4 className="font-semibold">Eligibility</h4>
+            <p>Access is granted only to current UIC students, faculty, and staff with valid institutional accounts. Sharing credentials or accessing another person’s account is strictly prohibited.</p>
 
-            <h4 className="font-semibold">2. Permitted Use</h4>
-            <p>ORBIT shall be used for legitimate academic and library-related activities. Users must not obstruct others' access, make fraudulent bookings, or abuse system functionality.</p>
+            <h4 className="font-semibold">Acceptable Use</h4>
+            <p>Use ORBIT only for legitimate academic, research, or university-related activities. Do not make fraudulent or overlapping bookings, attempt to bypass booking limits, or use the system to disrupt other users' access.</p>
 
-            <h4 className="font-semibold">3. Data & Privacy</h4>
-            <p>We collect minimal profile information (name, institutional email, avatar) and booking metadata to provide services. Data is processed according to UIC policies. By creating an account you consent to this data use for system operations and communications related to bookings.</p>
+            <h4 className="font-semibold">Data & Privacy</h4>
+            <p>
+              We collect basic profile details (name, institutional email, profile photo) and booking metadata (times, facility, participants) to operate the service. Collected data is used for reservation management, notifications, and administrative reporting and is handled in accordance with UIC's privacy policies.
+            </p>
 
-            <h4 className="font-semibold">4. Enforcement</h4>
-            <p>Violations of these Terms may result in warning, suspension, or revocation of access. Serious or repeated misconduct may be escalated to university authorities.</p>
+            <h4 className="font-semibold">Bookings, Cancellations & No-shows</h4>
+            <p>
+              Please create reservations in good faith and cancel promptly if plans change. Repeated no-shows or last-minute cancellations may result in temporary restrictions. Follow any facility-specific rules listed in the facility details when using a space.
+            </p>
 
-            <p className="text-sm text-gray-600">Click "I Understand" to acknowledge these Terms and continue.</p>
+            <h4 className="font-semibold">Enforcement & Appeals</h4>
+            <p>
+              Violations may result in warnings, temporary suspension, or permanent loss of access. Serious cases may be referred to university authorities. If you believe an action was taken in error, contact the library or the system administrators to request a review.
+            </p>
+
+            <h4 className="font-semibold">Contact & Support</h4>
+            <p>
+              For questions, support, or to report problems with a facility, contact the library staff using the contact information provided in the facility details or the university directory.
+            </p>
+
+            <p className="text-sm text-gray-600">Click "I Understand" to acknowledge these Terms and continue. Your acknowledgement will be recorded for compliance and support purposes.</p>
           </div>
 
           <div className="flex justify-end gap-3 mt-6">

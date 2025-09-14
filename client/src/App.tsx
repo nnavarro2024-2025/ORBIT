@@ -40,10 +40,43 @@ function Router() {
 
   return (
     <>
+      {/* If the app was loaded directly at /notifications, replace the URL so the BookingDashboard
+          receives the hash it expects. Use replaceState so browser history isn't polluted. */}
+      {typeof window !== 'undefined' && window.location.pathname === '/notifications' && (function() {
+        try {
+          // Mark a session flag so BookingDashboard knows to open notifications once
+          try { sessionStorage.setItem('openNotificationsOnce', '1'); } catch (_) { /* ignore */ }
+          const target = '/booking#activity-logs/notifications';
+          if (window.location.pathname + window.location.hash !== target) {
+            window.history.replaceState({}, '', target);
+          }
+        } catch (e) {
+          console.warn('Failed to rewrite /notifications -> /booking#activity-logs/notifications', e);
+        }
+        return null;
+      })()}
+      {typeof window !== 'undefined' && window.location.pathname === '/admin/alerts' && (function() {
+        try {
+          // mark a one-time flag for AdminDashboard to open alerts once
+          try { sessionStorage.setItem('openAdminAlertsOnce', '1'); } catch (_) { /* ignore */ }
+          // rewrite to admin route with a hash indicating the alerts view briefly
+          const target = '/admin#security/booking';
+          if (window.location.pathname + window.location.hash !== target) {
+            window.history.replaceState({}, '', target);
+          }
+        } catch (e) {
+          console.warn('Failed to rewrite /admin/alerts -> /admin#security/booking', e);
+        }
+        return null;
+      })()}
       <Route path="/" component={Landing} />
       <Route path="/login/:subsystem?" component={Login} />
       <Route path="/booking" component={() => <ProtectedRoute component={BookingDashboard} />} />
-      <Route path="/admin" component={() => <ProtectedRoute component={AdminDashboard} />} />
+  <Route path="/admin" component={() => <ProtectedRoute component={AdminDashboard} />} />
+  {/* Direct route to admin alerts - opens AdminDashboard and lets it pick the Security -> Booking tab */}
+  <Route path="/admin/alerts" component={() => <ProtectedRoute component={AdminDashboard} />} />
+  {/* Route for user notifications - opens BookingDashboard and lets it pick Activity Logs -> Notification Logs */}
+  <Route path="/notifications" component={() => <ProtectedRoute component={BookingDashboard} />} />
     </>
   );
 }
