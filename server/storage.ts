@@ -73,7 +73,9 @@ export interface IStorage {
   // System alerts
   createSystemAlert(alert: SystemAlert): Promise<SystemAlert>;
   getSystemAlerts(): Promise<SystemAlert[]>;
-  markAlertAsRead(id: string): Promise<void>;
+  markAlertAsRead(id: string): Promise<number>;
+  markAlertAsReadForUser(id: string, userId: string): Promise<number>;
+  markAlertAsReadForAdmin(id: string): Promise<number>;
   
   // Activity logs
   createActivityLog(log: ActivityLog): Promise<ActivityLog>;
@@ -448,8 +450,25 @@ class DatabaseStorage implements IStorage {
     return db.select().from(systemAlerts).orderBy(desc(systemAlerts.createdAt));
   }
 
-  async markAlertAsRead(id: string): Promise<void> {
-    await db.update(systemAlerts).set({ isRead: true }).where(eq(systemAlerts.id, id));
+  async markAlertAsRead(id: string): Promise<number> {
+    const result = await db.update(systemAlerts).set({ isRead: true }).where(eq(systemAlerts.id, id));
+    // drizzle returns a result with rowCount in some drivers; fall back to 0 when missing
+    // @ts-ignore
+    return (result && (result as any).rowCount) || 0;
+  }
+
+  // Mark an alert as read only if it belongs to the specified user.
+  async markAlertAsReadForUser(id: string, userId: string): Promise<number> {
+    const result = await db.update(systemAlerts).set({ isRead: true }).where(and(eq(systemAlerts.id, id), eq(systemAlerts.userId, userId)));
+    // @ts-ignore
+    return (result && (result as any).rowCount) || 0;
+  }
+
+  // Mark a global/admin alert as read (only when userId IS NULL). Intended for admin routes.
+  async markAlertAsReadForAdmin(id: string): Promise<number> {
+    const result = await db.update(systemAlerts).set({ isRead: true }).where(and(eq(systemAlerts.id, id), sql`${systemAlerts.userId} IS NULL`));
+    // @ts-ignore
+    return (result && (result as any).rowCount) || 0;
   }
 
   // Activity logs
@@ -489,7 +508,12 @@ class DatabaseStorage implements IStorage {
       const [systemAlertsCount] = await db
         .select({ count: count() })
         .from(systemAlerts)
-        .where(and(eq(systemAlerts.isRead, false), eq(systemAlerts.type, 'booking')));
+        // Only count unread alerts that are global/admin (userId IS NULL) and of type 'booking'
+        .where(and(
+          eq(systemAlerts.isRead, false),
+          eq(systemAlerts.type, 'booking'),
+          sql`${systemAlerts.userId} IS NULL`
+        ));
 
       const [bannedUsers] = await db
         .select({ count: count() })

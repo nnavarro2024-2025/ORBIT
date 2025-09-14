@@ -143,6 +143,8 @@ export default function EditBookingModal({
   const [lastSubmissionTime, setLastSubmissionTime] = useState(0);
   const SUBMISSION_COOLDOWN = 2000; // 2 seconds cooldown between submissions
   const [purposeError, setPurposeError] = useState("");
+  // Inline form validation warnings (same shape as BookingModal)
+  const [formValidationWarnings, setFormValidationWarnings] = useState<Array<{title: string; description: string}>>([]);
 
   useEffect(() => {
     if (booking) {
@@ -169,6 +171,19 @@ export default function EditBookingModal({
     }
   }, [booking]);
 
+  // Clear inline warnings when fields change
+  useEffect(() => {
+    if (formValidationWarnings.length === 0) return;
+    // Watch our local fields - simple effect based on their state
+    const handler = () => {
+      setFormValidationWarnings([]);
+    };
+    // If user changes startTime/endTime/facilityId/participants/purpose, clear warnings
+    // We'll attach simple local watchers via refs to state changes by using another effect
+    // Note: This effect runs when any of the below states change and clears warnings.
+    handler();
+  }, [startTime, endTime, facilityId, participants, purpose]);
+
   // Keep end time 30 minutes after start if end is missing or earlier than start
   useEffect(() => {
     if (!startTime) return;
@@ -176,6 +191,12 @@ export default function EditBookingModal({
       setEndTime(new Date(startTime.getTime() + 30 * 60 * 1000));
     }
   }, [startTime]);
+
+  const isDurationValid = (start?: Date, end?: Date) => {
+    if (!start || !end) return false;
+    const diff = end.getTime() - start.getTime();
+    return diff >= 30 * 60 * 1000;
+  };
 
   const handleSave = async () => {
     // Prevent rapid duplicate submissions
@@ -221,10 +242,10 @@ export default function EditBookingModal({
       if (startTime && !startTimeValid) timeIssues.push("start time");
       if (endTime && !endTimeValid) timeIssues.push("end time");
       
-      validationErrors.push({
-        title: "Library Hours",
-        description: `Your ${timeIssues.join(" and ")} ${timeIssues.length > 1 ? "are" : "is"} outside library operating hours (${formatLibraryHours()}). Room access is only available during these hours.`,
-      });
+  validationErrors.push({
+  title: "School Hours",
+    description: `Your ${timeIssues.join(" and ")} ${timeIssues.length > 1 ? "are" : "is"} outside school operating hours (${formatLibraryHours()}). Room access is only available during these hours.`,
+  });
     }
 
     // Validate end time is after start time
@@ -233,6 +254,18 @@ export default function EditBookingModal({
         title: "Invalid Time Selection",
         description: "End time must be after start time.",
       });
+    }
+
+    // Enforce minimum duration of 30 minutes
+    if (startTime && endTime) {
+      const diff = endTime.getTime() - startTime.getTime();
+      const minMs = 30 * 60 * 1000;
+      if (diff > 0 && diff < minMs) {
+        validationErrors.push({
+          title: "Invalid Duration",
+          description: "Bookings must be at least 30 minutes long.",
+        });
+      }
     }
 
     // Validate same calendar day (no multi-day bookings)
@@ -275,22 +308,20 @@ export default function EditBookingModal({
       }
     }
 
-    // Show all validation errors as separate toasts
+    // Show all validation errors inline
     if (validationErrors.length > 0) {
       setIsSubmitting(false);
-      validationErrors.forEach((error, index) => {
-        // Add a small delay between toasts to prevent them from overlapping
-        setTimeout(() => {
-          toast({
-            title: error.title,
-            description: error.description,
-            variant: "destructive",
-          });
-        }, index * 100); // 100ms delay between each toast
-      });
+      setFormValidationWarnings(validationErrors);
       return;
     }
 
+    // UX guard: if duration invalid, add inline warning and block save
+    if (!isDurationValid(startTime, endTime)) {
+      setFormValidationWarnings([{ title: 'Invalid Duration', description: 'Bookings must be at least 30 minutes long.' }]);
+      return;
+    }
+
+    setFormValidationWarnings([]);
     setIsSubmitting(true);
 
     try {
@@ -606,14 +637,29 @@ export default function EditBookingModal({
               </PopoverContent>
             </Popover>
           </div>
+          {formValidationWarnings.length > 0 && (
+            <div className="mt-3 text-sm text-red-700 rounded-b-lg px-4 py-3 bg-white border-t border-gray-200">
+              {formValidationWarnings.map((w, idx) => (
+                <div key={idx} className="mb-1">
+                  <span className="mr-2">⚠️</span>
+                  <span className="font-medium">{w.title}:</span>
+                  <span className="ml-2">{w.description}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={() => setShowConfirmDialog(true)} disabled={isSubmitting}>
+          <Button onClick={() => setShowConfirmDialog(true)} disabled={isSubmitting || !isDurationValid(startTime, endTime)}>
             {isSubmitting ? "Saving..." : "Save Changes"}
           </Button>
+
+          {!isDurationValid(startTime, endTime) && (
+            <div className="col-span-4 text-sm text-red-700 mt-2">⚠️ Bookings must be at least 30 minutes long. Please adjust the times before saving.</div>
+          )}
 
           <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
             <AlertDialogContent>

@@ -14,9 +14,9 @@ import {
   createFacilityBookingSchema,
   facilityBookings,
 } from "../shared/schema";
-import { eq, and, or, gt, lt, asc } from "drizzle-orm";
+import { eq, and, or, gt, lt, asc, lte } from "drizzle-orm";
 
-// Library working hours validation
+// School working hours validation
 function isWithinLibraryHours(date: Date): boolean {
   const hours = date.getHours();
   const minutes = date.getMinutes();
@@ -225,6 +225,126 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Ensure sample data exists
   await createSampleData();
+
+  // Background sweep: cancel pending bookings past confirmation deadline
+  // This simple in-process interval is intended for development and small deployments.
+  // It will be started once when routes are registered.
+  if (process.env.NODE_ENV === 'development') {
+    const sweepExpiredPendingBookings = async () => {
+      try {
+        const now = new Date();
+        // Find pending bookings where confirmationDeadline is set and <= now
+        let expired: any[] = [];
+        try {
+          expired = await db.select().from(facilityBookings).where(
+            and(
+              eq(facilityBookings.status, 'pending'),
+              // start_time < now
+              lt(facilityBookings.startTime as any, now as any)
+            )
+          );
+        } catch (selectErr: any) {
+          // If the confirmation_deadline column doesn't exist yet, skip sweep and log once
+          if (selectErr && selectErr.code === '42703') {
+            console.warn('[Sweep] Skipping expired bookings sweep: confirmation_deadline column not present yet.');
+            return;
+          }
+          throw selectErr;
+        }
+
+        for (const b of expired) {
+          try {
+            await storage.updateFacilityBooking(b.id, {
+              status: 'cancelled',
+              adminResponse: 'Automatically cancelled: not confirmed within 15 minutes',
+              updatedAt: new Date(),
+            });
+
+            // Notify user about cancellation
+            const user = await storage.getUser(b.userId);
+            const facility = await storage.getFacility(b.facilityId);
+            if (user && user.email) {
+              await emailService.sendBookingStatusUpdate(b as any, user as any, facility?.name || `Facility ${b.facilityId}`);
+            }
+
+            // Create a system alert for the user
+            await storage.createSystemAlert({
+              id: randomUUID(),
+              type: 'booking',
+              severity: 'low',
+              title: 'Booking Auto-Cancelled',
+              message: `Your booking request for ${facility?.name || `Facility ${b.facilityId}`} on ${new Date(b.startTime).toLocaleString()} was automatically cancelled because it was not confirmed within 15 minutes.`,
+              userId: b.userId,
+              isRead: false,
+              createdAt: new Date(),
+            });
+          } catch (innerErr) {
+            console.warn('[Sweep] Failed to cancel expired booking or notify user', innerErr);
+          }
+        }
+
+        // Also find approved bookings where arrival confirmation deadline has passed and arrival not confirmed
+        let expiredArrival: any[] = [];
+        try {
+          expiredArrival = await db.select().from(facilityBookings).where(
+            and(
+              eq(facilityBookings.status, 'approved'),
+              // arrival_confirmation_deadline <= now
+              lt(facilityBookings.arrivalConfirmationDeadline as any, now as any),
+              // arrival not confirmed
+              eq(facilityBookings.arrivalConfirmed as any, false),
+              // only consider bookings that have started (or are at start)
+              lte(facilityBookings.startTime as any, now as any)
+            )
+          );
+        } catch (selectErr: any) {
+          // If the column doesn't exist yet, skip and log once
+          if (selectErr && selectErr.code === '42703') {
+            console.warn('[Sweep] Skipping expired arrival sweep: arrival_confirmation columns not present yet.');
+          } else {
+            throw selectErr;
+          }
+        }
+
+        for (const b of expiredArrival) {
+          try {
+            await storage.updateFacilityBooking(b.id, {
+              status: 'cancelled',
+              adminResponse: 'Automatically cancelled: no-show (not confirmed within 15 minutes)',
+              updatedAt: new Date(),
+            });
+
+            // Notify user about cancellation
+            const user = await storage.getUser(b.userId);
+            const facility = await storage.getFacility(b.facilityId);
+            if (user && user.email) {
+              await emailService.sendBookingStatusUpdate(b as any, user as any, facility?.name || `Facility ${b.facilityId}`);
+            }
+
+            // Create a system alert for the user
+            await storage.createSystemAlert({
+              id: randomUUID(),
+              type: 'booking',
+              severity: 'low',
+              title: 'Booking Auto-Cancelled - No-Show',
+              message: `Your approved booking for ${facility?.name || `Facility ${b.facilityId}`} on ${new Date(b.startTime).toLocaleString()} was automatically cancelled because no admin confirmed your arrival within 15 minutes of the start time.`,
+              userId: b.userId,
+              isRead: false,
+              createdAt: new Date(),
+            });
+          } catch (innerErr) {
+            console.warn('[Sweep] Failed to cancel expired arrival booking or notify user', innerErr);
+          }
+        }
+      } catch (err) {
+        console.warn('[Sweep] Error while checking expired pending bookings', err);
+      }
+    };
+
+    // Run immediately and then each minute
+    sweepExpiredPendingBookings().catch(() => {});
+    setInterval(() => { sweepExpiredPendingBookings().catch(() => {}); }, 60 * 1000);
+  }
 
   // -------------------------
   // 🧠 AUTH ROUTES
@@ -438,13 +558,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Validate library working hours
       if (!isWithinLibraryHours(data.startTime)) {
         return res.status(400).json({ 
-          message: `Start time must be within library working hours (${formatLibraryHours()})` 
+          message: `Start time must be within school working hours (${formatLibraryHours()})` 
         });
       }
 
       if (!isWithinLibraryHours(data.endTime)) {
         return res.status(400).json({ 
-          message: `End time must be within library working hours (${formatLibraryHours()})` 
+          message: `End time must be within school working hours (${formatLibraryHours()})` 
         });
       }
 
@@ -515,31 +635,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Check for time conflicts with EXISTING APPROVED bookings only.
-      // Allow multiple pending requests for the same slot; only approved bookings block new requests.
-      const conflictingApproved = await storage.checkApprovedBookingConflicts(
+      // Check for time conflicts with EXISTING bookings (approved or pending).
+      // For stricter enforcement we disallow new requests that overlap any active or pending booking
+      // to prevent two different users from reserving the same facility/time window.
+      const conflictingBookings = await storage.checkBookingConflicts(
         data.facilityId,
         data.startTime,
         data.endTime
       );
 
-      if (conflictingApproved.length > 0) {
+      if (conflictingBookings.length > 0) {
         // Provide clearer conflict details (facility name + conflicting ranges)
         const facilityInfo = await storage.getFacility(data.facilityId);
-        const conflicts = conflictingApproved.map(booking => ({
+        const conflicts = conflictingBookings.map(booking => ({
           id: booking.id,
           startTime: booking.startTime,
           endTime: booking.endTime,
           status: booking.status
         }));
         return res.status(409).json({ 
-          message: `This time slot for ${facilityInfo?.name || `Facility ${data.facilityId}`} is already booked. Please choose a different time or facility.`,
+          message: `This time slot for ${facilityInfo?.name || `Facility ${data.facilityId}`} is already booked or has a pending request. Please choose a different time or facility.`,
           facility: { id: data.facilityId, name: facilityInfo?.name || null },
           conflictingBookings: conflicts
         });
       }
 
-      const booking = await storage.createFacilityBooking(data);
+      // Enforce minimum booking duration: at least 30 minutes
+      try {
+        const durationMs = data.endTime.getTime() - data.startTime.getTime();
+        const minMs = 30 * 60 * 1000; // 30 minutes
+        if (durationMs <= 0) {
+          return res.status(400).json({ message: 'End time must be after start time.' });
+        }
+        if (durationMs < minMs) {
+          return res.status(400).json({ message: 'Booking duration must be at least 30 minutes.' });
+        }
+      } catch (e) {
+        // ignore and proceed (parsing/validation above should catch malformed dates)
+      }
+
+      // Enforce minimum lead time: booking must be created at least 1 hour before start
+      try {
+        const minLeadMs = 60 * 60 * 1000; // 1 hour
+        if (new Date(data.startTime).getTime() < Date.now() + minLeadMs) {
+          return res.status(400).json({ error: 'BookingTooSoon', message: 'Bookings must start at least 1 hour from now. Please choose a later start time.' });
+        }
+      } catch (e) {
+        // ignore malformed dates; validation earlier should handle
+      }
+
+  // Set a confirmation deadline for pending bookings: now + 15 minutes
+  // No longer set a 15-minute confirmation deadline for pending requests.
+  // Pending bookings will be auto-cancelled if they were not approved by their start time.
+
+  const booking = await storage.createFacilityBooking(data);
       const user = await storage.getUser(userId);
 
       if (user?.email && facility) {
@@ -621,13 +770,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Validate library working hours
       if (!isWithinLibraryHours(parsedStartTime)) {
         return res.status(400).json({ 
-          message: `Start time must be within library working hours (${formatLibraryHours()})` 
+          message: `Start time must be within school working hours (${formatLibraryHours()})` 
         });
       }
 
       if (!isWithinLibraryHours(parsedEndTime)) {
         return res.status(400).json({ 
-          message: `End time must be within library working hours (${formatLibraryHours()})` 
+          message: `End time must be within school working hours (${formatLibraryHours()})` 
         });
       }
 
@@ -846,26 +995,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const user = await storage.getUser(booking.userId);
         const facility = await storage.getFacility(booking.facilityId);
-        await storage.createSystemAlert({
-          id: randomUUID(),
-          type: 'booking',
-          severity: 'low',
-          title: 'Booking Canceled',
-          message: `${user?.email || `User ${booking.userId}`} canceled their booking for ${facility?.name || `Facility ${booking.facilityId}`} from ${new Date(booking.startTime).toLocaleString()} to ${new Date(booking.endTime).toLocaleString()}.`,
-          userId: booking.userId,
-          isRead: false,
-          createdAt: new Date(),
-        });
+        // Only create a global/admin alert for scheduled (upcoming approved) or active (in-progress approved) bookings
+        // so admins are notified when an approved booking is canceled or ended.
+        try {
+          if (booking.status === 'approved') {
+            const startTime = new Date(booking.startTime);
+            const endTime = new Date(booking.endTime);
+            const isActiveBooking = startTime <= now && now <= endTime;
+            const isScheduledBooking = startTime > now;
+            if (isActiveBooking || isScheduledBooking) {
+              await storage.createSystemAlert({
+                id: randomUUID(),
+                type: 'booking',
+                severity: 'low',
+                title: 'Booking Canceled / Ended',
+                message: `${user?.email || `User ${booking.userId}`} cancelled/ended their booking for ${facility?.name || `Facility ${booking.facilityId}`} (${new Date(booking.startTime).toLocaleString()} - ${new Date(booking.endTime).toLocaleString()}).`,
+                userId: null,
+                isRead: false,
+                createdAt: new Date(),
+              });
+            }
+          }
+        } catch (e) {
+          console.warn('[Alerts] Failed to create booking cancellation alert', e);
+        }
       } catch (e) {
         console.warn('[Alerts] Failed to create booking cancellation alert', e);
       }
 
       // Log activity for cancellation
       try {
+        const facility = await storage.getFacility(booking.facilityId).catch(() => null);
         await storage.createActivityLog({
           id: randomUUID(),
           action: 'Booking Canceled',
-          details: `User canceled booking ${bookingId}`,
+          details: `User canceled booking for ${facility?.name || `Facility ${booking.facilityId}`} (${new Date(booking.startTime).toLocaleString()} - ${new Date(booking.endTime).toLocaleString()})`,
           userId: userId,
           ipAddress: req.ip,
           userAgent: req.get('User-Agent'),
@@ -925,7 +1089,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       // Fetch all alerts then return only the global/admin ones (userId == null)
       const alerts = await storage.getSystemAlerts();
-      const adminAlerts = Array.isArray(alerts) ? alerts.filter(a => !a.userId) : [];
+      // Use explicit null/undefined check so falsy userId values (e.g. empty string) are not treated as global
+      const adminAlerts = Array.isArray(alerts) ? alerts.filter(a => a.userId == null) : [];
       res.json(adminAlerts);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch system alerts" });
@@ -936,7 +1101,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/admin/alerts/:alertId/read", isAuthenticated, requireAdmin, async (req: any, res) => {
     try {
       const { alertId } = req.params;
-      await storage.markAlertAsRead(alertId);
+      // Temporary debug: log the alert row before attempting admin mark-read
+      try {
+        const alerts = await storage.getSystemAlerts();
+        const matched = Array.isArray(alerts) ? alerts.find(a => a.id === alertId) : null;
+        console.warn(`[ADMIN READ ATTEMPT] alertId=${alertId} currentUserId=${matched?.userId ?? 'NULL'} isRead=${matched?.isRead}`);
+      } catch (e) {
+        console.warn('[ADMIN READ ATTEMPT] failed to fetch alert for debug', e);
+      }
+
+      // Only mark global/admin alerts as read via admin route
+      const affected = await storage.markAlertAsReadForAdmin(alertId);
+      if (!affected) {
+        console.warn(`[ADMIN READ] No rows updated when marking alert ${alertId} as read via admin route`);
+        return res.status(404).json({ message: 'Alert not found or not an admin/global alert' });
+      }
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ message: "Failed to mark alert as read" });
@@ -947,8 +1126,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/notifications", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
+      // Only return notifications explicitly targeted to the current user.
+      // Global/admin alerts (userId == null) are intended for admins and should not be included here.
       const alerts = await storage.getSystemAlerts();
-      const userAlerts = Array.isArray(alerts) ? alerts.filter(a => !a.userId || a.userId === userId) : [];
+      const userAlerts = Array.isArray(alerts) ? alerts.filter(a => a.userId === userId) : [];
       res.json(userAlerts);
     } catch (error) {
       console.error('[NOTIFICATIONS] Failed to fetch notifications', error);
@@ -960,11 +1141,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = req.user.claims.sub;
       const { alertId } = req.params;
+      // Debug: fetch and log the alert row so we can see its userId at the time of request
       const alerts = await storage.getSystemAlerts();
       const alert = Array.isArray(alerts) ? alerts.find(a => a.id === alertId) : null;
+      console.warn(`[USER READ ATTEMPT] userId=${userId} alertId=${alertId} alert.userId=${alert?.userId ?? 'NULL'} isRead=${alert?.isRead}`);
       if (!alert) return res.status(404).json({ message: 'Notification not found' });
-      if (alert.userId && alert.userId !== userId) return res.status(403).json({ message: 'Forbidden' });
-      await storage.markAlertAsRead(alertId);
+      // Disallow marking a global/admin alert (userId == null) as read via this user endpoint.
+      // Use explicit null/undefined check to avoid treating falsy userId values as global
+      if (alert.userId == null) {
+        return res.status(403).json({ message: 'Forbidden' });
+      }
+      if (alert.userId !== userId) return res.status(403).json({ message: 'Forbidden' });
+      // Use scoped write so a user cannot accidentally mark a global/admin alert as read
+      const affected = await storage.markAlertAsReadForUser(alertId, userId);
+      if (!affected) {
+        console.warn(`[NOTIFICATIONS] User ${userId} attempted to mark alert ${alertId} as read but no rows updated`);
+        return res.status(404).json({ message: 'Notification not found or not owned by this user' });
+      }
       res.json({ success: true });
     } catch (error) {
       console.error('[NOTIFICATIONS] Failed to mark notification read', error);
@@ -1044,6 +1237,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.warn('[Alerts] Failed to create booking approval notification', e);
       }
 
+      // Set arrival confirmation window: admins must confirm arrival within 15 minutes of booking start.
+      try {
+        if (booking) {
+          const arrivalDeadline = new Date(booking.startTime.getTime() + 15 * 60 * 1000); // +15 minutes
+          await storage.updateFacilityBooking(booking.id, {
+            arrivalConfirmationDeadline: arrivalDeadline,
+            arrivalConfirmed: false,
+            updatedAt: new Date(),
+          } as any);
+        }
+      } catch (e) {
+        console.warn('[Approval] Failed to set arrival confirmation deadline', e);
+      }
+
       // Auto-deny other pending requests that overlap this approved booking window
       try {
         if (booking) {
@@ -1094,6 +1301,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true, notification: createdNotification });
     } catch (error) {
       res.status(500).json({ message: "Failed to approve booking" });
+    }
+  });
+
+  // Admin confirms arrival for an approved booking
+  app.post("/api/bookings/:bookingId/confirm-arrival", isAuthenticated, requireAdmin, async (req: any, res) => {
+    try {
+      const { bookingId } = req.params;
+      const booking = await storage.getFacilityBooking(bookingId);
+      if (!booking) return res.status(404).json({ message: 'Booking not found' });
+      if (booking.status !== 'approved') return res.status(400).json({ message: 'Only approved bookings can be confirmed for arrival' });
+
+      await storage.updateFacilityBooking(bookingId, {
+        arrivalConfirmed: true,
+        updatedAt: new Date(),
+      } as any);
+
+      // Create an activity log
+      await storage.createActivityLog({
+        id: randomUUID(),
+        action: 'Arrival Confirmed',
+        details: `Admin ${req.user.claims.sub} confirmed arrival for booking ${bookingId}`,
+        userId: req.user.claims.sub,
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent'),
+        createdAt: new Date(),
+      });
+
+      // Notify user
+      try {
+        const user = await storage.getUser(booking.userId);
+        const facility = await storage.getFacility(booking.facilityId);
+        if (user) {
+          await storage.createSystemAlert({
+            id: randomUUID(),
+            type: 'booking',
+            severity: 'low',
+            title: 'Arrival Confirmed',
+            message: `An admin has confirmed your arrival for ${facility?.name || `Facility ${booking.facilityId}`}. Enjoy your session!`,
+            userId: booking.userId,
+            isRead: false,
+            createdAt: new Date(),
+          });
+        }
+      } catch (e) {
+        console.warn('[Confirm Arrival] Failed to notify user', e);
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('[Confirm Arrival] Failed', error);
+      res.status(500).json({ message: 'Failed to confirm arrival' });
     }
   });
 
@@ -1604,7 +1862,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const libraryCloseTime = 17 * 60;
         const isLibraryClosed = currentTimeInMinutes < libraryOpenTime || currentTimeInMinutes > libraryCloseTime;
         if (!isLibraryClosed) {
-          return res.status(400).json({ message: 'Cannot mark facility unavailable during library open hours. Please perform this action after hours.' });
+          return res.status(400).json({ message: 'Cannot mark facility unavailable during school open hours. Please perform this action after hours.' });
         }
       }
 

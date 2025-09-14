@@ -38,6 +38,9 @@ async function startServer() {
     try {
       await pool.query(`ALTER TABLE facilities ADD COLUMN IF NOT EXISTS unavailable_reason TEXT;`);
       await pool.query(`ALTER TABLE facility_bookings ADD COLUMN IF NOT EXISTS equipment JSONB;`);
+      await pool.query(`ALTER TABLE facility_bookings ADD COLUMN IF NOT EXISTS confirmation_deadline TIMESTAMP;`);
+  await pool.query(`ALTER TABLE facility_bookings ADD COLUMN IF NOT EXISTS arrival_confirmation_deadline TIMESTAMP;`);
+  await pool.query(`ALTER TABLE facility_bookings ADD COLUMN IF NOT EXISTS arrival_confirmed BOOLEAN DEFAULT false;`);
       console.log("✅ Applied development-safe schema updates (unavailable_reason, equipment)");
     } catch (err) {
       console.error("⚠️ Failed to apply development-safe schema updates:", err);

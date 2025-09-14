@@ -7,13 +7,14 @@ import { z } from "zod";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
-import { Send, Calendar as CalendarIcon, Plus, Minus } from "lucide-react"; // Added Plus, Minus icons
+import { Calendar as CalendarIcon, Plus, Minus, Send } from "lucide-react"; // Added Plus, Minus, Send icons
 import type { Facility } from "../../../../shared/schema";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import { DialogDescription } from "@/components/ui/dialog";
 import {
@@ -159,12 +160,29 @@ const createBookingSchema = () => z
     purpose: z.string().min(1, "Purpose is required"),
     participants: z.number().min(1, "Number of participants is required"),
   })
+  .superRefine((val, ctx) => {
+    try {
+      if (val.startTime && val.endTime) {
+        const diff = val.endTime.getTime() - val.startTime.getTime();
+        const minMs = 30 * 60 * 1000; // 30 minutes
+        if (diff <= 0) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'End time must be after start time', path: ['endTime'] });
+        } else if (diff < minMs) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Bookings must be at least 30 minutes long', path: ['endTime'] });
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  });
 
 interface BookingModalProps {
   isOpen: boolean;
   onClose: () => void;
   facilities: Facility[];
   selectedFacilityId?: number | null;
+  initialStartTime?: Date | null;
+  initialEndTime?: Date | null;
 }
 
 export default function BookingModal({
@@ -172,6 +190,8 @@ export default function BookingModal({
   onClose,
   facilities,
   selectedFacilityId,
+  initialStartTime = null,
+  initialEndTime = null,
 }: BookingModalProps) {
   const { toast } = useToast();
   const { user } = useAuth();
@@ -212,7 +232,7 @@ export default function BookingModal({
     
     const facilityBookings = allBookings.filter((booking: any) => 
       booking.facilityId === facilityId && 
-      (booking.status === "approved" || booking.status === "pending") &&
+      booking.status === "approved" &&
       new Date(booking.endTime) > now
     ).sort((a: any, b: any) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
 
@@ -259,7 +279,7 @@ export default function BookingModal({
     return allBookings.filter((booking: any) =>
       booking.facilityId === facilityId &&
       booking.userEmail === user.email &&
-      (booking.status === "approved" || booking.status === "pending") &&
+      booking.status === "approved" &&
       new Date(booking.endTime) > new Date() // Only future/current bookings
     );
   };
@@ -288,12 +308,21 @@ export default function BookingModal({
     mode: 'onChange',
     defaultValues: {
       facilityId: "",
-      startTime: new Date(new Date().getTime() + 5 * 60 * 1000), // Default to current date and time + 5 minutes
-      endTime: new Date(Date.now() + 35 * 60 * 1000), // 30 minutes after start time
+      startTime: initialStartTime ?? new Date(new Date().getTime() + 5 * 60 * 1000), // Default: initialStartTime or now + 5 minutes
+      endTime: initialEndTime ?? new Date(Date.now() + 35 * 60 * 1000), // Default: initialEndTime or start + 30 minutes
       purpose: "",
       participants: 1,
     },
   });
+
+  // If the modal receives new initial times while open, update the form fields
+  useEffect(() => {
+    if (!isOpen) return;
+    if (initialStartTime) form.setValue('startTime', initialStartTime);
+    if (initialEndTime) form.setValue('endTime', initialEndTime);
+  }, [isOpen, initialStartTime, initialEndTime]);
+
+  const [formValidationWarnings, setFormValidationWarnings] = useState<Array<{title: string; description: string}>>([]);
 
   // Auto-select facility when modal opens with a specific facility ID
   useEffect(() => {
@@ -315,6 +344,16 @@ export default function BookingModal({
       }
     }
   }, [isOpen, selectedFacilityId, facilities, form, fallbackFacilities]);
+
+  // Clear inline warnings when relevant form fields change
+  useEffect(() => {
+    const subscription = form.watch((_, { name }) => {
+      if (["startTime", "endTime", "facilityId", "participants", "purpose"].includes(name as string)) {
+        if (formValidationWarnings.length > 0) setFormValidationWarnings([]);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [form, formValidationWarnings]);
 
   const handleFacilityChange = (facilityId: string) => {
     const facility = facilities.find((f) => f.id === parseInt(facilityId));
@@ -421,6 +460,16 @@ export default function BookingModal({
           description: error.message,
           variant: "destructive",
         });
+      }
+      // Handle server-side BookingTooSoon structured error - show inline in modal
+      else if (error && error.error === 'BookingTooSoon') {
+        setFormValidationWarnings([{ title: 'Booking Too Soon', description: error.message || 'Bookings must start at least 1 hour from now. Please choose a later start time.' }]);
+        // Also surface a toast briefly for visibility
+        toast({
+          title: "Booking Too Soon",
+          description: error.message || 'Bookings must start at least 1 hour from now. Please choose a later start time.',
+          variant: "destructive",
+        });
       } else {
         toast({
           title: "Error",
@@ -453,6 +502,19 @@ export default function BookingModal({
         title: "Invalid Start Time",
         description: "Start time cannot be in the past. Please select a future time.",
       });
+    }
+
+    // Validate booking is at least 1 hour in advance
+    try {
+      const minLeadMs = 60 * 60 * 1000; // 1 hour
+      if (data.startTime.getTime() < Date.now() + minLeadMs) {
+        validationErrors.push({
+          title: "Booking Too Soon",
+          description: "Bookings must start at least 1 hour from now. Please choose a later start time.",
+        });
+      }
+    } catch (e) {
+      // ignore malformed dates here; zod should have caught them earlier
     }
 
     // Validate facility exists
@@ -502,29 +564,21 @@ export default function BookingModal({
       if (!endTimeValid) timeIssues.push("end time");
       
       validationErrors.push({
-        title: "Library Hours",
-        description: `Your ${timeIssues.join(" and ")} ${timeIssues.length > 1 ? "are" : "is"} outside library operating hours (${formatLibraryHours()}). Room access is only available during these hours.`,
+  title: "School Hours",
+  description: `Your ${timeIssues.join(" and ")} ${timeIssues.length > 1 ? "are" : "is"} outside school operating hours (${formatLibraryHours()}). Room access is only available during these hours.`,
       });
     }
 
-    // Show all validation errors as separate toasts
+    // Show validation errors inline in the modal
     if (validationErrors.length > 0) {
-      validationErrors.forEach((error, index) => {
-        // Add a small delay between toasts to prevent them from overlapping
-        setTimeout(() => {
-          toast({
-            title: error.title,
-            description: error.description,
-            variant: "destructive",
-          });
-        }, index * 100); // 100ms delay between each toast
-      });
+      setFormValidationWarnings(validationErrors);
       return;
     }
 
-  // Store pending data and open confirmation dialog
-  setConfirmPendingData(data);
-  setShowConfirmDialog(true);
+    // Clear any previous inline warnings and proceed to confirmation
+    setFormValidationWarnings([]);
+    setConfirmPendingData(data);
+    setShowConfirmDialog(true);
   };
 
   // Confirmation dialog state
@@ -566,6 +620,12 @@ export default function BookingModal({
     return `${hours}h ${minutes}m`;
   };
 
+  const isDurationValid = (start: Date | undefined, end: Date | undefined) => {
+    if (!start || !end) return false;
+    const diff = end.getTime() - start.getTime();
+    return diff >= 30 * 60 * 1000; // at least 30 minutes
+  };
+
   // Helper function to format booking conflict error messages
   const formatBookingConflictMessage = (errorMessage: string) => {
     try {
@@ -603,7 +663,7 @@ export default function BookingModal({
         <DialogHeader>
           <DialogTitle className="text-2xl font-semibold">New Facility Booking</DialogTitle>
           <DialogDescription>
-            Create a new booking by selecting a facility, date, and time. Please follow library hours and room capacity rules.
+            Create a new booking by selecting a facility, date, and time. Please follow school hours and room capacity rules.
           </DialogDescription>
         </DialogHeader>
 
@@ -1147,24 +1207,46 @@ export default function BookingModal({
               </div>
             )}
 
-            <div className="flex items-center space-x-4 pt-6">
-              <Button 
-                type="submit" 
-                className="flex-1" 
-                disabled={
-                  createBookingMutation.isPending || 
-                  isSubmitting || 
-                  (selectedFacility ? getUserFacilityBookings(selectedFacility.id).length > 0 : false)
-                }
-              >
-                <Send className="h-4 w-4 mr-2" />
-                {createBookingMutation.isPending || isSubmitting ? "Submitting..." : 
-                 (selectedFacility && getUserFacilityBookings(selectedFacility.id).length > 0) ? "Cannot Book Same Facility" :
-                 "Submit Booking"}
-              </Button>
-              <Button type="button" variant="outline" className="flex-1" onClick={onClose}>
-                Cancel
-              </Button>
+            <DialogFooter>
+              <div className="w-full flex items-center justify-between gap-4">
+                <div className="flex gap-3 w-1/2">
+                  <div className="flex-1">
+                    <Button
+                      type="submit"
+                      className="w-full h-10 flex items-center justify-center gap-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg"
+                      disabled={
+                        createBookingMutation.isPending ||
+                        isSubmitting ||
+                        (selectedFacility ? getUserFacilityBookings(selectedFacility.id).length > 0 : false)
+                      }
+                    >
+                      {createBookingMutation.isPending || isSubmitting ? (
+                          "Submitting..."
+                        ) : (
+                          <span className="flex items-center">
+                            <Send className="h-4 w-4 mr-2 text-white" />
+                            <span>Submit Booking</span>
+                          </span>
+                        )}
+                    </Button>
+                  </div>
+
+                  <div className="flex-1">
+                    <Button
+                      variant="outline"
+                      onClick={onClose}
+                      className="w-full h-10 flex items-center justify-center text-gray-900 bg-white border border-gray-300 rounded-lg"
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Right-aligned placeholder (warnings moved to unified inline section below) */}
+                <div className="w-1/2 flex justify-end">
+                  <div className="text-sm text-transparent">&nbsp;</div>
+                </div>
+              </div>
 
               <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
                 <AlertDialogContent>
@@ -1185,7 +1267,30 @@ export default function BookingModal({
                   </AlertDialogFooter>
                 </AlertDialogContent>
               </AlertDialog>
-            </div>
+            </DialogFooter>
+            {/* Inline validation warnings (replaces toasts for form validation) */}
+            {(() => {
+              const durationWarning = !isDurationValid(form.watch('startTime'), form.watch('endTime'))
+                ? [{ title: 'Bookings must be at least 30 minutes long', description: 'Please adjust the times before saving.' }]
+                : [];
+
+              const warnings = durationWarning.concat(formValidationWarnings || []);
+              if (warnings.length === 0) return null;
+
+              return (
+                <div className="mt-3 text-sm rounded-b-lg px-4 py-3 bg-white border-t border-gray-200">
+                  {warnings.map((w, idx) => (
+                    <div key={idx} className="mb-2 flex items-start gap-3">
+                      <div className="mt-1 text-yellow-600">⚠️</div>
+                      <div>
+                        <div className="font-medium text-red-700">{w.title}</div>
+                        <div className="text-red-700">{w.description}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
           </form>
           )}
         </Form>

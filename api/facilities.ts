@@ -46,7 +46,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       // Fallback to static data if database is not available (for initial testing)
-      const libraryFacilities = [
+  const schoolFacilities = [
         {
           id: 1,
           name: "Collaraborative Learning Room 1",
@@ -76,7 +76,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       ];
       
-      return res.status(200).json(libraryFacilities);
+  return res.status(200).json(schoolFacilities);
     }
 
     if (req.method === 'POST') {

@@ -46,13 +46,13 @@
 
 These test accounts are automatically created when the server starts up in development mode. The credentials are stored in Supabase authentication and will persist across server restarts.
 
-## Library Hours
+## School Hours
 
-Remember that the system enforces library working hours:
+Remember that the system enforces school working hours:
 
 - **Operating Hours**: 7:30 AM - 5:00 PM
 - Bookings outside these hours will be rejected
-- Facilities show as "Library Closed" outside operating hours
+- Facilities show as "School Closed" outside operating hours
 
 ## Test Facilities
 

@@ -20,6 +20,28 @@ import {
 import { Button } from "@/components/ui/button";
 import { format } from 'date-fns';
 
+// Simple countdown component that shows mm:ss remaining until expiry
+function Countdown({ expiry, onExpire }: { expiry: string | Date; onExpire?: () => void }) {
+  const [now, setNow] = useState(new Date());
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const exp = new Date(expiry);
+  const diff = Math.max(0, Math.floor((exp.getTime() - now.getTime()) / 1000));
+  useEffect(() => {
+    if (diff <= 0 && onExpire) {
+      onExpire();
+    }
+  }, [diff]);
+
+  const minutes = Math.floor(diff / 60).toString().padStart(2, '0');
+  const seconds = (diff % 60).toString().padStart(2, '0');
+  return <span className="font-mono">{minutes}:{seconds}</span>;
+}
+
 export default function BookingDashboard() {
   const { user } = useAuth(); // Keep auth hook for authentication check and role
   const [, setLocation] = useLocation();
@@ -27,6 +49,10 @@ export default function BookingDashboard() {
   const queryClient = useQueryClient();
   const [showBookingModal, setShowBookingModal] = useState(false);
   const [selectedFacilityForBooking, setSelectedFacilityForBooking] = useState<number | null>(null);
+  const [initialStartForBooking, setInitialStartForBooking] = useState<Date | null>(null);
+  const [initialEndForBooking, setInitialEndForBooking] = useState<Date | null>(null);
+  // Avoid 'declared but its value is never read' during iterative refactor
+  void initialStartForBooking; void initialEndForBooking;
   const [showEditBookingModal, setShowEditBookingModal] = useState(false);
   const [editingBooking, setEditingBooking] = useState<any>(null);
   const [selectedView, setSelectedView] = useState("dashboard");
@@ -56,6 +82,16 @@ export default function BookingDashboard() {
   useEffect(() => {
     const hash = window.location.hash?.replace('#', '');
     if (hash) setSelectedView(hash);
+
+    // If the URL requests a new booking, open the booking modal and prefill sensible times
+    if (hash === 'new') {
+  // compute default start = now + 1 hour (add 1 minute buffer to avoid race on submit)
+  const start = new Date(Date.now() + 60 * 60 * 1000 + 60 * 1000);
+  const end = new Date(start.getTime() + 30 * 60 * 1000); // default 30 minute booking
+      setInitialStartForBooking(start);
+      setInitialEndForBooking(end);
+      openBookingModal(undefined, start, end);
+    }
   }, []);
 
   const handleSidebarClick = (id: string) => {
@@ -239,6 +275,19 @@ export default function BookingDashboard() {
     setBookingToCancel(null);
   };
 
+  // Handler invoked when a pending booking's confirmation window expires
+  const handlePendingBookingAutoCancel = () => {
+    queryClient.invalidateQueries({ queryKey: ['/api/bookings'] });
+    toast({
+      title: 'Booking Auto-Cancelled',
+      description: 'Your pending booking was automatically cancelled after the confirmation window.',
+      variant: 'destructive'
+    });
+  };
+
+  // reference the handler to avoid "declared but its value is never read" TypeScript error
+  void handlePendingBookingAutoCancel;
+
   // Mutation for user settings (specifically for email notifications)
   const updateUserSettingsMutation = useMutation({
     mutationFn: (data: { emailNotifications?: boolean }) =>
@@ -285,6 +334,8 @@ export default function BookingDashboard() {
       const response = await apiRequest("GET", "/api/bookings");
       return response.json();
     },
+    // Refetch every 30s so countdowns stay in sync with server-side expirations
+    refetchInterval: 30000,
   });
 
   // NEW: Get ALL approved bookings to show facility availability to all users
@@ -370,8 +421,8 @@ export default function BookingDashboard() {
     // If outside library hours, mark as closed (unless already caught by admin-unavailable above)
     if (!isWithinLibraryHours) {
       return {
-        status: "closed",
-        label: "Library Closed",
+  status: "closed",
+  label: "School Closed",
         booking: null,
         badgeClass: "bg-gray-100 text-gray-800"
       };
@@ -386,7 +437,7 @@ export default function BookingDashboard() {
     if (upcomingBooking) {
       return {
         status: "scheduled",
-        label: "Upcoming Booking",
+        label: "Scheduled",
         booking: upcomingBooking,
         badgeClass: "bg-yellow-100 text-yellow-800"
       };
@@ -412,14 +463,14 @@ export default function BookingDashboard() {
     };
   };
 
-  // Helper to determine if library is currently closed (same hours as booking validation)
+  // Helper to determine if school is currently closed (same hours as booking validation)
   const isLibraryClosedNow = () => {
     const now = new Date();
     const currentHour = now.getHours();
     const currentMinute = now.getMinutes();
     const currentTimeInMinutes = currentHour * 60 + currentMinute;
-    const libraryOpenTime = 7 * 60 + 30; // 7:30 AM
-    const libraryCloseTime = 17 * 60; // 5:00 PM
+  const libraryOpenTime = 7 * 60 + 30; // 7:30 AM
+  const libraryCloseTime = 17 * 60; // 5:00 PM
     return currentTimeInMinutes < libraryOpenTime || currentTimeInMinutes > libraryCloseTime;
   };
 
@@ -452,8 +503,16 @@ export default function BookingDashboard() {
   const stats = getStats();
 
   // Helper function to open booking modal with a specific facility
-  const openBookingModal = (facilityId?: number) => {
+  const openBookingModal = (facilityId?: number, start?: Date, end?: Date) => {
     setSelectedFacilityForBooking(facilityId || null);
+    // If no start/end provided, compute sensible defaults that satisfy the 1-hour lead-time requirement
+    if (!start) {
+      // default to current time + 1 hour (add 1 minute buffer to avoid race on submit)
+      start = new Date(Date.now() + 60 * 60 * 1000 + 60 * 1000);
+      end = new Date(start.getTime() + 30 * 60 * 1000);
+    }
+    setInitialStartForBooking(start ?? null);
+    setInitialEndForBooking(end ?? null);
     setShowBookingModal(true);
   };
 
@@ -461,6 +520,8 @@ export default function BookingDashboard() {
   const closeBookingModal = () => {
     setShowBookingModal(false);
     setSelectedFacilityForBooking(null);
+    setInitialStartForBooking(null);
+    setInitialEndForBooking(null);
   };
 
   const getFacilityDisplay = (facilityId: number) => {
@@ -474,6 +535,18 @@ export default function BookingDashboard() {
       // Room capacity is 12
     }
     return name;
+  };
+
+  // Small presentational badge for facility booking status to keep JSX simple
+  const FacilityStatusBadge = ({ facility, bookingStatus }: { facility: any; bookingStatus: any }) => {
+    const classes = `px-3 py-1 rounded-full text-sm font-medium ${
+      !facility.isActive ? 'bg-red-500 text-white' :
+      bookingStatus.status === 'closed' ? 'bg-gray-700 text-white' :
+      bookingStatus.status === 'booked' ? 'bg-red-500 text-white' :
+      bookingStatus.status === 'scheduled' ? 'bg-yellow-500 text-white' :
+      'bg-pink-500 text-white'
+    }`;
+    return <span className={classes}>{!facility.isActive ? 'Unavailable' : bookingStatus.label}</span>;
   };
 
   const getFacilityDescriptionByName = (name?: string) => {
@@ -611,13 +684,13 @@ export default function BookingDashboard() {
                             </div>
                           </div>
                           <span className={`px-3 py-0.5 rounded-full text-sm font-medium border ${statusColors[status.label as keyof typeof statusColors] || 'bg-gray-100 text-gray-800 border-gray-200'}`}>
-                            <div className={`w-2 h-2 rounded-full mr-2 inline-block ${
+                            <span className={`w-2 h-2 rounded-full mr-2 inline-block ${
                               status.label === 'Active' ? 'bg-green-500' :
                               status.label === 'Pending' || status.label === 'Pending Request' ? 'bg-yellow-500' :
                               status.label === 'Done' ? 'bg-gray-500' :
                               status.label === 'Denied' ? 'bg-red-500' :
                               status.label === 'Cancelled' ? 'bg-orange-500' : 'bg-gray-500'
-                            }`}></div>
+                            }`} />
                             {status.label}
                           </span>
                         </div>
@@ -697,6 +770,27 @@ export default function BookingDashboard() {
                         <div className="flex items-center justify-between pt-4 border-t border-gray-100">
                           <div className="text-sm text-gray-500">
                             Booked on {new Date(booking.createdAt || booking.startTime).toLocaleDateString()}
+                            {/* Arrival-confirmation: if an arrivalConfirmationDeadline exists and arrival not yet confirmed, show confirmation countdown in Active Booking; otherwise show time remaining */}
+                            {getBookingStatus(booking).label === 'Active' && booking.userId === user?.id && (
+                              <div className="text-xs text-gray-500 mt-1">
+                                {booking.arrivalConfirmationDeadline && !booking.arrivalConfirmed ? (
+                                  <div>
+                                    Confirmation required in: <Countdown expiry={booking.arrivalConfirmationDeadline} onExpire={() => {
+                                      // Refresh bookings so expired arrivals are re-evaluated
+                                      queryClient.invalidateQueries({ queryKey: ['/api/bookings'] });
+                                      toast({ title: 'Arrival Confirmation Expired', description: `Your booking for ${getFacilityDisplay(booking.facilityId)} was not confirmed and may be cancelled.` });
+                                    }} />
+                                  </div>
+                                ) : (
+                                  <div>
+                                    Time remaining: <Countdown expiry={booking.endTime} onExpire={() => {
+                                      queryClient.invalidateQueries({ queryKey: ['/api/bookings'] });
+                                      toast({ title: 'Booking Ended', description: `Your booking for ${getFacilityDisplay(booking.facilityId)} has ended.` });
+                                    }} />
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
                           <div className="flex items-center gap-2">
                             {canEditBooking(booking) && (
@@ -774,7 +868,7 @@ export default function BookingDashboard() {
 
                   {(isLibraryClosedNow() || facilities.some(f => getFacilityBookingStatus(f.id).status === 'closed')) && (
                     <div className="mt-3 text-sm text-gray-500 bg-gray-50 rounded p-2 border border-gray-100">
-                      If you request a booking outside library hours, staff will review and confirm or reschedule it.
+                      If you request a booking outside school hours, staff will review and confirm or reschedule it.
                     </div>
                   )}
                 </div>
@@ -792,7 +886,7 @@ export default function BookingDashboard() {
                   const bookingStatus = getFacilityBookingStatus(facility.id);
                   // Immediate availability for same-day booking
                   const isAvailableForBooking = facility.isActive && bookingStatus.status === "available";
-                  // Allow users to submit booking requests even when library is closed; these will be reviewed
+                  // Allow users to submit booking requests even when school is closed; these will be reviewed
                   // by staff and are subject to approval and scheduling validation.
                   const canRequestBooking = facility.isActive && (bookingStatus.status === "available" || bookingStatus.status === "closed");
                   
@@ -809,15 +903,7 @@ export default function BookingDashboard() {
                       <div className="aspect-video bg-gradient-to-br from-pink-100 to-rose-100 flex items-center justify-center relative">
                           {isAvailableForBooking ? (
                             <div className="absolute inset-0 bg-black bg-opacity-40 flex items-center justify-center">
-                              <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                                !facility.isActive ? 'bg-red-500 text-white' :
-                                bookingStatus.status === 'closed' ? 'bg-gray-700 text-white' :
-                                bookingStatus.status === 'booked' ? 'bg-red-500 text-white' :
-                                bookingStatus.status === 'scheduled' ? 'bg-yellow-500 text-white' :
-                                'bg-pink-500 text-white'
-                              }`}>
-                                {!facility.isActive ? 'Unavailable' : bookingStatus.label}
-                              </span>
+                              <FacilityStatusBadge facility={facility} bookingStatus={bookingStatus} />
 
                               {/* End/Cancel button for bookings the user may cancel (matches server rules) */}
                               {bookingStatus.booking && bookingStatus.booking.userId === user?.id && canCancelBooking(bookingStatus.booking) && (
@@ -888,9 +974,9 @@ export default function BookingDashboard() {
                         {bookingStatus.booking && (
                           <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
                             <p className="text-xs font-medium text-gray-600 mb-1">
-                              {bookingStatus.status === 'booked' ? 'Currently in use until:' :
-                               bookingStatus.status === 'scheduled' ? 'Next booking:' :
-                               'Pending approval:'}
+                     {bookingStatus.status === 'booked' ? 'Currently in use until:' :
+                       bookingStatus.status === 'scheduled' ? 'Next booking:' :
+                       'Scheduled:'}
                             </p>
                             <p className="text-sm text-gray-900 font-medium">
                               {bookingStatus.status === 'booked' ? (
@@ -951,7 +1037,7 @@ export default function BookingDashboard() {
 
                               {bookingStatus.status === 'closed' && (
                                 <p className="text-xs text-gray-500 mt-2 text-right max-w-xs">
-                                  If requested outside library hours, staff will review and confirm or reschedule your booking.
+                                  If requested outside school hours, staff will review and confirm or reschedule your booking.
                                 </p>
                               )}
                             </div>
@@ -984,13 +1070,13 @@ export default function BookingDashboard() {
                       </div>
                       {isLibraryClosedNow() ? (
                             <>
-                              <h4 className="text-lg font-medium text-gray-900 mb-2">Library Closed</h4>
-                              <p className="text-gray-600">The library is currently closed. Please return during normal operating hours (7:30 AM – 5:00 PM).</p>
+                              <h4 className="text-lg font-medium text-gray-900 mb-2">School Closed</h4>
+                              <p className="text-gray-600">The school is currently closed. Please return during normal operating hours (7:30 AM – 5:00 PM).</p>
                             </>
                           ) : (
                             <>
                               <h4 className="text-lg font-medium text-gray-900 mb-2">All rooms are currently booked</h4>
-                              <p className="text-gray-600">All facilities are currently in use, scheduled, or otherwise unavailable. Please check back later or contact library staff for assistance.</p>
+                              <p className="text-gray-600">All facilities are currently in use, scheduled, or otherwise unavailable. Please check back later or contact school staff for assistance.</p>
                             </>
                           )}
                     </div>
@@ -1040,7 +1126,7 @@ export default function BookingDashboard() {
                     <ul className="space-y-1 ml-4 list-disc">
                       <li>Make bookings at least 30 minutes before the start time.</li>
                       <li>One active booking per facility at a time; you may book different facilities concurrently.</li>
-                      <li>Bookings are within library hours (7:30 AM – 5:00 PM). Requests outside these hours will be reviewed by staff.</li>
+                      <li>Bookings are within school hours (7:30 AM – 5:00 PM). Requests outside these hours will be reviewed by school staff.</li>
                     </ul>
                   </div>
 
@@ -1156,7 +1242,7 @@ export default function BookingDashboard() {
                         if (isLibraryClosedNow()) {
                           return (
                             <div>
-                              <div>Library is currently closed. You can still request a booking; staff will review and confirm or reschedule it.</div>
+                              <div>School is currently closed. You can still request a booking; school staff will review and confirm or reschedule it.</div>
                               <div className="mt-2">
                                 <button onClick={() => openBookingModal()} className="inline-flex items-center px-3 py-1.5 bg-pink-600 hover:bg-pink-700 text-white rounded text-sm">Request Booking</button>
                               </div>
@@ -1254,9 +1340,9 @@ export default function BookingDashboard() {
                         {bookingStatus.booking && (
                           <div className="mb-3 p-2 bg-white rounded border border-gray-200">
                             <p className="text-xs text-gray-600 mb-1">
-                              {bookingStatus.status === 'booked' ? 'In use until:' :
+                              {bookingStatus.status === 'booked' ? 'Currently in use until:' :
                                bookingStatus.status === 'scheduled' ? 'Next booking:' : 
-                               'Pending approval:'}
+                               'Scheduled:'}
                             </p>
                             <p className="text-xs font-medium text-gray-900">
                               {bookingStatus.status === 'booked' ? (
@@ -1459,6 +1545,8 @@ export default function BookingDashboard() {
         onClose={closeBookingModal}
         facilities={facilities}
         selectedFacilityId={selectedFacilityForBooking}
+        initialStartTime={initialStartForBooking}
+        initialEndTime={initialEndForBooking}
       />
       <EditBookingModal
         isOpen={showEditBookingModal}

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRoute } from "wouter";
 import { Check, Mail } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -20,6 +20,23 @@ export default function Login() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [confirmAction, setConfirmAction] = useState<"manual" | "oauth" | null>(null);
+  const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  // When the confirm modal opens, focus the Confirm button so Enter will activate it immediately
+  useEffect(() => {
+    if (showConfirmModal) {
+      // small delay to ensure dialog content is mounted
+      const id = setTimeout(() => {
+        try {
+          confirmButtonRef.current?.focus();
+        } catch (e) {
+          // ignore focus failures
+        }
+      }, 50);
+      return () => clearTimeout(id);
+    }
+    return undefined;
+  }, [showConfirmModal]);
 
   useEffect(() => {
     // Redirect authenticated users to the appropriate dashboard.
@@ -118,7 +135,8 @@ export default function Login() {
               </div>
             )}
 
-            <div className="space-y-2">
+            <form onSubmit={(e) => { e.preventDefault(); setConfirmAction("manual"); setShowConfirmModal(true); }} className="space-y-4">
+              <div className="space-y-2">
               <label className="block text-sm font-medium text-gray-700">Email Address</label>
               <input
                 type="email"
@@ -141,24 +159,25 @@ export default function Login() {
                 required
               />
             </div>
-
-            <div className="grid grid-cols-1 gap-2">
-              <button
-                onClick={() => { setConfirmAction("manual"); setShowConfirmModal(true); }}
-                className="w-full bg-pink-600 hover:bg-pink-700 text-white font-medium text-sm py-2 px-4 rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
-                disabled={loading}
-              >
-                {loading ? "Signing in..." : "Sign In"}
-              </button>
-              <div className="my-2 border-t border-gray-100" />
-              <button
-                onClick={() => { setConfirmAction("oauth"); setShowConfirmModal(true); }}
-                className="w-full bg-pink-600 hover:bg-pink-700 text-white font-medium text-sm py-2 px-4 rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
-                disabled={loading}
-              >
-                {loading ? "Signing in..." : "Sign in with UIC Account"}
-              </button>
-            </div>
+              <div className="grid grid-cols-1 gap-2">
+                <button
+                  type="submit"
+                  className="w-full bg-pink-600 hover:bg-pink-700 text-white font-medium text-sm py-2 px-4 rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
+                  disabled={loading}
+                >
+                  {loading ? "Signing in..." : "Sign In"}
+                </button>
+                <div className="my-2 border-t border-gray-100" />
+                <button
+                  type="button"
+                  onClick={() => { setConfirmAction("oauth"); setShowConfirmModal(true); }}
+                  className="w-full bg-pink-600 hover:bg-pink-700 text-white font-medium text-sm py-2 px-4 rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
+                  disabled={loading}
+                >
+                  {loading ? "Signing in..." : "Sign in with UIC Account"}
+                </button>
+              </div>
+            </form>
 
             <div className="text-center pt-4 border-t border-gray-100">
               <p className="text-xs text-gray-600">
@@ -193,8 +212,8 @@ export default function Login() {
     <Dialog open={showTermsModal} onOpenChange={setShowTermsModal}>
       <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-2xl font-bold text-center mb-4">
-              ORBIT — Integrated Library Facility Management System — Terms and Conditions
+              <DialogTitle className="text-2xl font-bold text-center mb-4">
+              ORBIT - Integrated Library Facility Management System — Terms and Conditions
             </DialogTitle>
           </DialogHeader>
 
@@ -241,33 +260,36 @@ export default function Login() {
       {/* Confirmation Modal for Sign In / OAuth */}
       <Dialog open={showConfirmModal} onOpenChange={setShowConfirmModal}>
         <DialogContent className="max-w-md bg-white rounded-lg p-6 text-gray-900 shadow-sm border border-gray-200">
-          <DialogHeader>
-            <DialogTitle className="text-lg font-semibold text-center mb-2">Confirm action</DialogTitle>
-          </DialogHeader>
-          <div className="text-sm text-gray-700">
-            {confirmAction === "manual" && (
-              <p>You're about to sign in with the email and password you provided. Do you want to continue?</p>
-            )}
-            {confirmAction === "oauth" && (
-              <p>You're about to sign in with your UIC account. You will be redirected to the provider to complete sign in. Continue?</p>
-            )}
-          </div>
-          <div className="flex justify-end gap-3 mt-6">
-            <Button variant="ghost" onClick={() => { setShowConfirmModal(false); setConfirmAction(null); }} className="bg-gray-200 text-gray-800 hover:bg-gray-300">
-              Cancel
-            </Button>
-            <Button onClick={async () => {
-              setShowConfirmModal(false);
-              if (confirmAction === "manual") {
-                await handleAuth();
-              } else if (confirmAction === "oauth") {
-                await signInWithGoogle();
-              }
-              setConfirmAction(null);
-            }} className="bg-pink-600 hover:bg-pink-700 text-white">
-              Confirm
-            </Button>
-          </div>
+          <form onSubmit={async (e) => {
+            e.preventDefault();
+            setShowConfirmModal(false);
+            if (confirmAction === "manual") {
+              await handleAuth();
+            } else if (confirmAction === "oauth") {
+              await signInWithGoogle();
+            }
+            setConfirmAction(null);
+          }}>
+            <DialogHeader>
+              <DialogTitle className="text-lg font-semibold text-center mb-2">Confirm action</DialogTitle>
+            </DialogHeader>
+            <div className="text-sm text-gray-700">
+              {confirmAction === "manual" && (
+                <p>You're about to sign in with the email and password you provided. Do you want to continue?</p>
+              )}
+              {confirmAction === "oauth" && (
+                <p>You're about to sign in with your UIC account. You will be redirected to the provider to complete sign in. Continue?</p>
+              )}
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <Button type="button" variant="ghost" onClick={() => { setShowConfirmModal(false); setConfirmAction(null); }} className="bg-gray-200 text-gray-800 hover:bg-gray-300">
+                Cancel
+              </Button>
+              <Button ref={confirmButtonRef} type="submit" className="bg-pink-600 hover:bg-pink-700 text-white">
+                Confirm
+              </Button>
+            </div>
+          </form>
         </DialogContent>
       </Dialog>
 
@@ -286,7 +308,7 @@ export default function Login() {
                 </div>
               </div>
               <h4 className="font-semibold text-lg text-gray-900 mb-2">University Account Only</h4>
-              <p className="text-sm text-gray-600 mb-4">ORBIT requires a valid UIC (University of the Immaculate Conception) email account to access library services.</p>
+              <p className="text-sm text-gray-600 mb-4">ORBIT requires a valid UIC (University of the Immaculate Conception) email account to access school services.</p>
               <p className="text-sm text-gray-600 mb-6">You can sign in using your UIC Account (Google OAuth).</p>
 
               <div className="space-y-3">
@@ -299,7 +321,7 @@ export default function Login() {
               </div>
             </div>
 
-            <p className="text-xs text-gray-500 text-center mt-3">If you don't have a UIC account, please contact the library administration for assistance.</p>
+            <p className="text-xs text-gray-500 text-center mt-3">If you don't have a UIC account, please contact the school administration for assistance.</p>
           </div>
         </DialogContent>
       </Dialog>

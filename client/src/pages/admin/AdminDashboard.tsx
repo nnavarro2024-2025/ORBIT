@@ -37,6 +37,25 @@ import {
 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { User, FacilityBooking, SystemAlert, ActivityLog, Facility } from "../../../../shared/schema";
+import { Button } from "@/components/ui/button";
+
+// Small countdown component for admin UI
+function Countdown({ expiry, onExpire }: { expiry: string | Date | undefined; onExpire?: () => void }) {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  if (!expiry) return null;
+  const exp = new Date(expiry);
+  const diff = Math.max(0, Math.floor((exp.getTime() - now.getTime()) / 1000));
+  useEffect(() => {
+    if (diff <= 0 && onExpire) onExpire();
+  }, [diff]);
+  const minutes = Math.floor(diff / 60).toString().padStart(2, '0');
+  const seconds = (diff % 60).toString().padStart(2, '0');
+  return <span className="font-mono text-xs text-gray-700">{minutes}:{seconds}</span>;
+}
 
 export default function AdminDashboard() {
 
@@ -47,6 +66,7 @@ export default function AdminDashboard() {
   // reference icon values (no-op to avoid unused imports)
   void Dock; void BarChart3; void XCircle; void Monitor; void Settings; void UserCheck; void UserX; void Clock; void ChevronLeft; void ChevronRight; void Eye;
   void UserEmailDisplay;
+  // UI components are imported statically at the top to avoid runtime require in the browser
   // Forward-declared placeholders and helpers (populated later by queries)
   const [usersData, setUsersData] = useState<User[] | undefined>(undefined);
   const [activities, setActivities] = useState<ActivityLog[] | undefined>(undefined);
@@ -146,6 +166,12 @@ export default function AdminDashboard() {
     if (id === 'settings') {
       setSettingsTab('facilities');
     }
+    // If admin chooses to create a new booking from the admin sidebar, send them to the booking page
+    if (id === 'new-booking') {
+      // Use hash '#new' so the Booking page can detect this and open the booking modal automatically
+      setLocation('/booking#new');
+      return;
+    }
     if (id === 'booking-dashboard') {
       // navigate to the student booking dashboard route and request the dashboard view
       setLocation('/booking#dashboard');
@@ -177,6 +203,8 @@ export default function AdminDashboard() {
   const queryClient = useQueryClient();
 
   // Admin stats
+  const isAdmin = !!authUser && authUser.role === 'admin';
+
   const { data: statsData = { pendingBookings: 0, systemAlerts: 0 }, isLoading: statsLoading, isError: statsError } = useQuery({
     queryKey: ['/api/admin/stats'],
     queryFn: async () => {
@@ -185,6 +213,7 @@ export default function AdminDashboard() {
     },
     // Auto-refresh dashboard stats frequently so the admin overview stays up-to-date
     refetchInterval: 5000,
+    enabled: isAdmin,
   });
 
   // System alerts
@@ -196,6 +225,7 @@ export default function AdminDashboard() {
     },
     // Poll alerts so system alerts appear in near-real time for admins
     refetchInterval: 5000,
+    enabled: isAdmin,
   });
 
   // Activity logs
@@ -206,6 +236,7 @@ export default function AdminDashboard() {
       return res.json();
     },
     refetchInterval: 5000,
+    enabled: isAdmin,
   });
 
   // All bookings (admin view)
@@ -216,6 +247,7 @@ export default function AdminDashboard() {
       return res.json();
     },
     refetchInterval: 5000,
+    enabled: isAdmin,
   });
 
   // Pending bookings (for booking requests tab)
@@ -226,6 +258,7 @@ export default function AdminDashboard() {
       return res.json();
     },
     refetchInterval: 5000,
+    enabled: isAdmin,
   });
 
   // Facilities
@@ -311,6 +344,21 @@ export default function AdminDashboard() {
     },
   });
 
+  const confirmArrivalMutation = useMutation({
+    mutationFn: async ({ bookingId }: any) => {
+      const res = await apiRequest('POST', `/api/bookings/${bookingId}/confirm-arrival`);
+      return res.json?.();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/admin/bookings'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/admin/alerts'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] });
+    },
+  });
+
+  // Reference confirmArrivalMutation to avoid 'declared but its value is never read' during iterative edits
+  void confirmArrivalMutation;
+
   const banUserMutation = useMutation({
     mutationFn: async ({ userId, reason, duration, customDate }: any) => {
       // duration is required by the server (permanent | 7days | 30days | custom)
@@ -391,7 +439,7 @@ export default function AdminDashboard() {
       if (!isLibraryClosedNow()) {
         toast({
           title: 'Cannot set unavailable now',
-          description: 'Facilities can only be marked unavailable when the library is closed to avoid conflicts with active bookings. Please disable after hours or cancel active bookings first.',
+          description: 'Facilities can only be marked unavailable when the library is closed, to avoid booking conflicts overall. This action will only work if the library is closed.',
           variant: 'destructive',
         });
         return;
@@ -804,6 +852,31 @@ export default function AdminDashboard() {
                                 <span className="px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
                                   Active
                                 </span>
+                                {/* removed: admin-facing pending-notice per request */}
+
+                                {/* Arrival confirmation countdown and admin action: if arrivalConfirmationDeadline exists and not yet confirmed, show confirmation countdown and a Confirm button */}
+                                {booking.status === 'approved' && (
+                                  <div className="text-right text-xs text-gray-500 mt-1">
+                                    {booking.arrivalConfirmationDeadline && !booking.arrivalConfirmed ? (
+                                      <div className="flex items-center justify-end gap-3">
+                                        <div>Confirmation required in: <Countdown expiry={booking.arrivalConfirmationDeadline} onExpire={() => { queryClient.invalidateQueries({ queryKey: ['/api/admin/bookings'] }); toast({ title: 'Arrival Confirmation Expired', description: `Arrival confirmation window expired for booking ${booking.id}.` }); }} /></div>
+                                        <div>
+                                          <Button
+                                            onClick={() => confirmArrivalMutation.mutate({ bookingId: booking.id })}
+                                            variant="outline"
+                                            size="sm"
+                                            aria-label={`Confirm arrival for booking ${booking.id}`}
+                                            className="inline-flex items-center gap-2"
+                                          >
+                                            Confirm Arrival
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div>Time remaining: <Countdown expiry={booking.endTime} onExpire={() => { queryClient.invalidateQueries({ queryKey: ['/api/admin/bookings'] }); toast({ title: 'Booking Ended', description: `Booking for ${getUserEmail(booking.userId)} has ended.` }); }} /></div>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -1060,6 +1133,7 @@ export default function AdminDashboard() {
                                     Deny
                                   </button>
                                 </div>
+                                {/* removed: admin-facing pending-notice per request */}
                               </div>
                             </div>
                           </div>
@@ -1245,7 +1319,7 @@ export default function AdminDashboard() {
               <div className="flex items-center justify-between mb-6">
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900">User Management</h2>
-                  <p className="text-gray-600 mt-1">Manage facility booking users, computer station users, and suspended accounts</p>
+                  <p className="text-gray-600 mt-1">Manage facility booking users and suspended accounts</p>
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">

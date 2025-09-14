@@ -101,7 +101,7 @@ class EmailService {
           ${
             booking.status === 'approved'
               ? '<p>Please present your Student ID and this confirmation when using the facility.</p>'
-              : '<p>If you have any questions, please contact the library administration.</p>'
+              : '<p>If you have any questions, please contact the school administration.</p>'
           }
 
           <p>Best regards,<br>ORBIT System Team</p>

@@ -54,29 +54,32 @@ export default function Header() {
     mutationFn: async (alertId: string) => apiRequest('POST', markReadEndpoint(alertId)),
     // optimistic update
     onMutate: async (alertId: string) => {
-      // add to pending set
-      setPendingMarkIds(prev => new Set(prev).add(alertId));
+        // add to pending set
+        setPendingMarkIds(prev => new Set(prev).add(alertId));
 
-      // snapshot previous data
-      const prevAdmin = queryClient.getQueryData<any>(['/api/admin/alerts']);
-      const prevUser = queryClient.getQueryData<any>(['/api/notifications']);
+        // snapshot previous data depending on role
+        const prevAdmin = isAdmin ? queryClient.getQueryData<any>(['/api/admin/alerts']) : undefined;
+        const prevUser = !isAdmin ? queryClient.getQueryData<any>(['/api/notifications']) : undefined;
 
-      // helper to mark read in a dataset
-      const markReadIn = (data: any) => {
-        if (!Array.isArray(data)) return data;
-        return data.map((a: any) => (a.id === alertId ? { ...a, isRead: true } : a));
-      };
+        // helper to mark read in a dataset
+        const markReadIn = (data: any) => {
+          if (!Array.isArray(data)) return data;
+          return data.map((a: any) => (a.id === alertId ? { ...a, isRead: true } : a));
+        };
 
-      // optimistically update both caches
-      queryClient.setQueryData(['/api/admin/alerts'], (old: any) => markReadIn(old));
-      queryClient.setQueryData(['/api/notifications'], (old: any) => markReadIn(old));
+        // optimistically update only the relevant cache for this actor
+        if (isAdmin) {
+          queryClient.setQueryData(['/api/admin/alerts'], (old: any) => markReadIn(old));
+        } else {
+          queryClient.setQueryData(['/api/notifications'], (old: any) => markReadIn(old));
+        }
 
-      return { prevAdmin, prevUser, alertId };
+        return { prevAdmin, prevUser, alertId };
     },
     onError: (_err, _alertId, context: any) => {
-      // rollback
-      if (context?.prevAdmin) queryClient.setQueryData(['/api/admin/alerts'], context.prevAdmin);
-      if (context?.prevUser) queryClient.setQueryData(['/api/notifications'], context.prevUser);
+      // rollback - only restore the cache we touched
+      if (isAdmin && context?.prevAdmin) queryClient.setQueryData(['/api/admin/alerts'], context.prevAdmin);
+      if (!isAdmin && context?.prevUser) queryClient.setQueryData(['/api/notifications'], context.prevUser);
       // remove from pending
       if (context?.alertId) setPendingMarkIds(prev => {
         const next = new Set(prev);
@@ -86,10 +89,14 @@ export default function Header() {
     },
     onSettled: (_data, _err, alertId: string | undefined) => {
       // ensure we refetch to get authoritative state and remove pending
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/alerts'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/notifications'] });
-      // also refresh admin stats so the dashboard count reflects the change
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] });
+      // Only invalidate the cache relevant to this actor
+      if (isAdmin) {
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/alerts'] });
+        // refresh admin stats so the dashboard count reflects the change
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] });
+      } else {
+        queryClient.invalidateQueries({ queryKey: ['/api/notifications'] });
+      }
       if (alertId) setPendingMarkIds(prev => {
         const next = new Set(prev);
         next.delete(alertId);
