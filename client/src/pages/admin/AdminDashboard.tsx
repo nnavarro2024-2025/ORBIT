@@ -100,6 +100,32 @@ export default function AdminDashboard() {
     return activity.details || activity.message || '';
   }
 
+  // Render a colored badge for booking status
+  function renderStatusBadge(statusRaw: any) {
+    const s = String(statusRaw || '').toLowerCase();
+    let label = (statusRaw && String(statusRaw)) || 'Unknown';
+    let classes = 'text-sm font-medium px-2 py-1 rounded-full';
+
+    if (s === 'pending' || s === 'request' || s === 'requested') {
+      label = 'Pending';
+      classes += ' bg-yellow-100 text-yellow-800';
+    } else if (s === 'approved' || s === 'completed' || s === 'completed') {
+      // treat approved that have ended as Completed elsewhere; styling for completed/approved
+      label = (label === 'approved') ? 'Approved' : label;
+      classes += ' bg-green-100 text-green-800';
+    } else if (s === 'denied' || s === 'cancelled' || s === 'canceled') {
+      label = (s === 'denied') ? 'Denied' : 'Cancelled';
+      classes += ' bg-red-100 text-red-800';
+    } else if (s === 'expired' || s === 'void') {
+      label = 'Expired';
+      classes += ' bg-gray-100 text-gray-800';
+    } else {
+      classes += ' bg-gray-100 text-gray-800';
+    }
+
+    return <span className={classes}>{label}</span>;
+  }
+
   // Lightweight UI state and pagination placeholders
   const [selectedView, setSelectedView] = useState<string>('overview');
   const [activeBookingsPage, setActiveBookingsPage] = useState(0);
@@ -118,8 +144,13 @@ export default function AdminDashboard() {
   // Controlled inner-tabs for other sidebar sections so we can set defaults on navigation
   const [userTab, setUserTab] = useState<string>('booking-users');
   const [settingsTab, setSettingsTab] = useState<string>('facilities');
+  // Preview tab for system alerts in the dashboard (booking | users)
+  const [alertsPreviewTab, setAlertsPreviewTab] = useState<string>('booking');
   // silence unused setters where appropriate
   void setActiveBookingsPage; void setUpcomingBookingsPage; void setApprovedAndDeniedBookingsPage; void setPendingBookingsDashboardPage; void setPendingBookingsPage; void setBookingUsersPage; void setBannedUsersPage; void setActivitiesPage;
+  // silence unused page variables to avoid tsc noUnusedLocals failures in iterative edits
+  void activitiesPage; void approvedAndDeniedBookingsPage;
+  void pendingBookingsDashboardPage;
 
   // Placeholder lists (populated from queries below)
 
@@ -147,6 +178,7 @@ export default function AdminDashboard() {
       { id: 'booking-management', label: 'Facility Booking Management', icon: Calendar },
       { id: 'user-management', label: 'User Management', icon: Users },
       { id: 'security', label: 'Admin System Alerts', icon: Shield },
+      { id: 'admin-activity-logs', label: 'Admin Activity Logs', icon: BarChart3 },
       { id: 'settings', label: 'System Settings', icon: Settings },
     ];
     if (authUser && authUser.role === 'admin') {
@@ -760,7 +792,7 @@ export default function AdminDashboard() {
               </div>
 
               <Tabs value={bookingTab} onValueChange={(v) => setBookingTab(v)} className="space-y-6">
-                <TabsList className="grid w-full grid-cols-4">
+                <TabsList className="grid w-full grid-cols-3">
                   <TabsTrigger value="active" className="flex items-center gap-2">
                     <CheckCircle className="h-4 w-4 text-green-600" />
                     Active Bookings
@@ -772,10 +804,6 @@ export default function AdminDashboard() {
                   <TabsTrigger value="requests" className="flex items-center gap-2">
                     <Calendar className="h-4 w-4 text-purple-600" />
                     Booking Requests
-                  </TabsTrigger>
-                  <TabsTrigger value="recent" className="flex items-center gap-2">
-                    <BarChart3 className="h-4 w-4 text-purple-600" />
-                    History
                   </TabsTrigger>
                 </TabsList>
 
@@ -1177,134 +1205,7 @@ export default function AdminDashboard() {
                     )}
                   </div>
                 </TabsContent>
-                <TabsContent value="recent" className="space-y-4">
-                  <div className="bg-gray-50 rounded-lg p-6">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-lg font-semibold text-gray-900">Booking History</h3>
-                      <span className="text-sm text-gray-600">{recentBookings?.length || 0} records</span>
-                    </div>
-                    
-                    {recentBookings && recentBookings.length > 0 ? (
-                          <div className="space-y-2">
-                            {recentBookings
-                              ?.slice(approvedAndDeniedBookingsPage * itemsPerPage, (approvedAndDeniedBookingsPage + 1) * itemsPerPage)
-                              .map((booking: FacilityBooking) => (
-                              <div key={booking.id} className={`bg-white rounded-lg p-2 border transition-colors duration-150 ${
-                                booking.status === 'denied' ? 'border-red-200 hover:border-red-300' : 'border-green-200 hover:border-green-300'
-                              }`}>
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-3">
-                                    <div className={`p-1.5 rounded-lg ${
-                                      booking.status === 'denied' ? 'bg-red-100' : 'bg-green-100'
-                                    }`}>
-                                      {booking.status === 'denied' ? (
-                                        <XCircle className="h-4 w-4" />
-                                      ) : (
-                                        <CheckCircle className="h-4 w-4" />
-                                      )}
-                                    </div>
-                                    <div>
-                                      <h4 className="font-medium text-gray-900 text-sm">{getUserEmail(booking.userId)}</h4>
-                                      <p className="text-xs text-gray-600">{getFacilityName(booking.facilityId)}</p>
-                                      <div className="flex items-center gap-2 mt-0.5">
-                                        <span className="text-[10px] font-medium text-gray-500">Participants:</span>
-                                        <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-800">{booking.participants || 0}</span>
-                                      </div>
-                                    </div>
-                                  </div>
-                              
-                                  <div className="flex items-center gap-4">
-                                    <div className="text-right">
-                                      <TooltipProvider>
-                                        <Tooltip>
-                                          <TooltipTrigger asChild>
-                                            <div className="flex items-center gap-1 cursor-help justify-end">
-                                              {booking.purpose && booking.purpose.length > 30 ? (
-                                                <>
-                                                  <Eye className="h-3 w-3 text-pink-600" />
-                                                  <span className="text-[10px] text-pink-600">View</span>
-                                                </>
-                                              ) : (
-                                                <div className="text-right">
-                                                  <p className="text-xs font-medium text-gray-900">Purpose</p>
-                                                  <p className="text-xs text-gray-600 max-w-[180px] truncate">
-                                                    {booking.purpose || 'No purpose specified'}
-                                                  </p>
-                                                </div>
-                                              )}
-                                            </div>
-                                          </TooltipTrigger>
-                                          <TooltipContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
-                                            <div className="bg-gray-50 px-3 py-2 border-b border-gray-200">
-                                              <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
-                                            </div>
-                                            <div className="p-3 max-h-40 overflow-y-auto">
-                                              <p className="whitespace-pre-wrap text-sm text-gray-900 leading-6 break-words text-left">
-                                                {booking.purpose || 'No purpose specified'}
-                                              </p>
-                                            </div>
-                                          </TooltipContent>
-                                        </Tooltip>
-                                      </TooltipProvider>
-                                    </div>
-                                    <div className="text-right">
-                                      <p className="text-xs font-medium text-gray-900">Started</p>
-                                      <p className="text-xs text-gray-600">{formatDateTime(booking.startTime)}</p>
-                                    </div>
-                                    <div className="text-right">
-                                      <p className="text-xs font-medium text-gray-900">Ended</p>
-                                      <p className="text-xs text-gray-600">{formatDateTime(booking.endTime)}</p>
-                                    </div>
-                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${
-                                      booking.status === 'denied' 
-                                        ? 'bg-red-100 text-red-800' 
-                                        : 'bg-green-100 text-green-800'
-                                    }`}>
-                                      {booking.status === 'denied' ? 'Denied' : 'Completed'}
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                        
-                            {/* Pagination for booking history */}
-                            {recentBookings.length > itemsPerPage && (
-                              <div className="flex items-center justify-between pt-3 border-t border-gray-200">
-                                <p className="text-xs text-gray-600">
-                                  Showing {approvedAndDeniedBookingsPage * itemsPerPage + 1} to {Math.min((approvedAndDeniedBookingsPage + 1) * itemsPerPage, recentBookings.length)} of {recentBookings.length} results
-                                </p>
-                                <div className="flex items-center gap-2">
-                                  <button
-                                    onClick={() => setApprovedAndDeniedBookingsPage(prev => Math.max(prev - 1, 0))}
-                                    disabled={approvedAndDeniedBookingsPage === 0}
-                                    className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-150"
-                                  >
-                                    <ChevronLeft className="h-4 w-4" />
-                                  </button>
-                                  <span className="px-2 py-1 text-xs font-medium">
-                                    {approvedAndDeniedBookingsPage + 1} of {Math.ceil(recentBookings.length / itemsPerPage)}
-                                  </span>
-                                  <button
-                                    onClick={() => setApprovedAndDeniedBookingsPage(prev => (recentBookings && (prev + 1) * itemsPerPage < recentBookings.length ? prev + 1 : prev))}
-                                    disabled={!recentBookings || (approvedAndDeniedBookingsPage + 1) * itemsPerPage >= recentBookings.length}
-                                    className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-150"
-                                  >
-                                    <ChevronRight className="h-4 w-4" />
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="text-center py-6">
-                            <div className="bg-gray-100 rounded-full w-10 h-10 flex items-center justify-center mx-auto mb-2">
-                              <BarChart3 className="h-5 w-5 text-gray-400" />
-                            </div>
-                            <p className="text-gray-600 text-xs">No booking history available</p>
-                          </div>
-                        )}
-                  </div>
-                </TabsContent>
+                
               </Tabs>
             </div>
           </div>
@@ -1798,6 +1699,124 @@ export default function AdminDashboard() {
         );
         break;
 
+      case "admin-activity-logs":
+        // Prepare lists for the activity logs view
+        const successfullyBooked = allBookings.filter(b => b.status === 'approved' && b.arrivalConfirmed && new Date(b.endTime) < new Date());
+        const bookingHistory = allBookings.filter(b => ['denied', 'cancelled', 'expired', 'void'].includes(b.status) || (b.status === 'approved' && new Date(b.endTime) < new Date() && !b.arrivalConfirmed));
+        const systemActivity = [ ...(activities || []), ...(alerts || []) ].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+        return (
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900">Admin Activity Logs</h2>
+                  <p className="text-gray-600 mt-1">Centralized booking and system logs</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium">{successfullyBooked.length || 0} Successful</div>
+                  <div className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-medium">{bookingHistory.length || 0} History</div>
+                  <div className="bg-gray-100 text-gray-800 px-3 py-1 rounded-full text-sm font-medium">{systemActivity.length || 0} System</div>
+                </div>
+              </div>
+
+              <Tabs value={settingsTab} onValueChange={(v: string) => setSettingsTab(v)} className="space-y-6">
+                <TabsList className="grid w-full grid-cols-3">
+                  <TabsTrigger value="success" className="flex items-center gap-2">
+                    <CheckCircle className="h-4 w-4 text-green-600" />
+                    Successfully Booked
+                  </TabsTrigger>
+                  <TabsTrigger value="history" className="flex items-center gap-2">
+                    <BarChart3 className="h-4 w-4 text-yellow-600" />
+                    Booking History
+                  </TabsTrigger>
+                  <TabsTrigger value="system" className="flex items-center gap-2">
+                    <Activity className="h-4 w-4 text-gray-600" />
+                    System Activity
+                  </TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="success" className="space-y-4">
+                  <div className="bg-gray-50 rounded-lg p-6">
+                    <h3 className="text-lg font-semibold text-gray-900">Successfully Booked</h3>
+                    {successfullyBooked.length > 0 ? (
+                      <div className="space-y-3 mt-4">
+                        {successfullyBooked.slice(0, itemsPerPage).map((b: FacilityBooking) => (
+                          <div key={b.id} className="bg-white rounded-lg p-4 border border-gray-200">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <h4 className="font-medium text-gray-900">{getUserEmail(b.userId)}</h4>
+                                <p className="text-sm text-gray-600">{getFacilityName(b.facilityId)}</p>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-sm text-gray-900">{formatDateTime(b.startTime)} → {formatDateTime(b.endTime)}</p>
+                                <p className="text-xs text-gray-500">Participants: {b.participants || 0}</p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <EmptyState Icon={CheckCircle} message="No successful bookings found" />
+                    )}
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="history" className="space-y-4">
+                  <div className="bg-gray-50 rounded-lg p-6">
+                    <h3 className="text-lg font-semibold text-gray-900">Booking History</h3>
+                    {bookingHistory.length > 0 ? (
+                      <div className="space-y-3 mt-4">
+                        {bookingHistory.slice(0, itemsPerPage).map((b: FacilityBooking) => (
+                          <div key={b.id} className="bg-white rounded-lg p-4 border border-gray-200">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <h4 className="font-medium text-gray-900">{getUserEmail(b.userId)}</h4>
+                                <p className="text-sm text-gray-600">{getFacilityName(b.facilityId)}</p>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-sm text-gray-900">{formatDateTime(b.startTime)} → {formatDateTime(b.endTime)}</p>
+                                <p className="text-xs text-gray-500">Status: {b.status}</p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <EmptyState Icon={BarChart3} message="No booking history records" />
+                    )}
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="system" className="space-y-4">
+                  <div className="bg-gray-50 rounded-lg p-6">
+                    <h3 className="text-lg font-semibold text-gray-900">System Activity</h3>
+                    {systemActivity.length > 0 ? (
+                      <div className="space-y-3 mt-4">
+                        {systemActivity.slice(0, itemsPerPage).map((a: any, idx: number) => (
+                          <div key={a.id || idx} className="bg-white rounded-lg p-4 border border-gray-200">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="font-medium text-gray-900">{(a.title || a.action) ?? 'System Event'}</p>
+                                <p className="text-xs text-gray-600">{a.message || a.details || ''}</p>
+                              </div>
+                              <div className="text-right text-xs text-gray-500">
+                                {a.createdAt ? formatDateTime(a.createdAt) : ''}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <EmptyState Icon={Activity} message="No system activity found" />
+                    )}
+                  </div>
+                </TabsContent>
+              </Tabs>
+            </div>
+          </div>
+        );
+
       case "settings":
         return (
           <div className="space-y-6">
@@ -1925,100 +1944,101 @@ export default function AdminDashboard() {
 
             {/* Overview Sections */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                <CardHeader title="Pending Bookings" subtitle="Facility booking requests requiring approval" badges={[{ text: `${pendingBookings?.length || 0} pending`, className: 'bg-purple-100 text-purple-800' }]} />
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 flex flex-col justify-between">
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-900">Pending Bookings</h3>
+                    <p className="text-gray-600 text-sm mt-1">Facility booking requests requiring approval</p>
+                  </div>
+                  <div className="bg-pink-100 text-pink-800 px-3 py-1 rounded-full text-sm font-medium">
+                    {pendingBookings?.length || 0} pending
+                  </div>
+                </div>
 
                 {pendingBookings && pendingBookings.length > 0 ? (
-                  <div className="space-y-4">
-                    {pendingBookings.slice(pendingBookingsDashboardPage * itemsPerPage, (pendingBookingsDashboardPage + 1) * itemsPerPage).map((booking) => (
-                      <div key={booking.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors duration-200">
-                        <div className="flex items-center gap-4">
-                          <div className="bg-white p-2 rounded-lg shadow-sm">
-                            <Calendar className="h-5 w-5 text-gray-600" />
-                          </div>
+                  <div className="space-y-3">
+                    {pendingBookings.slice(0,5).map((booking) => (
+                      <div key={booking.id} className="bg-gray-50 rounded-lg p-3 hover:bg-gray-100 transition-colors duration-200">
+                        <div className="flex items-center justify-between">
                           <div>
                             <h4 className="font-medium text-gray-900">{getFacilityName(booking.facilityId)}</h4>
-                            <p className="text-sm text-gray-600">
-                              {getUserEmail(booking.userId)} • {new Date(booking.startTime).toLocaleDateString('en-US', {
-                                weekday: 'short',
-                                month: 'short',
-                                day: 'numeric'
-                              })}
-                            </p>
+                            <p className="text-sm text-gray-600">{getUserEmail(booking.userId)} • {new Date(booking.startTime).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</p>
                           </div>
-                        </div>
-
-                        <div className="flex items-center gap-3">
-                          <span className="px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                            Pending
-                          </span>
-                          <button
-                            onClick={() => setSelectedView("booking-management")}
-                            className="text-gray-400 hover:text-gray-600 transition-colors duration-200"
-                          >
-                            <Eye className="h-4 w-4" />
-                          </button>
+                          <div>
+                            {renderStatusBadge(booking.status)}
+                          </div>
                         </div>
                       </div>
                     ))}
-                    
-                    {/* Pagination for pending bookings */}
-                    {pendingBookings.length > itemsPerPage && (
-                      <div className="flex items-center justify-between pt-4 border-t border-gray-200">
-                        <p className="text-sm text-gray-600">
-                          Showing {pendingBookingsDashboardPage * itemsPerPage + 1} to {Math.min((pendingBookingsDashboardPage + 1) * itemsPerPage, pendingBookings.length)} of {pendingBookings.length} results
-                        </p>
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => setPendingBookingsDashboardPage(prev => Math.max(prev - 1, 0))}
-                            disabled={pendingBookingsDashboardPage === 0}
-                            className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
-                          >
-                            <ChevronLeft className="h-4 w-4" />
-                          </button>
-                          <span className="px-3 py-1 text-sm font-medium">
-                            {pendingBookingsDashboardPage + 1} of {Math.ceil(pendingBookings.length / itemsPerPage)}
-                          </span>
-                          <button
-                            onClick={() => setPendingBookingsDashboardPage(prev => (prev + 1) * itemsPerPage < pendingBookings.length ? prev + 1 : prev)}
-                            disabled={(pendingBookingsDashboardPage + 1) * itemsPerPage >= pendingBookings.length}
-                            className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
-                          >
-                            <ChevronRight className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </div>
-                    )}
+
+                    <div className="pt-4 border-t border-gray-200 flex justify-end">
+                      <button
+                        onClick={() => { setSelectedView('booking-management'); setBookingTab('pendingList'); }}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-pink-600 text-white rounded-lg text-sm hover:bg-pink-700 transition-colors duration-150"
+                      >
+                        View All
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <EmptyState Icon={Calendar} message="No pending booking requests" />
                 )}
               </div>
 
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 flex flex-col justify-between">
                 <div className="flex items-center justify-between mb-6">
                   <div>
-                    <h3 className="text-lg font-bold text-gray-900">Recent Booking Activity</h3>
-                    <p className="text-gray-600 text-sm mt-1">Recent booking events and status changes</p>
+                    <h3 className="text-lg font-bold text-gray-900">Recent Booking History</h3>
+                    <p className="text-gray-600 text-sm mt-1">A quick preview of the most recent booking records</p>
                   </div>
-                  <div className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">
-                    {recentBookings?.length || 0} events
+                  <div className="bg-pink-100 text-pink-800 px-3 py-1 rounded-full text-sm font-medium">
+                    {recentBookings?.length || 0} records
                   </div>
                 </div>
 
                 {recentBookings && recentBookings.length > 0 ? (
                   <div className="space-y-3">
-                    {recentBookings.slice(0, itemsPerPage).map((booking: FacilityBooking) => (
-                      <div key={booking.id} className="bg-gray-50 rounded-lg p-3 hover:bg-gray-100 transition-colors duration-200">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <h4 className="font-medium text-gray-900">{getFacilityName(booking.facilityId)}</h4>
-                            <p className="text-sm text-gray-600">{getUserEmail(booking.userId)} • {new Date(booking.startTime).toLocaleString()}</p>
+                    {recentBookings.slice(0, 5).map((booking: FacilityBooking) => {
+                      const actionTime = booking.createdAt || booking.startTime;
+                      // Map status to a more user-friendly label
+                      let statusLabel = String(booking.status || '').toLowerCase();
+                      if (statusLabel === 'approved') {
+                        // If approved and ended, show Completed
+                        try {
+                          if (new Date(booking.endTime) < new Date()) statusLabel = 'Completed';
+                          else statusLabel = 'Approved';
+                        } catch (e) {
+                          statusLabel = 'Approved';
+                        }
+                      } else if (statusLabel === 'denied') statusLabel = 'Denied';
+                      else if (statusLabel === 'cancelled' || statusLabel === 'canceled') statusLabel = 'Cancelled';
+                      else if (statusLabel === 'expired' || statusLabel === 'void') statusLabel = 'Expired';
+                      else statusLabel = booking.status || 'Unknown';
+
+                      return (
+                        <div key={booking.id} className="bg-gray-50 rounded-lg p-3 hover:bg-gray-100 transition-colors duration-200">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <h4 className="font-medium text-gray-900">{getFacilityName(booking.facilityId)}</h4>
+                              <p className="text-sm text-gray-600">{getUserEmail(booking.userId)} • {formatDateTime(actionTime)}</p>
+                            </div>
+                            <div>
+                              {/* Use same badge renderer but prefer the computed statusLabel for display */}
+                              {renderStatusBadge(statusLabel)}
+                            </div>
                           </div>
-                          <div className="text-sm text-gray-500">{booking.status}</div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
+
+                    <div className="pt-4 border-t border-gray-200 flex justify-end">
+                      <button
+                        onClick={() => { setSelectedView('admin-activity-logs'); setSettingsTab('history'); }}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-pink-600 text-white rounded-lg text-sm hover:bg-pink-700 transition-colors duration-150"
+                      >
+                        View All
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <EmptyState Icon={Calendar} message="No recent booking activity" />
@@ -2026,78 +2046,139 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            {/* Recent Activity Log */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h3 className="text-xl font-bold text-gray-900">Recent System Activity</h3>
-                  <p className="text-gray-600 mt-1">Monitor system events and user actions</p>
-                </div>
-                <div className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">
-                  {activities?.length || 0} Events
-                </div>
-              </div>
-                {activities && activities.length > 0 ? (
-                <div className="space-y-2">
-                  {activities
-                    ?.slice(activitiesPage * itemsPerPage, (activitiesPage + 1) * itemsPerPage)
-                    .map((activity) => (
-                    <div key={activity.id} className="bg-gray-50 rounded-lg p-2 hover:bg-gray-100 transition-colors duration-150">
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className="bg-blue-100 p-1.5 rounded-lg">
-                            <Activity className="h-3.5 w-3.5 text-blue-600" />
-                          </div>
-                          <div>
-                            <h4 className="font-medium text-gray-900 text-sm">{activity.action}</h4>
-                            <p className="text-xs text-gray-600 mt-0.5">
-                              {formatActivityDetails(activity)} {activity.userId && `by ${getUserEmail(activity.userId)}`}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <span className="text-xs text-gray-500">{formatDateTime(activity.createdAt)}</span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-6">
-                  <div className="bg-gray-100 rounded-full w-10 h-10 flex items-center justify-center mx-auto mb-2">
-                    <Activity className="h-5 w-5 text-gray-400" />
+            {/* Recent System Activity & Recent System Alerts (stacked) */}
+            <div className="space-y-6">
+              {/* Block 1: Recent System Alerts with two preview tabs */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-900">Recent System Alerts</h3>
+                    <p className="text-gray-600 mt-1">Booking and user management alerts</p>
                   </div>
-                  <p className="text-gray-600 text-xs">No recent system activity</p>
+                  <div className="bg-pink-100 text-pink-800 px-3 py-1 rounded-full text-sm font-medium">
+                    {alerts?.length || 0} alerts
+                  </div>
                 </div>
-              )}
-              
-              {/* Pagination for activities */}
-              {activities && activities.length > itemsPerPage && (
-                <div className="flex items-center justify-between pt-4 border-t border-gray-200">
-                  <p className="text-sm text-gray-600">
-                    Showing {activitiesPage * itemsPerPage + 1} to {Math.min((activitiesPage + 1) * itemsPerPage, activities.length)} of {activities.length} results
-                  </p>
+
+                <div className="mb-4">
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => setActivitiesPage(prev => Math.max(prev - 1, 0))}
-                      disabled={activitiesPage === 0}
-                      className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                      onClick={() => setAlertsPreviewTab('booking')}
+                      className={`px-3 py-1 rounded-lg text-sm ${alertsPreviewTab === 'booking' ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-700'}`}
                     >
-                      <ChevronLeft className="h-4 w-4" />
+                      Booking Alerts
                     </button>
-                    <span className="px-3 py-1 text-sm font-medium">
-                      {activitiesPage + 1} of {Math.ceil((activities?.length || 0) / itemsPerPage)}
-                    </span>
                     <button
-                      onClick={() => setActivitiesPage(prev => (activities && (prev + 1) * itemsPerPage < activities.length ? prev + 1 : prev))}
-                      disabled={!activities || (activitiesPage + 1) * itemsPerPage >= activities.length}
-                      className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                      onClick={() => setAlertsPreviewTab('users')}
+                      className={`px-3 py-1 rounded-lg text-sm ${alertsPreviewTab === 'users' ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-700'}`}
                     >
-                      <ChevronRight className="h-4 w-4" />
+                      User Management Alerts
                     </button>
                   </div>
                 </div>
-              )}
+
+                <div>
+                  {alertsPreviewTab === 'booking' ? (
+                    <div className="space-y-2">
+                      {alerts?.filter(a => {
+                        if (a.type === 'booking') return true;
+                        const t = (a.title || '').toLowerCase();
+                        const m = (a.message || '').toLowerCase();
+                        return t.includes('booking') || m.includes('booking');
+                      }).slice(0,5).map((alert: SystemAlert) => (
+                        <div key={alert.id} className="bg-gray-50 rounded-lg p-3 hover:bg-gray-100 transition-colors duration-150">
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <h4 className="font-medium text-gray-900 text-sm">{alert.title}</h4>
+                              <p className="text-xs text-gray-600">{formatAlertMessage(alert.message)}</p>
+                            </div>
+                            <div className="text-xs text-gray-500">{formatDateTime(alert.createdAt)}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {alerts?.filter(a => {
+                        const t = (a.title || '').toLowerCase();
+                        const m = (a.message || '').toLowerCase();
+                        return t.includes('user') || m.includes('banned') || m.includes('unbanned') || t.includes('suspension');
+                      }).slice(0,5).map((alert: SystemAlert) => (
+                        <div key={alert.id} className="bg-gray-50 rounded-lg p-3 hover:bg-gray-100 transition-colors duration-150">
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <h4 className="font-medium text-gray-900 text-sm">{alert.title}</h4>
+                              <p className="text-xs text-gray-600">{formatAlertMessage(alert.message)}</p>
+                            </div>
+                            <div className="text-xs text-gray-500">{formatDateTime(alert.createdAt)}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="pt-4 border-t border-gray-200 flex justify-end">
+                    <button
+                      onClick={() => { setSelectedView('admin-activity-logs'); setSettingsTab('system'); }}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-pink-600 text-white rounded-lg text-sm hover:bg-pink-700 transition-colors duration-150"
+                    >
+                      View All
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Block 2: Recent System Activity (preview of activities) */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h3 className="text-xl font-bold text-gray-900">Recent System Activity</h3>
+                    <p className="text-gray-600 mt-1">Monitor system events and user actions</p>
+                  </div>
+                  <div className="bg-pink-100 text-pink-800 px-3 py-1 rounded-full text-sm font-medium">
+                    {activities?.length || 0} Events
+                  </div>
+                </div>
+
+                {activities && activities.length > 0 ? (
+                  <div className="space-y-2">
+                    {activities.slice(0, 5).map((activity) => (
+                      <div key={activity.id} className="bg-gray-50 rounded-lg p-2 hover:bg-gray-100 transition-colors duration-150">
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className="bg-pink-100 p-1.5 rounded-lg">
+                              <Activity className="h-3.5 w-3.5 text-pink-600" />
+                            </div>
+                            <div>
+                              <h4 className="font-medium text-gray-900 text-sm">{activity.action}</h4>
+                              <p className="text-xs text-gray-600 mt-0.5">{formatActivityDetails(activity)} {activity.userId && `by ${getUserEmail(activity.userId)}`}</p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-xs text-gray-500">{formatDateTime(activity.createdAt)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+
+                    <div className="pt-4 border-t border-gray-200 flex justify-end">
+                      <button
+                        onClick={() => { setSelectedView('admin-activity-logs'); setSettingsTab('system'); }}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-pink-600 text-white rounded-lg text-sm hover:bg-pink-700 transition-colors duration-150"
+                      >
+                        View All
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-6">
+                    <div className="bg-gray-100 rounded-full w-10 h-10 flex items-center justify-center mx-auto mb-2">
+                      <Activity className="h-5 w-5 text-gray-400" />
+                    </div>
+                    <p className="text-gray-600 text-xs">No recent system activity</p>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         );
