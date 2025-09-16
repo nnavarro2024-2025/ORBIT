@@ -31,8 +31,13 @@ export async function authenticatedFetch(url: string, options: RequestInit = {})
   headers.set("Authorization", `Bearer ${session.access_token}`);
   headers.set("Content-Type", "application/json");
 
-  // Construct the full API URL
-  const apiUrl = `/api${url.startsWith("/") ? "" : "/"}${url}`;
+  // Construct the full API URL. Prefer an explicit backend URL when provided via
+  // VITE_API_BASE_URL (e.g. http://localhost:5000). Otherwise, fall back to a
+  // relative `/api/...` path which relies on Vite's dev server proxy in development.
+  const apiBase = (import.meta as any).env?.VITE_API_BASE_URL || '';
+  const apiUrl = apiBase
+    ? `${apiBase.replace(/\/$/, '')}/api${url.startsWith('/') ? '' : '/'}${url}`
+    : `/api${url.startsWith('/') ? '' : '/'}${url}`;
 
   const response = await fetch(apiUrl, {
     ...options,
@@ -40,6 +45,13 @@ export async function authenticatedFetch(url: string, options: RequestInit = {})
   });
 
   if (!response.ok) {
+    // Helpful diagnostics for 404/502 when backend or proxy isn't available
+    if (response.status === 404) {
+      console.error(`API 404 at ${apiUrl} - check that your backend is running and the route exists.`);
+    }
+    if (response.status === 502) {
+      console.error(`API 502 Bad Gateway at ${apiUrl} - proxy failed to reach backend.`);
+    }
     if (response.status === 401) {
       console.error("🚨 401 Unauthorized received. Session expired. NOT redirecting to login for debugging.");
       console.error("401 Response:", response);

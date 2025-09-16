@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { User, FacilityBooking, SystemAlert, ActivityLog, Facility } from "../../../../shared/schema";
 import { Button } from "@/components/ui/button";
 
@@ -271,6 +272,10 @@ export default function AdminDashboard() {
   const [userToBan, setUserToBan] = useState<User | null>(null);
   const [isUnavailableModalOpen, setIsUnavailableModalOpen] = useState(false);
   const [facilityForUnavailable, setFacilityForUnavailable] = useState<any | null>(null);
+  // Track which booking's Popover is open (persisted until user clicks away)
+  const [openOthers, setOpenOthers] = useState<Record<string, boolean>>({});
+  // Track which booking's Purpose popover is open
+  const [openPurpose, setOpenPurpose] = useState<Record<string, boolean>>({});
 
   // Wire real data using react-query and the project's apiRequest helper
   useAuth(); // ensure user is authenticated
@@ -287,6 +292,139 @@ export default function AdminDashboard() {
     return currentTimeInMinutes < libraryOpenTime || currentTimeInMinutes > libraryCloseTime;
   };
   const queryClient = useQueryClient();
+
+  // Track which bookings are currently being updated so buttons show loading/disabled state
+  const [updatingNeedsIds, setUpdatingNeedsIds] = useState<Set<string>>(new Set());
+  // Local map to track admin-updated needs status so UI reflects updates immediately
+  const [needsStatusById, setNeedsStatusById] = useState<Record<string, 'prepared' | 'not_available'>>({});
+
+  const markBookingNeeds = async (bookingId: string, status: 'prepared' | 'not_available', note?: string) => {
+    try {
+      setUpdatingNeedsIds(prev => new Set(prev).add(bookingId));
+  await updateNeedsMutation.mutateAsync({ bookingId, status, note });
+  // optimistically record the status so UI updates immediately
+  setNeedsStatusById(prev => ({ ...prev, [bookingId]: status }));
+  toast({ title: 'Updated', description: `Marked needs as ${status} for booking ${bookingId}`, variant: 'default' });
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      toast({ title: 'Error', description: msg, variant: 'destructive' });
+    } finally {
+      setUpdatingNeedsIds(prev => {
+        const copy = new Set(prev);
+        copy.delete(bookingId);
+        return copy;
+      });
+    }
+  };
+
+  // Mutation to update needs status
+  const updateNeedsMutation = useMutation({
+    mutationFn: async ({ bookingId, status, note }: { bookingId: string; status: 'prepared' | 'not_available'; note?: string }) => {
+      const res = await apiRequest('POST', `/api/admin/bookings/${bookingId}/needs`, { status, note });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/admin/bookings'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/admin/alerts'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/admin/activity'] });
+    }
+  });
+
+  function renderEquipmentLine(booking: FacilityBooking | any) {
+    try {
+      const eq = booking.equipment || booking.equipment || null;
+      if (!eq) return null;
+  const rawItems = Array.isArray(eq.items) ? eq.items.map((s: string) => s.replace(/_/g, ' ')) : [];
+  // filter out placeholder 'others' tokens if present in items array
+  const items = rawItems.filter((s: string) => !/^others[:\s]*$/i.test(String(s).trim()));
+      if (items.length === 0) return null;
+      return (
+        <div className="mt-2">
+            <div className="flex items-center gap-3">
+            <div className="text-xs font-medium text-gray-700">Equipment or Needs:</div>
+            {eq.others && (() => {
+                                    const id = String(booking.id || Math.random());
+              const isOpen = !!openOthers[id];
+              return (
+                <Popover open={isOpen} onOpenChange={(v) => setOpenOthers(prev => ({ ...prev, [id]: v }))}>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <PopoverTrigger asChild>
+                          <button
+                            onClick={() => setOpenOthers(prev => ({ ...prev, [id]: !prev[id] }))}
+                            className="ml-2 text-xs text-blue-600 hover:underline cursor-pointer"
+                            aria-expanded={isOpen}
+                          >
+                            View other
+                          </button>
+                        </PopoverTrigger>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" align="start" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
+                        <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                          <p className="font-semibold text-sm text-gray-800 text-left">Other equipment</p>
+                        </div>
+                        <div className="p-3">
+                          <p className="text-sm text-gray-900 leading-5 break-words text-left">{String(eq.others)}</p>
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                  <PopoverContent side="top" align="start" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50 origin-top-left">
+                    <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                      <p className="font-semibold text-sm text-gray-800 text-left">Other equipment</p>
+                    </div>
+                    <div className="p-3">
+                      <p className="text-sm text-gray-900 leading-5 break-words text-left">{String(eq.others)}</p>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              );
+            })()}
+          </div>
+          {items.length > 0 && (
+            <div className="mt-1 grid grid-cols-1 md:grid-cols-2 gap-x-3 gap-y-1 text-xs text-gray-600">
+              {items.map((it: string, idx: number) => (
+                <div key={idx} className="truncate">{it}</div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Resolve a booking's needs status: prefer local optimistic state, fall back to parsing server adminResponse
+  const getNeedsStatusForBooking = (booking: any): 'prepared' | 'not_available' | undefined => {
+    if (!booking) return undefined;
+    if (needsStatusById[booking.id]) return needsStatusById[booking.id];
+    try {
+      const resp = String(booking?.adminResponse || '');
+      const m = resp.match(/Needs:\s*(Prepared|Not Available)/i);
+      if (m) return /prepared/i.test(m[1]) ? 'prepared' : 'not_available';
+    } catch (e) {
+      // ignore
+    }
+    return undefined;
+  };
+
+  // Small visible badge used to highlight bookings that requested equipment
+  function renderEquipmentBadge(booking: FacilityBooking | any) {
+    try {
+      const eq = booking?.equipment;
+      const has = !!(eq && ((Array.isArray(eq.items) && eq.items.length > 0) || (eq.others && String(eq.others).trim().length > 0)));
+      if (!has) return null;
+      return (
+        <div className="mt-1">
+          <span className="inline-block text-xs font-semibold px-2 py-1 rounded-full bg-yellow-100 text-yellow-800">NEEDS EQUIPMENT</span>
+        </div>
+      );
+    } catch (e) {
+      return null;
+    }
+  }
 
   // Admin stats
   const isAdmin = !!authUser && authUser.role === 'admin';
@@ -400,6 +538,32 @@ export default function AdminDashboard() {
     })
     .sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   const pendingBookings: FacilityBooking[] = Array.isArray(pendingBookingsData) ? pendingBookingsData : [];
+
+  // When bookings are (re)fetched, derive any persisted needs status stored in adminResponse
+  // The server currently stores a marker like "Needs: Prepared" or "Needs: Not Available" inside adminResponse.
+  // Parse that marker into our local map so the UI reflects persisted status after refresh.
+  useEffect(() => {
+    try {
+      const derived: Record<string, 'prepared' | 'not_available'> = {};
+      const all = Array.isArray(adminBookingsData) ? adminBookingsData.concat(pendingBookingsData || []) : (pendingBookingsData || []);
+      (all || []).forEach((b: any) => {
+        try {
+          const resp = String(b?.adminResponse || '');
+          const m = resp.match(/Needs:\s*(Prepared|Not Available)/i);
+          if (m) {
+            const s = /prepared/i.test(m[1]) ? 'prepared' : 'not_available';
+            if (b?.id) derived[b.id] = s as 'prepared' | 'not_available';
+          }
+        } catch (e) {
+          // ignore per-book parse errors
+        }
+      });
+      // merge server-derived values into local optimistic map (server should be canonical)
+      setNeedsStatusById(prev => ({ ...prev, ...derived }));
+    } catch (e) {
+      // ignore
+    }
+  }, [adminBookingsData, pendingBookingsData]);
 
   // Mutations
   const approveBookingMutation = useMutation({
@@ -547,190 +711,98 @@ export default function AdminDashboard() {
 
   const formatAlertMessage = (message: string | null): string => {
     if (!message) return '';
-    
-    // Handle session ID replacements for alerts
-    const uuidRegex = /Session ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/;
-    const match = message.match(uuidRegex);
+    const raw = String(message).trim();
 
-    // Session-specific alert handling removed; provide a generic fallback for session messages
-    if (match || message.includes('The computer session for this user was automatically logged out due to inactivity')) {
-      return message.replace('this user', 'a user');
-    }
-
-    // Handle user unbanned messages with UUID
-    if (message.includes('has been unbanned by admin') && message.includes('-')) {
-      const userIdMatch = message.match(/User ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) has been unbanned/);
-      if (userIdMatch) {
-        const userId = userIdMatch[1];
-        const userEmail = getUserEmail(userId);
-        return message.replace(`User ${userId}`, `User ${userEmail}`);
-      }
-    }
-
-  // Handle "User [UUID] has been unbanned by admin and account access restored" pattern
-    if (message.includes('has been unbanned by admin and account access restored')) {
-      // First try to match UUID pattern
-      const userIdMatch = message.match(/User ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) has been unbanned/);
-      if (userIdMatch) {
-        const userId = userIdMatch[1];
-        const userEmail = getUserEmail(userId);
-        
-        // Try to find the corresponding activity log to get the actual admin email
-        const relatedActivity = activities?.find(activity => 
-          activity.action === "User Unbanned" && 
-          activity.details?.includes(userId)
-        );
-        
-  let adminEmail = user?.email || 'admin';
-        if (relatedActivity) {
-          // First try to extract admin email from "by [email]" pattern
-          const adminEmailMatch = relatedActivity.details?.match(/by ([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
-          if (adminEmailMatch) {
-            adminEmail = adminEmailMatch[1];
-          } else {
-            // Fallback to admin ID lookup
-            const adminIdMatch = relatedActivity.details?.match(/Admin ([a-zA-Z0-9-]+) unbanned user/);
-            if (adminIdMatch) {
-              const adminId = adminIdMatch[1];
-              const adminUser = usersMap.get(adminId);
-              adminEmail = adminUser?.email || adminId;
-            }
-          }
-        }
-        
-        return `User ${userEmail} has been unbanned by ${adminEmail} and account access restored.`;
-      }
-      
-      // Handle email-based messages (no UUID) - extract user email from message
-      const emailMatch = message.match(/User ([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}) has been unbanned/);
-      if (emailMatch) {
-        const userEmail = emailMatch[1];
-        
-        // Find the user by email to get their ID
-        const unbannedUser = usersData?.find(u => u.email === userEmail);
-        const userId = unbannedUser?.id;
-        
-        // Try to find the corresponding activity log to get the actual admin email
-        const relatedActivity = activities?.find(activity => 
-          activity.action === "User Unbanned" && 
-          (userId ? activity.details?.includes(userId) : 
-           Math.abs(new Date(activity.createdAt).getTime() - Date.now()) < 60000) // Within last minute as fallback
-        );
-        
-  let adminEmail = user?.email || 'admin';
-        if (relatedActivity) {
-          // First try to extract admin email from "by [email]" pattern
-          const adminEmailMatch = relatedActivity.details?.match(/by ([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
-          if (adminEmailMatch) {
-            adminEmail = adminEmailMatch[1];
-          } else {
-            // Fallback to admin ID lookup
-            const adminIdMatch = relatedActivity.details?.match(/Admin ([a-zA-Z0-9-]+) unbanned user/);
-            if (adminIdMatch) {
-              const adminId = adminIdMatch[1];
-              const adminUser = usersMap.get(adminId);
-              adminEmail = adminUser?.email || adminId;
-            }
-          }
-        }
-        
-        return `User ${userEmail} has been unbanned by ${adminEmail} and account access restored.`;
-      }
-      
-      // Fallback for generic case
-      const relatedActivity = activities?.find(activity => 
-        activity.action === "User Unbanned" && 
-        Math.abs(new Date(activity.createdAt).getTime() - Date.now()) < 60000 // Within last minute
-      );
-      
-  let adminEmail = user?.email || 'admin';
-      if (relatedActivity) {
-        // First try to extract admin email from "by [email]" pattern
-        const adminEmailMatch = relatedActivity.details?.match(/by ([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
-        if (adminEmailMatch) {
-          adminEmail = adminEmailMatch[1];
-        } else {
-          // Fallback to admin ID lookup
-          const adminIdMatch = relatedActivity.details?.match(/Admin ([a-zA-Z0-9-]+) unbanned user/);
-          if (adminIdMatch) {
-            const adminId = adminIdMatch[1];
-            const adminUser = usersMap.get(adminId);
-            adminEmail = adminUser?.email || adminId;
-          }
-        }
-      }
-      
-      return message.replace('by admin', `by ${adminEmail}`);
-    }
-
-  // Handle user management messages - fix the format for unbanned users
-    if (message.includes('unbanned user') && message.includes('by ')) {
-      // Extract the admin email at the end
-        const byMatch = message.match(/by ([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
-      if (byMatch) {
-        const adminEmail = byMatch[1];
-        
-        // Try to extract user ID or email being unbanned - multiple patterns
-        let userEmail = 'a user';
-        
-        // Pattern 1: "unbanned user (ID removed)"
-        const userIdMatch1 = message.match(/unbanned user \(ID removed\)/);
-        if (userIdMatch1) {
-          // Try to find the actual user ID in the original message
-          const fullUserIdMatch = message.match(/User ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/);
-          if (fullUserIdMatch) {
-            const userId = fullUserIdMatch[1];
-            userEmail = getUserEmail(userId);
-          }
-        }
-        
-        // Pattern 2: "unbanned user [userId]"
-        const userIdMatch2 = message.match(/unbanned user ([a-zA-Z0-9-]+) by/);
-        if (userIdMatch2) {
-          const userId = userIdMatch2[1];
-          userEmail = getUserEmail(userId);
-        }
-        
-        return `Admin ${adminEmail} unbanned user ${userEmail}`;
-      }
-    }
-
-    // Handle banned user messages
-    if (message.includes('banned user') && message.includes('by admin')) {
-      const userIdMatch = message.match(/User ([a-zA-Z0-9-]+) has been banned/);
-      if (userIdMatch) {
-        const userId = userIdMatch[1];
-        const userEmail = getUserEmail(userId);
-        return message.replace(`User ${userId}`, `User ${userEmail}`);
-      }
-    }
-
-    // General cleanup - remove session IDs and other technical details
-    let cleaned = message
-      .replace(/\(Session ID: [0-9a-f-]+\)/g, '')
-      .replace(/\(ID: [0-9a-f-]+\)/g, '')
-      .replace(/\(ID removed\)/g, '')
-      .trim();
-
-    // Replace any UUID-like user IDs with an email if we know the user, otherwise remove them
+    // Session-specific replacement
     try {
-      const uuidRegexGlobal = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/g;
-      cleaned = cleaned.replace(uuidRegexGlobal, (match) => {
-        const found = usersData?.find(u => u.id === match);
-        // If we know this UUID corresponds to a user, show their email; otherwise remove the raw id
-        return found ? found.email : '';
-      });
-    } catch (e) {
-      // ignore replacement errors
-    }
-
-    // Strip any standalone 'booking <uuid>' occurrences to avoid exposing booking ids
-    try {
-      cleaned = cleaned.replace(/booking\s+[0-9a-f-]{36}/gi, 'booking');
+      const uuidRegex = /Session ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/;
+      if (uuidRegex.test(raw) || raw.includes('The computer session for this user was automatically logged out due to inactivity')) {
+        return raw.replace('this user', 'a user');
+      }
     } catch (e) {}
 
-    // Finally normalize whitespace
-    return cleaned.replace(/\s{2,}/g, ' ').trim();
+    // Try to convert user UUIDs to emails in 'unbanned' messages
+    try {
+      const unbanMatch = raw.match(/User ([0-9a-f-]{36}) has been unbanned/);
+      if (unbanMatch) {
+        const userEmail = getUserEmail(unbanMatch[1]);
+        return raw.replace(unbanMatch[1], userEmail);
+      }
+    } catch (e) {}
+
+    // Equipment/Needs parsing (JSON-style or free-text)
+    try {
+      const needsMatch = raw.match(/Needs:\s*(\{[\s\S]*\})/i);
+      const eqMatch = raw.match(/Requested equipment:\s*([^\[]+)/i);
+      const mapToken = (tok: string) => {
+        const t = String(tok || '').replace(/_/g, ' ').trim();
+        const lower = t.toLowerCase();
+        if (lower.includes('others')) return null;
+        if (lower.includes('whiteboard')) return 'Whiteboard & Markers';
+        if (lower.includes('projector')) return 'Projector';
+        if (lower.includes('extension cord') || lower.includes('extension_cord')) return 'Extension Cord';
+        if (lower.includes('hdmi')) return 'HDMI Cable';
+        if (lower.includes('extra chairs') || lower.includes('extra_chairs')) return 'Extra Chairs';
+        return t.replace(/[.,;]+$/g, '').trim();
+      };
+
+      let equipmentList: string[] = [];
+      let othersText: string | null = null;
+
+      if (needsMatch && needsMatch[1]) {
+        try {
+          const obj = JSON.parse(needsMatch[1]);
+          const items = Array.isArray(obj.items) ? obj.items : [];
+          let othersFromItems = '';
+          equipmentList = items.map((it: string) => {
+            const rawIt = String(it || '');
+            if (/others?/i.test(rawIt)) {
+              const trailing = rawIt.replace(/.*?others[:\s-]*/i, '').trim();
+              if (trailing && !othersFromItems) othersFromItems = trailing;
+              return null;
+            }
+            return mapToken(rawIt);
+          }).filter(Boolean) as string[];
+          othersText = othersFromItems || (obj.others ? String(obj.others).trim() : null);
+        } catch (e) {}
+      } else if (eqMatch && eqMatch[1]) {
+        const parts = eqMatch[1].split(/[;,]+/).map(s => String(s).trim()).filter(Boolean);
+        let othersFromParts = '';
+        equipmentList = parts.map(p => {
+          if (/others?/i.test(p)) {
+            const trailing = p.replace(/.*?others[:\s-]*/i, '').trim();
+            if (trailing && !othersFromParts) othersFromParts = trailing;
+            return null;
+          }
+          return mapToken(p);
+        }).filter(Boolean) as string[];
+        const extrasMatch = eqMatch[1].match(/Others?:\s*(.*)$/i);
+        othersText = othersFromParts || (extrasMatch && extrasMatch[1] ? String(extrasMatch[1]).trim() : null);
+      }
+
+      if ((equipmentList && equipmentList.length > 0) || othersText) {
+        const items = equipmentList.slice();
+        if (othersText && !items.includes('and others')) items.push('and others');
+        const itemsText = items.join(', ').replace(/,\s*and others/i, ' and others');
+        const emailMatch = raw.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+        const prefix = emailMatch ? `${emailMatch[1]} ` : '';
+        return `${prefix}Requested equipment: ${itemsText}`;
+      }
+    } catch (e) {}
+
+    // Generic cleanup fallback
+    try {
+      let cleaned = raw.replace(/\(Session ID: [0-9a-f-]+\)/g, '').replace(/\(ID: [0-9a-f-]+\)/g, '').replace(/\(ID removed\)/g, '').trim();
+      const uuidRegexGlobal = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/g;
+      cleaned = cleaned.replace(uuidRegexGlobal, (m) => {
+        const found = usersData?.find(u => u.id === m);
+        return found ? found.email : '';
+      });
+      cleaned = cleaned.replace(/booking\s+[0-9a-f-]{36}/gi, 'booking');
+      return cleaned.replace(/\s{2,}/g, ' ').trim();
+    } catch (e) {
+      return raw;
+    }
   };
 
   // formatActivityDetails removed (unused) — formatting is handled inline where needed
@@ -922,9 +994,12 @@ export default function AdminDashboard() {
                                 <div className="bg-green-100 p-2 rounded-lg">
                                   <CheckCircle className="h-5 w-5 text-green-600" />
                                 </div>
-                                <div>
+                                  <div>
                                   <h4 className="font-medium text-gray-900">{getUserEmail(booking.userId)}</h4>
-                                  <p className="text-sm text-gray-600">{getFacilityName(booking.facilityId)}</p>
+                                  <div className="flex items-center gap-3">
+                                    <p className="text-sm text-gray-600">{getFacilityName(booking.facilityId)}</p>
+                                    {renderEquipmentBadge(booking)}
+                                  </div>
                                   <div className="flex items-center gap-2 mt-1">
                                     <span className="text-xs font-medium text-gray-500">Participants:</span>
                                     <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">{booking.participants || 0}</span>
@@ -934,37 +1009,50 @@ export default function AdminDashboard() {
                               
                               <div className="flex items-center gap-6">
                                 <div className="text-right">
-                                  <TooltipProvider>
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <div className="flex items-center gap-1 cursor-help justify-end">
-                                          {booking.purpose && booking.purpose.length > 30 ? (
-                                            <>
-                                              <Eye className="h-3 w-3" />
-                                              <span className="text-xs">View purpose</span>
-                                            </>
-                                          ) : (
-                                            <div className="text-right">
-                                              <p className="text-sm font-medium text-gray-900">Purpose</p>
-                                              <p className="text-sm text-gray-600 max-w-[200px] truncate">
-                                                {booking.purpose || 'No purpose specified'}
-                                              </p>
-                                            </div>
-                                          )}
-                                        </div>
-                                      </TooltipTrigger>
-                                      <TooltipContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
-                                        <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                                          <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
-                                        </div>
-                                        <div className="p-4 max-h-48 overflow-y-auto">
-                                          <p className="whitespace-pre-wrap text-sm text-gray-900 leading-6 break-words text-left">
-                                            {booking.purpose || 'No purpose specified'}
-                                          </p>
-                                        </div>
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  </TooltipProvider>
+                                  {booking.purpose && (() => {
+                                    const id = String(booking.id || Math.random());
+                                    const isOpen = !!openPurpose[id];
+                                    return (
+                                      <Popover open={isOpen} onOpenChange={(v) => setOpenPurpose(prev => ({ ...prev, [id]: v }))}>
+                                        <TooltipProvider>
+                                          <Tooltip>
+                                            <TooltipTrigger asChild>
+                                              <PopoverTrigger asChild>
+                                                <button
+                                                  onClick={() => setOpenPurpose(prev => ({ ...prev, [id]: !prev[id] }))}
+                                                  className="flex items-center gap-1 cursor-help justify-end text-xs text-pink-600"
+                                                  aria-expanded={isOpen}
+                                                >
+                                                  <Eye className="h-3 w-3 text-pink-600" />
+                                                  <span>View purpose</span>
+                                                </button>
+                                              </PopoverTrigger>
+                                            </TooltipTrigger>
+                                                <TooltipContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
+                                                  <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                                    <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
+                                                  </div>
+                                                  <div className="p-3">
+                                                    <p className="text-sm text-gray-900 leading-5 break-words text-left">
+                                                      {booking.purpose || 'No purpose specified'}
+                                                    </p>
+                                                  </div>
+                                                </TooltipContent>
+                                          </Tooltip>
+                                        </TooltipProvider>
+                                        <PopoverContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50 origin-top-left">
+                                          <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                            <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
+                                          </div>
+                                          <div className="p-3">
+                                            <p className="text-sm text-gray-900 leading-5 break-words text-left">
+                                              {booking.purpose || 'No purpose specified'}
+                                            </p>
+                                          </div>
+                                        </PopoverContent>
+                                      </Popover>
+                                    );
+                                  })()}
                                 </div>
                                 <div className="text-right">
                                   <p className="text-sm font-medium text-gray-900">Started</p>
@@ -974,9 +1062,20 @@ export default function AdminDashboard() {
                                   <p className="text-sm font-medium text-gray-900">Ends</p>
                                   <p className="text-sm text-gray-600">{formatDateTime(booking.endTime)}</p>
                                 </div>
-                                <span className="px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                  Active
-                                </span>
+                                <div className="inline-grid gap-2 justify-items-stretch items-start">
+                                  <span className="justify-self-stretch px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">Active</span>
+                                  { (booking.status === 'approved' && !!booking.equipment) && (
+                                    getNeedsStatusForBooking(booking) ? (
+                                      getNeedsStatusForBooking(booking) === 'prepared' ? (
+                                        <div className="justify-self-stretch inline-flex items-center justify-center h-6 min-w-[72px] px-3 rounded-full bg-emerald-100 text-emerald-800 text-xs font-medium truncate">Prepared</div>
+                                      ) : (
+                                        <div className="justify-self-stretch inline-flex items-center justify-center h-6 min-w-[72px] px-3 rounded-full bg-red-100 text-red-800 text-xs font-medium truncate">Not Available</div>
+                                      )
+                                    ) : (
+                                      <div className="justify-self-stretch inline-flex items-center justify-center h-6 min-w-[72px] px-3 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 truncate">NEEDS</div>
+                                    )
+                                  )}
+                                </div>
                                 {/* removed: admin-facing pending-notice per request */}
 
                                 {/* Arrival confirmation countdown and admin action: if arrivalConfirmationDeadline exists and not yet confirmed, show confirmation countdown and a Confirm button */}
@@ -1002,6 +1101,18 @@ export default function AdminDashboard() {
                                     )}
                                   </div>
                                 )}
+                                {/* Equipment line and admin actions */}
+                                <div className="ml-4">
+                                  {(booking.status === 'approved' && new Date(booking.startTime) > new Date()) && renderEquipmentLine(booking)}
+                                  {isAdmin && !!booking.equipment && (booking.status === 'approved' && new Date(booking.startTime) > new Date()) && (
+                                    !getNeedsStatusForBooking(booking) ? (
+                                      <div className="flex items-center gap-2 mt-2">
+                                        <Button size="sm" disabled={updatingNeedsIds.has(booking.id)} aria-busy={updatingNeedsIds.has(booking.id)} onClick={() => markBookingNeeds(booking.id, 'prepared')} aria-label={`Mark equipment prepared for ${booking.id}`}>✅ Prepared</Button>
+                                        <Button size="sm" variant="outline" disabled={updatingNeedsIds.has(booking.id)} aria-busy={updatingNeedsIds.has(booking.id)} onClick={() => markBookingNeeds(booking.id, 'not_available')} aria-label={`Mark equipment not available for ${booking.id}`}>❌ Not Available</Button>
+                                      </div>
+                                    ) : null
+                                  )}
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -1078,29 +1189,56 @@ export default function AdminDashboard() {
                                 <div className="text-right">
                                   <TooltipProvider>
                                     <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <div className="flex items-center gap-1 cursor-help justify-end">
-                                          {booking.purpose && booking.purpose.length > 30 ? (
-                                            <>
-                                              <Eye className="h-3 w-3 text-pink-600" />
-                                              <span className="text-xs text-pink-600">View purpose</span>
-                                            </>
-                                          ) : (
-                                            <div className="text-right">
-                                              <p className="text-sm font-medium text-gray-900">Purpose</p>
-                                              <p className="text-sm text-gray-600 max-w-[200px] truncate">
-                                                {booking.purpose || 'No purpose specified'}
-                                              </p>
-                                            </div>
-                                          )}
-                                        </div>
-                                      </TooltipTrigger>
+                                      {booking.purpose && (() => {
+                                        const id = String(booking.id || Math.random());
+                                        const isOpen = !!openPurpose[id];
+                                        return (
+                                          <Popover open={isOpen} onOpenChange={(v) => setOpenPurpose(prev => ({ ...prev, [id]: v }))}>
+                                            <TooltipProvider>
+                                              <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                  <PopoverTrigger asChild>
+                                                    <button
+                                                      onClick={() => setOpenPurpose(prev => ({ ...prev, [id]: !prev[id] }))}
+                                                      className="flex items-center gap-1 cursor-help justify-end text-xs text-pink-600"
+                                                      aria-expanded={isOpen}
+                                                    >
+                                                      <Eye className="h-3 w-3 text-pink-600" />
+                                                      <span>View purpose</span>
+                                                    </button>
+                                                  </PopoverTrigger>
+                                                </TooltipTrigger>
+                                                <TooltipContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
+                                                  <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                                    <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
+                                                  </div>
+                                                  <div className="p-3">
+                                                    <p className="text-sm text-gray-900 leading-5 break-words text-left">
+                                                      {booking.purpose || 'No purpose specified'}
+                                                    </p>
+                                                  </div>
+                                                </TooltipContent>
+                                              </Tooltip>
+                                            </TooltipProvider>
+                                            <PopoverContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50 origin-top-left">
+                                              <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                                <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
+                                              </div>
+                                              <div className="p-3">
+                                                <p className="text-sm text-gray-900 leading-5 break-words text-left">
+                                                  {booking.purpose || 'No purpose specified'}
+                                                </p>
+                                              </div>
+                                            </PopoverContent>
+                                          </Popover>
+                                        );
+                                      })()}
                                       <TooltipContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
                                         <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
                                           <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
                                         </div>
-                                        <div className="p-4 max-h-48 overflow-y-auto">
-                                          <p className="whitespace-pre-wrap text-sm text-gray-900 leading-6 break-words text-left">
+                                        <div className="p-3">
+                                          <p className="text-sm text-gray-900 leading-5 break-words text-left">
                                             {booking.purpose || 'No purpose specified'}
                                           </p>
                                         </div>
@@ -1116,9 +1254,48 @@ export default function AdminDashboard() {
                                   <p className="text-sm font-medium text-gray-900">Ends</p>
                                   <p className="text-sm text-gray-600">{formatDateTime(booking.endTime)}</p>
                                 </div>
-                                <span className="px-3 py-1 rounded-full text-xs font-medium bg-pink-100 text-pink-800">
-                                  Scheduled
-                                </span>
+                                <div className="inline-grid gap-2 justify-items-stretch items-start">
+                                  <span className="justify-self-stretch inline-flex items-center justify-center h-6 min-w-[96px] px-3 rounded-full text-xs font-medium bg-pink-100 text-pink-800">Scheduled</span>
+                                  { (booking.status === 'approved' && !!booking.equipment) && (
+                                    getNeedsStatusForBooking(booking) ? (
+                                      getNeedsStatusForBooking(booking) === 'prepared' ? (
+                                        <div className="justify-self-stretch inline-flex items-center justify-center h-6 min-w-[72px] px-3 rounded-full bg-emerald-100 text-emerald-800 text-xs font-medium truncate">Prepared</div>
+                                      ) : (
+                                        <div className="justify-self-stretch inline-flex items-center justify-center h-6 min-w-[72px] px-3 rounded-full bg-red-100 text-red-800 text-xs font-medium truncate">Not Available</div>
+                                      )
+                                    ) : (
+                                      <div className="justify-self-stretch inline-flex items-center justify-center h-6 min-w-[96px] px-3 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">NEEDS</div>
+                                    )
+                                  )}
+                                </div>
+                                {/* Equipment line and admin actions for pending */}
+                                <div className="ml-4">
+                                  {(booking.status === 'approved' && new Date(booking.startTime) > new Date()) && renderEquipmentLine(booking)}
+                                  {isAdmin && !!booking.equipment && (booking.status === 'approved' && new Date(booking.startTime) > new Date()) && (
+                                    !getNeedsStatusForBooking(booking) ? (
+                                      <div className="flex items-center gap-2 mt-2">
+                                        <Button
+                                          disabled={updatingNeedsIds.has(booking.id)}
+                                          aria-busy={updatingNeedsIds.has(booking.id)}
+                                          onClick={() => markBookingNeeds(booking.id, 'prepared')}
+                                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700"
+                                        >
+                                          <CheckCircle className="h-3 w-3" />
+                                          <span className="truncate">Prepared</span>
+                                        </Button>
+                                        <Button
+                                          disabled={updatingNeedsIds.has(booking.id)}
+                                          aria-busy={updatingNeedsIds.has(booking.id)}
+                                          onClick={() => markBookingNeeds(booking.id, 'not_available')}
+                                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium border border-red-200 text-red-700 bg-white hover:bg-red-50"
+                                        >
+                                          <XCircle className="h-3 w-3" />
+                                          <span className="truncate">Not Available</span>
+                                        </Button>
+                                      </div>
+                                    ) : null
+                                  )}
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -1215,8 +1392,8 @@ export default function AdminDashboard() {
                                         <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
                                           <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
                                         </div>
-                                        <div className="p-4 max-h-48 overflow-y-auto">
-                                          <p className="whitespace-pre-wrap text-sm text-gray-900 leading-6 break-words text-left">
+                                        <div className="p-3">
+                                          <p className="text-sm text-gray-900 leading-5 break-words text-left">
                                             {booking.purpose || 'No purpose specified'}
                                           </p>
                                         </div>
@@ -1232,20 +1409,31 @@ export default function AdminDashboard() {
                                   <p className="text-sm font-medium text-gray-900">Ends</p>
                                   <p className="text-sm text-gray-600">{formatDateTime(booking.endTime)}</p>
                                 </div>
-                                <span className="px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                                  Pending Request
-                                </span>
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-3">
+                                  <span className="inline-flex items-center justify-center h-6 min-w-[140px] px-3 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">Pending Request</span>
+                                  { (booking.status === 'approved' && !!booking.equipment) && (
+                                    getNeedsStatusForBooking(booking) ? (
+                                      getNeedsStatusForBooking(booking) === 'prepared' ? (
+                                        <div className="inline-flex items-center justify-center h-6 min-w-[72px] px-3 rounded-full bg-emerald-100 text-emerald-800 text-xs font-medium truncate">Prepared</div>
+                                      ) : (
+                                        <div className="inline-flex items-center justify-center h-6 min-w-[72px] px-3 rounded-full bg-red-100 text-red-800 text-xs font-medium truncate">Not Available</div>
+                                      )
+                                    ) : (
+                                      <div className="inline-flex items-center justify-center h-6 min-w-[96px] px-3 rounded-full text-xs font-medium bg-yellow-50 text-yellow-800">NEEDS</div>
+                                    )
+                                  )}
+                                </div>
+                                <div className="flex flex-col items-start gap-2">
                                   <button
                                     onClick={() =>
                                       approveBookingMutation.mutate({
                                         bookingId: booking.id,
                                       })
                                     }
-                                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 transition-colors duration-200"
+                                    className="inline-flex items-center justify-center gap-1 px-2 bg-emerald-600 text-white text-xs font-medium rounded-md hover:bg-emerald-700 transition-colors duration-200 h-7 min-w-[88px]"
                                   >
-                                    <CheckCircle className="h-3.5 w-3.5" />
-                                    Approve
+                                    <CheckCircle className="h-3 w-3" />
+                                    <span className="truncate">Approve</span>
                                   </button>
                                   <button
                                     onClick={() =>
@@ -1253,13 +1441,66 @@ export default function AdminDashboard() {
                                         bookingId: booking.id,
                                       })
                                     }
-                                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-red-600 text-white text-xs font-medium rounded-lg hover:bg-red-700 transition-colors duration-200"
+                                    className="inline-flex items-center justify-center gap-1 px-2 bg-red-600 text-white text-xs font-medium rounded-md hover:bg-red-700 transition-colors duration-200 h-7 min-w-[88px]"
                                   >
-                                    <XCircle className="h-3.5 w-3.5" />
-                                    Deny
+                                    <XCircle className="h-3 w-3" />
+                                    <span className="truncate">Deny</span>
                                   </button>
+                                  { (booking.status === 'approved' && !!booking.equipment) && (
+                                    getNeedsStatusForBooking(booking) ? (
+                                      null
+                                    ) : (
+                                      <div className="flex items-center gap-2 mt-2">
+                                        <Button
+                                          disabled={updatingNeedsIds.has(booking.id)}
+                                          aria-busy={updatingNeedsIds.has(booking.id)}
+                                          onClick={() => markBookingNeeds(booking.id, 'prepared')}
+                                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700"
+                                        >
+                                          <CheckCircle className="h-3 w-3" />
+                                          <span className="truncate">Prepared</span>
+                                        </Button>
+                                        <Button
+                                          disabled={updatingNeedsIds.has(booking.id)}
+                                          aria-busy={updatingNeedsIds.has(booking.id)}
+                                          onClick={() => markBookingNeeds(booking.id, 'not_available')}
+                                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium border border-red-200 text-red-700 bg-white hover:bg-red-50"
+                                        >
+                                          <XCircle className="h-3 w-3" />
+                                          <span className="truncate">Not Available</span>
+                                        </Button>
+                                      </div>
+                                    )
+                                  )}
                                 </div>
-                                {/* removed: admin-facing pending-notice per request */}
+                                {/* Equipment line and admin actions for booking requests */}
+                                <div className="ml-4">
+                                  {(booking.status === 'approved' && new Date(booking.startTime) > new Date()) && renderEquipmentLine(booking)}
+                                  {isAdmin && !!booking.equipment && (booking.status === 'approved' && new Date(booking.startTime) > new Date()) && (
+                                    !getNeedsStatusForBooking(booking) ? (
+                                      <div className="flex items-center gap-2 mt-2">
+                                        <Button
+                                          disabled={updatingNeedsIds.has(booking.id)}
+                                          aria-busy={updatingNeedsIds.has(booking.id)}
+                                          onClick={() => markBookingNeeds(booking.id, 'prepared')}
+                                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700"
+                                        >
+                                          <CheckCircle className="h-3 w-3" />
+                                          <span className="truncate">Prepared</span>
+                                        </Button>
+                                        <Button
+                                          disabled={updatingNeedsIds.has(booking.id)}
+                                          aria-busy={updatingNeedsIds.has(booking.id)}
+                                          onClick={() => markBookingNeeds(booking.id, 'not_available')}
+                                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium border border-red-200 text-red-700 bg-white hover:bg-red-50"
+                                        >
+                                          <XCircle className="h-3 w-3" />
+                                          <span className="truncate">Not Available</span>
+                                        </Button>
+                                      </div>
+                                    ) : null
+                                  )}
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -1618,6 +1859,97 @@ export default function AdminDashboard() {
                         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
                         .map((alert: SystemAlert) => {
                           const isHighPriority = alert.severity === 'critical' || alert.severity === 'high';
+                          // Precompute parsed alert values so we don't put statements inside JSX
+                          const raw = String(alert.message || '');
+                          const bookingMatch = raw.match(/\[booking:([^\]]+)\]/);
+                          const bookingId = bookingMatch ? bookingMatch[1] : null;
+
+                          // Try to detect a modern "Needs: { ... }" payload (JSON-like) and parse it.
+                          let needsObj: any = null;
+                          try {
+                            const needsMatch = raw.match(/Needs:\s*(\{[\s\S]*\})/i);
+                            if (needsMatch && needsMatch[1]) {
+                              // Attempt to parse the JSON block. Some alerts may include single quotes — tolerate that.
+                              const jsonText = needsMatch[1].replace(/\"/g, '"');
+                              try {
+                                needsObj = JSON.parse(jsonText);
+                              } catch (e) {
+                                // Attempt a forgiving parse: replace single quotes with double quotes then parse
+                                const relaxed = jsonText.replace(/'/g, '"');
+                                try { needsObj = JSON.parse(relaxed); } catch (e) { needsObj = null; }
+                              }
+                            }
+                          } catch (e) {
+                            needsObj = null;
+                          }
+
+                          // Backwards-compatible: fall back to legacy "Requested equipment: ..." free-text extraction
+                          const eqMatch = raw.match(/Requested equipment:\s*([^\[]+)/i);
+                          let equipmentList: string[] = [];
+                          // capture any Others text separately so we don't inline long free-text
+                          let alertOthersText: string | null = null;
+                          if (needsObj && Array.isArray(needsObj.items)) {
+                            const mapped: string[] = [];
+                            for (const s of needsObj.items) {
+                              const token = String(s).replace(/_/g, ' ').trim();
+                              const lower = token.toLowerCase();
+                              if (lower.includes('others')) {
+                                const trailing = token.replace(/.*?others[:\s-]*/i, '').trim();
+                                if (trailing) alertOthersText = alertOthersText || trailing;
+                                continue;
+                              }
+                              if (lower === 'whiteboard') mapped.push('Whiteboard & Markers');
+                              else if (lower === 'projector') mapped.push('Projector');
+                              else if (lower === 'extension cord' || lower === 'extension_cord') mapped.push('Extension Cord');
+                              else if (lower === 'hdmi') mapped.push('HDMI Cable');
+                              else if (lower === 'extra chairs' || lower === 'extra_chairs') mapped.push('Extra Chairs');
+                              else mapped.push(token);
+                            }
+                            equipmentList = mapped;
+                            if (!alertOthersText && needsObj.others) alertOthersText = String(needsObj.others).trim() || null;
+                          } else if (eqMatch && eqMatch[1]) {
+                            const parts = eqMatch[1].split(/[,;]+/).map(s => String(s).trim()).filter(Boolean);
+                            const mapped: string[] = [];
+                            for (const p of parts) {
+                              const token = p;
+                              const lower = token.toLowerCase();
+                              if (lower.includes('others')) {
+                                const trailing = token.replace(/.*?others[:\s-]*/i, '').trim();
+                                if (trailing) alertOthersText = alertOthersText || trailing;
+                                continue;
+                              }
+                              if (lower === 'whiteboard') mapped.push('Whiteboard & Markers');
+                              else if (lower === 'projector') mapped.push('Projector');
+                              else if (lower === 'extension cord' || lower === 'extension_cord') mapped.push('Extension Cord');
+                              else if (lower === 'hdmi') mapped.push('HDMI Cable');
+                              else if (lower === 'extra chairs' || lower === 'extra_chairs') mapped.push('Extra Chairs');
+                              else mapped.push(token);
+                            }
+                            equipmentList = mapped;
+                            // attempt to extract trailing Others: text
+                            const extrasMatch = eqMatch[1].match(/Others?:\s*(.*)$/i);
+                            if (!alertOthersText && extrasMatch && extrasMatch[1]) alertOthersText = String(extrasMatch[1]).trim() || null;
+                          }
+
+                          // Compute visible title and requester email (strip trailing em-dash + email)
+                          let visibleTitle = String(alert.title || '');
+                          let titleRequesterEmail: string | null = null;
+                          try {
+                            const m = visibleTitle.match(/[—–-]\s*([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\s*$/);
+                            if (m && m[1]) {
+                              titleRequesterEmail = m[1];
+                              visibleTitle = visibleTitle.replace(/[—–-]\s*[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\s*$/, '').trim();
+                            }
+                          } catch (e) { titleRequesterEmail = null; }
+
+                          // Remove booking marker, embedded Needs JSON block, and legacy 'Requested equipment:' free-text
+                          const cleaned = String(raw)
+                            .replace(/\s*\[booking:[^\]]+\]/, '')
+                            .replace(/Needs:\s*\{[\s\S]*\}\s*/i, '')
+                            .replace(/Requested equipment:\s*([^\[]+)/i, '')
+                            .trim();
+                          const othersText = alertOthersText || (needsObj && needsObj.others ? String(needsObj.others).trim() : null);
+
                             return (
                               <div key={alert.id} className={`bg-white rounded-md p-3 border border-gray-200 transition-colors duration-200 ${alert.isRead ? 'opacity-60' : ''}`}>
                                 <div className="flex items-start gap-3">
@@ -1628,11 +1960,51 @@ export default function AdminDashboard() {
                                       isHighPriority ? 'text-red-600' : 'text-orange-600'
                                     }`} />
                                   </div>
-                                  <div className="flex-grow">
+                                  <div className="flex-grow min-w-0">
                                     <div className="flex items-start justify-between">
-                                      <div className="pr-4">
-                                        <p className="font-medium text-sm text-gray-900">{alert.title}</p>
-                                        <p className="text-xs text-gray-600 mt-1">{alert.isRead ? `READ: ${alert.message}` : alert.message}</p>
+                                      <div className="pr-4 min-w-0">
+                                        <p className="font-medium text-sm text-gray-900">{visibleTitle}</p>
+                                        {titleRequesterEmail && (
+                                          <div className="text-xs text-gray-500 mt-0.5">{titleRequesterEmail}</div>
+                                        )}
+                                        <div className="mt-1">
+                                          <p className="text-xs text-gray-600 break-words break-all whitespace-pre-wrap max-w-full">
+                                            {needsObj ? cleaned : (alert.isRead ? `READ: ${cleaned}` : cleaned)}
+                                          </p>
+
+                                          {(equipmentList && equipmentList.length > 0) && (
+                                            <div className="mt-2">
+                                              <div className="text-xs font-medium text-gray-700">Requested equipment:</div>
+                                              <ul className="text-xs text-gray-600 list-disc list-inside mt-1">
+                                                {equipmentList.map((it, idx) => <li key={idx}>{it}</li>)}
+                                              </ul>
+
+                                              {othersText && (
+                                                <div className="mt-2">
+                                                  {/* 'View other' removed by user request; extra text is still available in details */}
+                                                  <div className="max-w-xs p-2 text-sm text-gray-900 break-words whitespace-pre-wrap">{othersText}</div>
+                                                </div>
+                                              )}
+                                            </div>
+                                          )}
+                                          {bookingId && (
+                                            <div className="mt-2">
+                                              <button
+                                                onClick={() => {
+                                                  // Navigate to booking view; the student dashboard uses hash '#booking' plus booking id in some flows
+                                                  // We'll navigate to the booking page route and include an id fragment
+                                                  setSelectedView('booking-management');
+                                                  setBookingTab('pendingList');
+                                                  // Use location to open the student booking detail if route supports it
+                                                  try { setLocation(`/booking#id-${bookingId}`); } catch (e) { /* ignore */ }
+                                                }}
+                                                className="text-xs text-blue-600 underline"
+                                              >
+                                                View booking
+                                              </button>
+                                            </div>
+                                          )}
+                                        </div>
                                         {/* source not available on SystemAlert type */}
                                       </div>
                                       <div className="w-44 text-right text-xs text-gray-500 flex flex-col items-end gap-1">
@@ -1686,8 +2058,10 @@ export default function AdminDashboard() {
                         {alerts?.filter(a => {
                           const t = (a.title || '').toLowerCase();
                           const m = (a.message || '').toLowerCase();
+                          // Include user management events and equipment/needs submission alerts here
                           return t.includes('user banned') || t.includes('user unbanned') || 
-                                 t.includes('suspension') || m.includes('banned') || m.includes('unbanned');
+                                 t.includes('suspension') || m.includes('banned') || m.includes('unbanned') ||
+                                 t.includes('equipment') || t.includes('needs') || m.includes('equipment') || m.includes('needs');
                         }).length || 0} activities
                       </span>
                     </div>
@@ -1696,12 +2070,17 @@ export default function AdminDashboard() {
                       {alerts?.filter(a => {
                           const t = (a.title || '').toLowerCase();
                           const m = (a.message || '').toLowerCase();
+                          // Include user management events and equipment/needs submission alerts here
                           return t.includes('user banned') || t.includes('user unbanned') || 
-                                 t.includes('suspension') || m.includes('banned') || m.includes('unbanned');
+                                 t.includes('suspension') || m.includes('banned') || m.includes('unbanned') ||
+                                 t.includes('equipment') || t.includes('needs') || m.includes('equipment') || m.includes('needs');
                         })
                         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
                         .map((alert: SystemAlert) => {
                           const formattedMessage = formatAlertMessage(alert.message);
+                          // If this alert relates to equipment/needs, also append the createdAt time inline
+                          const isEquipmentRelated = /equipment|needs/i.test(String(alert.title || '') + ' ' + String(alert.message || ''));
+                          const formattedMessageWithTime = isEquipmentRelated ? `${formattedMessage} at ${formatDateTime(alert.createdAt)}` : formattedMessage;
                           const isUnbanActivity = (alert.title || '').toLowerCase().includes('unbanned') || 
                                                 (alert.message || '').toLowerCase().includes('unbanned');
                           const isBanActivity = (alert.title || '').toLowerCase().includes('banned') && !isUnbanActivity;
@@ -1726,11 +2105,11 @@ export default function AdminDashboard() {
                                     <UserIcon className="h-5 w-5 text-blue-600" />
                                   )}
                                 </div>
-                                <div className="flex-grow">
+                                <div className="flex-grow min-w-0">
                                   <div className="flex items-start justify-between">
-                                    <div className="pr-4">
+                                    <div className="pr-4 min-w-0">
                                       <p className="font-medium text-sm text-gray-900">{alert.title}</p>
-                                      <p className="text-xs text-gray-600 mt-1">{formattedMessage}</p>
+                                      <p className="text-xs text-gray-600 mt-1 break-words break-all whitespace-pre-wrap max-w-full">{formattedMessageWithTime}</p>
                                       {/* source not available on SystemAlert type */}
                                       {isUnbanActivity && (
                                         <div className="mt-2 inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
@@ -1778,7 +2157,8 @@ export default function AdminDashboard() {
                       const t = (a.title || '').toLowerCase();
                       const m = (a.message || '').toLowerCase();
                       return t.includes('user banned') || t.includes('user unbanned') || 
-                             t.includes('suspension') || m.includes('banned') || m.includes('unbanned');
+                             t.includes('suspension') || m.includes('banned') || m.includes('unbanned') ||
+                             t.includes('equipment') || t.includes('needs') || m.includes('equipment') || m.includes('needs');
                     }).length === 0) && (
                       <div className="text-center py-8">
                         <div className="bg-gray-100 rounded-full w-12 h-12 flex items-center justify-center mx-auto mb-3">
@@ -2018,8 +2398,192 @@ export default function AdminDashboard() {
 
                             if (!actorEmail) actorEmail = user?.email || '';
 
+                            // If the title includes an appended email (e.g. "Equipment Needs Submitted — test@uic.edu.ph"),
+                            // remove it from the visible title and treat it as a potential target email (booking owner) but do not force it.
+                            let visibleTitle = String(a.title || a.action || '');
+                            // Normalize certain server-produced titles: present equipment needs as a request label
+                            try {
+                              if (/equipment\s*needs?/i.test(visibleTitle) || /equipment needs submitted/i.test(visibleTitle)) {
+                                visibleTitle = 'Equipment or Needs Request';
+                              }
+                            } catch (e) {}
+                            let appendedEmail: string | null = null;
+                            try {
+                              const m = visibleTitle.match(/[—–-]\s*([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\s*$/);
+                              if (m && m[1]) {
+                                appendedEmail = m[1];
+                                visibleTitle = visibleTitle.replace(/[—–-]\s*[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\s*$/, '').trim();
+                              }
+                            } catch (e) { appendedEmail = null; }
+
                             const rawMsg = a.message || a.details || '';
                             let formatted = formatAlertMessage(rawMsg);
+                            // If appendedEmail present, prefer using it as the target (booking owner) when appropriate.
+                            // We'll only fall back to using it as the actorEmail if no other actor can be resolved.
+                            let appendedIsTarget = false;
+                            if (appendedEmail) {
+                              appendedIsTarget = true;
+                            }
+
+                            // For 'Needs Request' messages, prefer showing the booking/target email first.
+                            try {
+                              if (/needs request/i.test(visibleTitle)) {
+                                const emailRegex = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+                                const rawEmails = (String(formatted).match(emailRegex) || []);
+                                const uniq: string[] = [];
+                                for (const e of rawEmails) if (!uniq.includes(e)) uniq.push(e);
+
+                                // Determine target email: prefer appendedEmail (if present and not equal to actorEmail),
+                                // then prefer any unique email in the message that differs from actorEmail, otherwise use first found.
+                                let targetEmail = '';
+                                if (appendedIsTarget && appendedEmail && appendedEmail.toLowerCase() !== actorEmail.toLowerCase()) targetEmail = appendedEmail;
+                                if (!targetEmail) {
+                                  for (const e of uniq) {
+                                    if (actorEmail && e.toLowerCase() === String(actorEmail).toLowerCase()) continue;
+                                    targetEmail = e; break;
+                                  }
+                                }
+                                if (!targetEmail && uniq.length > 0) targetEmail = uniq[0];
+
+                                // Build rest of message without leading emails
+                                let rest = String(formatted).replace(emailRegex, '').trim();
+                                rest = rest.replace(/^[:\-\s,]+/, '').trim();
+                                if (!/^(requested|requested equipment|requested equipment:)/i.test(rest)) {
+                                  rest = `requested equipment: ${rest}`.trim();
+                                }
+
+                                if (targetEmail) {
+                                  formatted = `${targetEmail} ${rest}`.trim();
+                                }
+                                // If we still don't have an actorEmail, and appendedEmail wasn't used as target, use it as actor fallback
+                                if (!actorEmail && appendedEmail && appendedEmail !== targetEmail) actorEmail = appendedEmail;
+                              }
+                            } catch (e) {
+                              // ignore
+                            }
+                            // If the activity contains an embedded Needs: { ... } JSON block, parse and replace it with a friendly list
+                            try {
+                              const needsMatch = (a.message || a.details || '').toString().match(/Needs:\s*(\{[\s\S]*\})/i);
+                              if (needsMatch && needsMatch[1]) {
+                                let needsObj: any = null;
+                                const jsonText = needsMatch[1];
+                                try {
+                                  needsObj = JSON.parse(jsonText);
+                                } catch (e) {
+                                  try { needsObj = JSON.parse(jsonText.replace(/'/g, '"')); } catch (e) { needsObj = null; }
+                                }
+                                if (needsObj && Array.isArray(needsObj.items)) {
+                                  let othersTextFromItems = '';
+                                  const mappedItems = needsObj.items.map((s: string) => {
+                                    const raw = String(s).replace(/_/g, ' ').trim();
+                                    const lower = raw.toLowerCase();
+                                    if (lower.includes('others')) {
+                                      const trailing = raw.replace(/.*?others[:\s-]*/i, '').trim();
+                                      if (trailing && !othersTextFromItems) othersTextFromItems = trailing;
+                                      return null;
+                                    }
+                                    if (lower === 'whiteboard') return 'Whiteboard & Markers';
+                                    if (lower === 'projector') return 'Projector';
+                                    if (lower === 'extension cord' || lower === 'extension_cord') return 'Extension Cord';
+                                    if (lower === 'hdmi') return 'HDMI Cable';
+                                    if (lower === 'extra chairs' || lower === 'extra_chairs') return 'Extra Chairs';
+                                    return raw;
+                                  }).filter(Boolean) as string[];
+                                  // remove any items that reference 'others' (e.g., 'othersTEST') to avoid inline artifacts
+                                  for (let i = mappedItems.length - 1; i >= 0; i--) {
+                                    if (/others/i.test(String(mappedItems[i]))) mappedItems.splice(i, 1);
+                                    else mappedItems[i] = String(mappedItems[i]).replace(/[.,;]+$/g, '').trim();
+                                  }
+                                  const others = needsObj.others ? String(needsObj.others).trim() : '';
+                                  const othersText = othersTextFromItems || others || '';
+                                  const joinWithAnd = (arr: string[]) => { if (!arr || arr.length === 0) return ''; if (arr.length === 1) return arr[0]; if (arr.length === 2) return `${arr[0]} and ${arr[1]}`; return `${arr.slice(0, -1).join(', ')} and ${arr.slice(-1)[0]}`; };
+                                  const equipmentText = joinWithAnd(mappedItems);
+                                  const buildWithOthers = (items: string[]) => {
+                                    if (!items || items.length === 0) return 'others';
+                                    if (items.length === 1) return `${items[0]} and others`;
+                                    // for 2+ items: 'A, B and others'
+                                    const head = items.slice(0, -1).join(', ');
+                                    const last = items[items.length - 1];
+                                    return `${head}, ${last} and others`;
+                                  };
+                                  // If there is an 'others' free-text blob, attach it inline in parentheses to avoid duplicate 'Others:' fragments.
+                                  // Use 'and others' wording instead of parenthetical free-text to avoid duplicating 'Others:' fragments
+                                  const replacement = othersText
+                                    ? (mappedItems.length ? `Needs: ${buildWithOthers(mappedItems)}` : `Needs: others`)
+                                    : `Needs: ${equipmentText}`;
+                                  try { formatted = String(formatted).replace(/Needs:\s*\{[\s\S]*\}\s*/i, replacement).trim(); } catch (e) {}
+                                }
+                              }
+                            } catch (e) { /* ignore parse errors */ }
+                            // Also handle legacy free-text 'Requested equipment: ...' by mapping tokens to friendly labels
+                            try {
+                              const eqMatch = (a.message || a.details || '').toString().match(/Requested equipment:\s*([^\[]+)/i);
+                              if (eqMatch && eqMatch[1]) {
+                                const rawList = String(eqMatch[1]).trim();
+                                const parts = rawList.split(/[,;]+/).map(s => String(s).trim()).filter(Boolean);
+                                let othersText = '';
+                                const mapped = parts.map((it) => {
+                                  const raw = String(it).trim();
+                                  const lower = raw.toLowerCase();
+                                  // If token contains 'others' treat it as the Others marker and capture trailing text
+                                  if (lower.includes('others')) {
+                                    const trailing = raw.replace(/.*?others[:\s-]*/i, '').trim();
+                                    if (trailing && !othersText) othersText = trailing;
+                                    return null; // omit from equipment list
+                                  }
+                                  if (lower === 'whiteboard') return 'Whiteboard & Markers';
+                                  if (lower === 'projector') return 'Projector';
+                                  if (lower === 'extension cord' || lower === 'extension_cord') return 'Extension Cord';
+                                  if (lower === 'hdmi') return 'HDMI Cable';
+                                  if (lower === 'extra chairs' || lower === 'extra_chairs') return 'Extra Chairs';
+                                  return raw;
+                                }).filter(Boolean) as string[];
+                                // remove any items that reference 'others' (e.g., 'othersTEST') to avoid inline artifacts
+                                for (let i = mapped.length - 1; i >= 0; i--) {
+                                  if (/others/i.test(String(mapped[i]))) mapped.splice(i, 1);
+                                  else mapped[i] = String(mapped[i]).replace(/[.,;]+$/g, '').trim();
+                                }
+                                // Extract 'Others: ...' if present at end like 'Others: TEST' unless captured above
+                                const extrasMatch = rawList.match(/Others?:\s*(.*)$/i);
+                                if (!othersText && extrasMatch && extrasMatch[1]) othersText = String(extrasMatch[1]).trim();
+                                const equipmentItems = mapped;
+                                const joinWithAnd = (arr: string[]) => {
+                                  if (!arr || arr.length === 0) return '';
+                                  if (arr.length === 1) return arr[0];
+                                  if (arr.length === 2) return `${arr[0]} and ${arr[1]}`;
+                                  return `${arr.slice(0, -1).join(', ')} and ${arr.slice(-1)[0]}`;
+                                };
+                                const buildWithOthers = (items: string[]) => {
+                                  if (!items || items.length === 0) return 'others';
+                                  if (items.length === 1) return `${items[0]} and others`;
+                                  const head = items.slice(0, -1).join(', ');
+                                  const last = items[items.length - 1];
+                                  return `${head}, ${last} and others`;
+                                };
+
+                                // Attach any 'Others: <text>' content inline to avoid later duplicate fragments
+                                let replacement = '';
+                                if (othersText) {
+                                  if (equipmentItems.length === 0) {
+                                    replacement = `requested equipment: others`;
+                                  } else {
+                                    replacement = `requested equipment: ${buildWithOthers(equipmentItems)}`;
+                                  }
+                                } else {
+                                  replacement = `requested equipment: ${joinWithAnd(equipmentItems)}`;
+                                }
+                                try { formatted = String(formatted).replace(/Requested equipment:\s*([^\[]+)/i, replacement).trim(); } catch (e) {}
+                              }
+                            } catch (e) { /* ignore */ }
+                            // Strip any remaining long 'Others: ...' fragments from the inline formatted text (they remain in the detailed block)
+                            try {
+                              // Convert a trailing ', others' into ' and others' for correct grammar
+                              formatted = String(formatted).replace(/,\s*(and\s+)?others(\b)/i, ' and others$2');
+                              // Remove long 'Others: <text>' fragments from the inline sentence (keep details in the block)
+                              formatted = String(formatted).replace(/,?\s*Others?:\s*[^,\]]+/i, '').replace(/\s{2,}/g, ' ').trim();
+                              // Normalize a possible trailing comma before 'and others' (', and others' -> ' and others')
+                              formatted = formatted.replace(/,\s*and\s+others/i, ' and others');
+                            } catch (e) {}
                             // Remove generic leading 'Admin' to avoid confusion when actor is shown separately
                             try {
                               formatted = formatted.replace(/^Admin\b[:\s,-]*/i, '');
@@ -2092,11 +2656,22 @@ export default function AdminDashboard() {
                               }
                             } catch (e) {}
 
-                            return (
+                              // Ensure equipment-related events include the action time inline (if not already present)
+                              try {
+                                const actionLower = String((a.title || a.action || '')).toLowerCase();
+                                const isEquipmentAction = /equipment|needs/i.test(actionLower) || /needs request/i.test(visibleTitle.toLowerCase());
+                                const hasDateLike = /\d{1,2}\/\d{1,2}\/\d{4}|\d{1,2}:\d{2}:\d{2}/.test(subLine);
+                                if (isEquipmentAction && a.createdAt && !hasDateLike) {
+                                  const t = formatDateTime(a.createdAt);
+                                  if (t) subLine = `${subLine} at ${t}`.trim();
+                                }
+                              } catch (e) {}
+
+                                return (
                               <div key={a.id || idx} className="bg-white rounded-md p-3 border border-gray-200">
                                 <div className="flex items-start justify-between gap-3">
                                       <div className="flex-1 pr-4">
-                                        <p className="font-medium text-sm text-gray-900">{(a.title || a.action) ?? 'System Event'}</p>
+                                        <p className="font-medium text-sm text-gray-900">{(visibleTitle || (a.title || a.action)) ?? 'System Event'}</p>
                                         <p className="text-xs text-gray-600 mt-1">{subLine}</p>
                                         <div className="mt-1 text-xs text-gray-400">{a.source ? `Source: ${a.source}` : ''}</div>
                                       </div>
@@ -2416,35 +2991,53 @@ export default function AdminDashboard() {
                         const t = (a.title || '').toLowerCase();
                         const m = (a.message || '').toLowerCase();
                         return t.includes('booking') || m.includes('booking');
-                      }).slice(0,5).map((alert: SystemAlert) => (
-                        <div key={alert.id} className="bg-white rounded-md p-3 border border-gray-200 hover:border-gray-300 transition-colors duration-150">
-                          <div className="flex items-start justify-between">
-                            <div>
-                              <h4 className="font-medium text-gray-900 text-sm">{alert.title}</h4>
-                              <p className="text-xs text-gray-600">{formatAlertMessage(alert.message)}</p>
+                      }).slice(0,5).map((alert: SystemAlert) => {
+                        const fm = formatAlertMessage(alert.message);
+                        const isEquipmentRelated = /equipment|needs/i.test(String(alert.title || '') + ' ' + String(alert.message || ''));
+                        // Don't append inline time if the message already contains date/time text (e.g., booking 'from ... to ...')
+                        const hasDateLike = /\d{1,2}\/\d{1,2}\/\d{4}/.test(fm) || /\bfrom\b[\s\S]*\bto\b/i.test(fm) || /\bat\s*\d{1,2}:\d{2}/i.test(fm);
+                        const shouldAppendTime = isEquipmentRelated && !hasDateLike;
+                        const fmWithTime = shouldAppendTime ? `${fm} at ${formatDateTime(alert.createdAt)}` : fm;
+                        return (
+                          <div key={alert.id} className="bg-white rounded-md p-3 border border-gray-200 hover:border-gray-300 transition-colors duration-150">
+                            <div className="flex items-start justify-between">
+                              <div>
+                                <h4 className="font-medium text-gray-900 text-sm">{alert.title}</h4>
+                                <p className="text-xs text-gray-600">{fmWithTime}</p>
+                              </div>
+                              <div className="text-xs text-gray-500">{formatDateTime(alert.createdAt)}</div>
                             </div>
-                            <div className="text-xs text-gray-500">{formatDateTime(alert.createdAt)}</div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   ) : (
                     <div className="space-y-2">
                       {alerts?.filter(a => {
                         const t = (a.title || '').toLowerCase();
                         const m = (a.message || '').toLowerCase();
-                        return t.includes('user') || m.includes('banned') || m.includes('unbanned') || t.includes('suspension');
-                      }).slice(0,5).map((alert: SystemAlert) => (
-                        <div key={alert.id} className="bg-white rounded-md p-3 border border-gray-200 hover:border-gray-300 transition-colors duration-150">
-                          <div className="flex items-start justify-between">
-                            <div>
-                              <h4 className="font-medium text-gray-900 text-sm">{alert.title}</h4>
-                              <p className="text-xs text-gray-600">{formatAlertMessage(alert.message)}</p>
+                        // Include user management events and equipment/needs submission alerts
+                        return t.includes('user') || m.includes('banned') || m.includes('unbanned') || t.includes('suspension') ||
+                               t.includes('equipment') || t.includes('needs') || m.includes('equipment') || m.includes('needs');
+                      }).slice(0,5).map((alert: SystemAlert) => {
+                        const fm = formatAlertMessage(alert.message);
+                        const isEquipmentRelated = /equipment|needs/i.test(String(alert.title || '') + ' ' + String(alert.message || ''));
+                        // Don't append inline time if the message already contains date/time text (e.g., booking 'from ... to ...')
+                        const hasDateLike = /\d{1,2}\/\d{1,2}\/\d{4}/.test(fm) || /\bfrom\b[\s\S]*\bto\b/i.test(fm) || /\bat\s*\d{1,2}:\d{2}/i.test(fm);
+                        const shouldAppendTime = isEquipmentRelated && !hasDateLike;
+                        const fmWithTime = shouldAppendTime ? `${fm} at ${formatDateTime(alert.createdAt)}` : fm;
+                        return (
+                          <div key={alert.id} className="bg-white rounded-md p-3 border border-gray-200 hover:border-gray-300 transition-colors duration-150">
+                            <div className="flex items-start justify-between">
+                              <div>
+                                <h4 className="font-medium text-gray-900 text-sm">{alert.title}</h4>
+                                <p className="text-xs text-gray-600">{fmWithTime}</p>
+                              </div>
+                              <div className="text-xs text-gray-500">{formatDateTime(alert.createdAt)}</div>
                             </div>
-                            <div className="text-xs text-gray-500">{formatDateTime(alert.createdAt)}</div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
 
@@ -2473,133 +3066,216 @@ export default function AdminDashboard() {
 
                 {activities && activities.length > 0 ? (
                   <div className="space-y-2">
-                    {activities.slice(0, 5).map((activity) => (
-                      <div className="bg-white rounded-md p-3 border border-gray-200">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex items-center gap-3 flex-1">
-                            <div className="bg-pink-100 p-2 rounded-lg flex-shrink-0">
-                              <Activity className="h-5 w-5 text-pink-600" />
-                            </div>
-                            <div className="flex-1 pr-4">
-                              <p className="font-medium text-sm text-gray-900">{activity.action}</p>
-                              {(() => {
-                                // build a cleaned sub-line: prefer booking lookups and actor email, strip raw ids
-                                let actorEmail = '';
-                                try {
-                                  if (activity.userId) actorEmail = getUserEmail(activity.userId);
-                                  if (!actorEmail) {
-                                    const d = String(activity.details || '');
-                                    const m = d.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
-                                    if (m) actorEmail = m[1];
-                                  }
-                                  if (!actorEmail) {
-                                    const d = String(activity.details || '');
-                                    const adminIdMatch = d.match(/Admin\s+([0-9a-f-]{8,36})/i);
-                                    if (adminIdMatch) {
-                                      const id = adminIdMatch[1];
-                                      const found = usersMap.get(id) || (usersData || []).find((u: User) => String(u.id) === String(id));
-                                      actorEmail = found?.email || '';
-                                    }
-                                  }
-                                } catch (e) { actorEmail = '' }
-                                if (!actorEmail) actorEmail = user?.email || '';
+                    {activities.slice(0, 5).map((a: any, idx: number) => (
+                      (() => {
+                        // Use the same rich formatting logic as the System Activity list so the preview matches
+                        // Resolve actor email
+                        let actorEmail = '';
+                        try {
+                          if (a.userId) actorEmail = getUserEmail(a.userId);
+                          if (!actorEmail) {
+                            const details = String(a.details || a.message || '');
+                            const match = details.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+                            if (match) actorEmail = match[1];
+                          }
+                          if (!actorEmail) {
+                            const details = String(a.details || a.message || '');
+                            const adminIdMatch = details.match(/Admin\s+([0-9a-f-]{8,36})/i);
+                            if (adminIdMatch) {
+                              const id = adminIdMatch[1];
+                              const found = usersMap.get(id) || (usersData || []).find((u: User) => String(u.id) === String(id));
+                              actorEmail = found?.email || '';
+                            }
+                          }
+                        } catch (e) { actorEmail = '' }
+                        if (!actorEmail) actorEmail = user?.email || '';
 
-                                const raw = activity.details || activity.action || '';
-                                let formatted = formatAlertMessage(raw);
-                                try { formatted = String(formatted).replace(/^Admin\b[:\s,-]*/i, ''); } catch (e) {}
-                                if (actorEmail) {
-                                  try {
-                                    const esc = String(actorEmail).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                                    formatted = String(formatted).replace(new RegExp(esc, 'gi'), '').replace(/\s{2,}/g, ' ').trim();
-                                  } catch (e) {}
+                        // Title normalization
+                        let visibleTitle = String(a.title || a.action || '');
+                        try {
+                          if (/equipment\s*needs?/i.test(visibleTitle) || /equipment needs submitted/i.test(visibleTitle)) {
+                            visibleTitle = 'Equipment or Needs Request';
+                          }
+                        } catch (e) {}
+
+                        let formatted = formatAlertMessage(a.message || a.details || '');
+                        // If appendedEmail present, prefer using it as the target when appropriate
+
+                        // Reuse the same 'Needs:' JSON parsing and 'Requested equipment' mapping as in the main system activity
+                        try {
+                          const needsMatch = (a.message || a.details || '').toString().match(/Needs:\s*(\{[\s\S]*\})/i);
+                          if (needsMatch && needsMatch[1]) {
+                            let needsObj: any = null;
+                            const jsonText = needsMatch[1];
+                            try { needsObj = JSON.parse(jsonText); } catch (e) { try { needsObj = JSON.parse(jsonText.replace(/'/g, '"')); } catch (e) { needsObj = null; } }
+                            if (needsObj && Array.isArray(needsObj.items)) {
+                              let othersTextFromItems = '';
+                              const mappedItems = needsObj.items.map((s: string) => {
+                                const raw = String(s).replace(/_/g, ' ').trim();
+                                const lower = raw.toLowerCase();
+                                if (lower.includes('others')) {
+                                  const trailing = raw.replace(/.*?others[:\s-]*/i, '').trim();
+                                  if (trailing && !othersTextFromItems) othersTextFromItems = trailing;
+                                  return null;
                                 }
+                                if (lower === 'whiteboard') return 'Whiteboard & Markers';
+                                if (lower === 'projector') return 'Projector';
+                                if (lower === 'extension cord' || lower === 'extension_cord') return 'Extension Cord';
+                                if (lower === 'hdmi') return 'HDMI Cable';
+                                if (lower === 'extra chairs' || lower === 'extra_chairs') return 'Extra Chairs';
+                                return raw;
+                              }).filter(Boolean) as string[];
+                              for (let i = mappedItems.length - 1; i >= 0; i--) {
+                                if (/others/i.test(String(mappedItems[i]))) mappedItems.splice(i, 1);
+                                else mappedItems[i] = String(mappedItems[i]).replace(/[.,;]+$/g, '').trim();
+                              }
+                              const others = needsObj.others ? String(needsObj.others).trim() : '';
+                              const othersText = othersTextFromItems || others || '';
+                              const joinWithAnd = (arr: string[]) => { if (!arr || arr.length === 0) return ''; if (arr.length === 1) return arr[0]; if (arr.length === 2) return `${arr[0]} and ${arr[1]}`; return `${arr.slice(0, -1).join(', ')} and ${arr.slice(-1)[0]}`; };
+                              const equipmentText = joinWithAnd(mappedItems);
+                              const buildWithOthers = (items: string[]) => {
+                                if (!items || items.length === 0) return 'others';
+                                if (items.length === 1) return `${items[0]} and others`;
+                                const head = items.slice(0, -1).join(', ');
+                                const last = items[items.length - 1];
+                                return `${head}, ${last} and others`;
+                              };
+                              const replacement = othersText
+                                ? (mappedItems.length ? `Needs: ${buildWithOthers(mappedItems)}` : `Needs: others`)
+                                : `Needs: ${equipmentText}`;
+                              try { formatted = String(formatted).replace(/Needs:\s*\{[\s\S]*\}\s*/i, replacement).trim(); } catch (e) {}
+                            }
+                          }
+                        } catch (e) { /* ignore */ }
 
-                                let targetEmail = '';
-                                try {
-                                  const m = (activity.details || '').toString().match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
-                                  if (m) targetEmail = m[1];
-                                } catch (e) { /* ignore */ }
+                        try {
+                          const eqMatch = (a.message || a.details || '').toString().match(/Requested equipment:\s*([^\[]+)/i);
+                          if (eqMatch && eqMatch[1]) {
+                            const rawList = String(eqMatch[1]).trim();
+                            const parts = rawList.split(/[,;]+/).map(s => String(s).trim()).filter(Boolean);
+                            let othersText = '';
+                            const mapped = parts.map((it) => {
+                              const raw = String(it).trim();
+                              const lower = raw.toLowerCase();
+                              if (lower.includes('others')) {
+                                const trailing = raw.replace(/.*?others[:\s-]*/i, '').trim();
+                                if (trailing && !othersText) othersText = trailing;
+                                return null;
+                              }
+                              if (lower === 'whiteboard') return 'Whiteboard & Markers';
+                              if (lower === 'projector') return 'Projector';
+                              if (lower === 'extension cord' || lower === 'extension_cord') return 'Extension Cord';
+                              if (lower === 'hdmi') return 'HDMI Cable';
+                              if (lower === 'extra chairs' || lower === 'extra_chairs') return 'Extra Chairs';
+                              return raw;
+                            }).filter(Boolean) as string[];
+                            for (let i = mapped.length - 1; i >= 0; i--) {
+                              if (/others/i.test(String(mapped[i]))) mapped.splice(i, 1);
+                              else mapped[i] = String(mapped[i]).replace(/[.,;]+$/g, '').trim();
+                            }
+                            const extrasMatch = rawList.match(/Others?:\s*(.*)$/i);
+                            if (!othersText && extrasMatch && extrasMatch[1]) othersText = String(extrasMatch[1]).trim();
+                            const equipmentItems = mapped;
+                            const joinWithAnd = (arr: string[]) => { if (!arr || arr.length === 0) return ''; if (arr.length === 1) return arr[0]; if (arr.length === 2) return `${arr[0]} and ${arr[1]}`; return `${arr.slice(0, -1).join(', ')} and ${arr.slice(-1)[0]}`; };
+                            const buildWithOthers = (items: string[]) => { if (!items || items.length === 0) return 'others'; if (items.length === 1) return `${items[0]} and others`; const head = items.slice(0, -1).join(', '); const last = items[items.length - 1]; return `${head}, ${last} and others`; };
+                            let replacement = '';
+                            if (othersText) {
+                              if (equipmentItems.length === 0) {
+                                replacement = `requested equipment: others`;
+                              } else {
+                                replacement = `requested equipment: ${buildWithOthers(equipmentItems)}`;
+                              }
+                            } else {
+                              replacement = `requested equipment: ${joinWithAnd(equipmentItems)}`;
+                            }
+                            try { formatted = String(formatted).replace(/Requested equipment:\s*([^\[]+)/i, replacement).trim(); } catch (e) {}
+                          }
+                        } catch (e) { /* ignore */ }
 
-                                let extractedBookingId: string | null = null;
-                                try {
-                                  const bidMatch = (activity.details || '').toString().match(/booking\s+([0-9a-zA-Z-]{6,64})/i);
-                                  if (bidMatch) extractedBookingId = bidMatch[1];
-                                } catch (e) { extractedBookingId = null; }
+                        try {
+                          formatted = String(formatted).replace(/,\s*(and\s+)?others(\b)/i, ' and others$2');
+                          formatted = String(formatted).replace(/,?\s*Others?:\s*[^,\]]+/i, '').replace(/\s{2,}/g, ' ').trim();
+                          formatted = formatted.replace(/,\s*and\s+others/i, ' and others');
+                        } catch (e) {}
 
-                                let lookedUpBooking: FacilityBooking | undefined;
-                                if (extractedBookingId) {
-                                  try { lookedUpBooking = allBookings.find(b => String(b.id) === String(extractedBookingId)); } catch (e) { lookedUpBooking = undefined; }
-                                }
+                        try { formatted = formatted.replace(/^Admin\b[:\s,-]*/i, ''); } catch (e) {}
+                        if (actorEmail) {
+                          try {
+                            const esc = String(actorEmail).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                            formatted = String(formatted).replace(new RegExp(esc, 'gi'), '').replace(/\s{2,}/g, ' ').trim();
+                          } catch (e) {}
+                        }
 
-                                const title = String((activity.action || '')).toLowerCase();
-                                const isRequest = title.includes('request') || title.includes('requested') || title.includes('new booking');
-                                const isApproved = title.includes('approve') || title.includes('approved');
-                                const isDenied = title.includes('deny') || title.includes('denied');
-                                const isCancelled = title.includes('cancel');
-                                const isArrival = title.includes('arrival') || title.includes('confirmed');
+                        let targetEmail = '';
+                        try {
+                          const m = (a.message || a.details || '').toString().match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+                          if (m) targetEmail = m[1];
+                        } catch (e) { /* ignore */ }
 
-                                let subLine = formatted;
-                                try {
-                                  if (isRequest) {
-                                    if (targetEmail && !/^\s*\S+@/.test(subLine)) subLine = `${targetEmail} ${subLine}`.trim();
-                                  } else if (isApproved || isDenied || isCancelled || isArrival) {
-                                    if (isArrival) {
-                                      if (lookedUpBooking) {
-                                        const who = getUserEmail(lookedUpBooking.userId);
-                                        const where = getFacilityName(lookedUpBooking.facilityId);
-                                        const when = `${formatDateTime(lookedUpBooking.startTime)} to ${formatDateTime(lookedUpBooking.endTime)}`;
-                                        subLine = `${actorEmail} confirmed arrival for ${who} at ${where} from ${when}`;
-                                      } else if (targetEmail) {
-                                        subLine = `${actorEmail} confirmed arrival for ${targetEmail}`;
-                                      } else {
-                                        subLine = `${actorEmail} confirmed arrival`;
-                                      }
-                                    } else if (isApproved) {
-                                      if (lookedUpBooking) {
-                                        const who = getUserEmail(lookedUpBooking.userId);
-                                        const where = getFacilityName(lookedUpBooking.facilityId);
-                                        const when = `${formatDateTime(lookedUpBooking.startTime)} to ${formatDateTime(lookedUpBooking.endTime)}`;
-                                        subLine = `${actorEmail} approved booking for ${who} at ${where} from ${when}`;
-                                      } else if (targetEmail) {
-                                          const clean = String(formatted).replace(/\bby\s+[\w.-]+@[\w.-]+/i, '').trim();
-                                          if (clean && /booking|approved|approved booking|approved for/i.test(clean)) {
-                                            subLine = `${actorEmail} ${clean}`.trim();
-                                          } else {
-                                            subLine = `${actorEmail} approved booking for ${targetEmail}${clean ? ` — ${clean}` : ''}`.trim();
-                                          }
-                                        } else {
-                                          subLine = `${actorEmail} ${formatted}`.trim();
-                                        }
-                                    } else if (isDenied || isCancelled) {
-                                      if (lookedUpBooking) {
-                                        const who = getUserEmail(lookedUpBooking.userId);
-                                        const where = getFacilityName(lookedUpBooking.facilityId);
-                                        subLine = `${actorEmail} ${isCancelled ? 'cancelled' : 'denied'} booking for ${who} at ${where}`;
-                                      } else if (targetEmail) {
-                                          const clean = String(formatted).replace(/\bby\s+[\w.-]+@[\w.-]+/i, '').trim();
-                                          if (clean && /booking|cancelled|denied|cancel/i.test(clean)) {
-                                            subLine = `${actorEmail} ${clean}`.trim();
-                                          } else {
-                                            subLine = `${actorEmail} ${isCancelled ? 'cancelled' : 'denied'} booking for ${targetEmail}${clean ? ` — ${clean}` : ''}`.trim();
-                                          }
-                                        } else {
-                                          subLine = `${actorEmail} ${formatted}`.trim();
-                                        }
-                                    }
-                                  } else {
-                                    if (actorEmail && !/^\s*\S+@/.test(subLine)) subLine = `${actorEmail} ${subLine}`.trim();
-                                  }
-                                } catch (e) {}
+                        let extractedBookingId: string | null = null;
+                        try {
+                          const bidMatch = (a.message || a.details || '').toString().match(/booking\s+([0-9a-zA-Z-]{6,64})/i);
+                          if (bidMatch) extractedBookingId = bidMatch[1];
+                        } catch (e) { extractedBookingId = null; }
 
-                                return <p className="text-xs text-gray-600 mt-1 truncate">{subLine}</p>;
-                              })()}
+                        let lookedUpBooking: FacilityBooking | undefined;
+                        if (extractedBookingId) {
+                          try { lookedUpBooking = allBookings.find(b => String(b.id) === String(extractedBookingId)); } catch (e) { lookedUpBooking = undefined; }
+                        }
+
+                        const title = String((a.title || a.action || '')).toLowerCase();
+                        const isRequest = title.includes('request') || title.includes('requested') || title.includes('new booking');
+                        const isApproved = title.includes('approve') || title.includes('approved');
+                        const isDenied = title.includes('deny') || title.includes('denied');
+                        const isCancelled = title.includes('cancel');
+                        const isArrival = title.includes('arrival') || title.includes('confirmed');
+
+                        let subLine = formatted;
+                        try {
+                          if (isRequest) {
+                            if (targetEmail && !/^\s*\S+@/.test(subLine)) subLine = `${targetEmail} ${subLine}`.trim();
+                          } else if (isApproved || isDenied || isCancelled || isArrival) {
+                            if (isArrival && lookedUpBooking) {
+                              const who = getUserEmail(lookedUpBooking.userId);
+                              const where = getFacilityName(lookedUpBooking.facilityId);
+                              const when = `${formatDateTime(lookedUpBooking.startTime)} to ${formatDateTime(lookedUpBooking.endTime)}`;
+                              subLine = `${actorEmail} confirmed arrival for ${who} at ${where} from ${when}`;
+                            } else if (actorEmail && !subLine.toLowerCase().startsWith(actorEmail.toLowerCase())) {
+                              subLine = `${actorEmail} ${subLine}`.trim();
+                            }
+                          } else {
+                            if (actorEmail && !/^\s*\S+@/.test(subLine)) {
+                              subLine = `${actorEmail} ${subLine}`.trim();
+                            }
+                          }
+                        } catch (e) {}
+
+                        try {
+                          const actionLower = String((a.title || a.action || '')).toLowerCase();
+                          const isEquipmentAction = /equipment|needs/i.test(actionLower) || /needs request/i.test(visibleTitle.toLowerCase());
+                          const hasDateLike = /\d{1,2}\/\d{1,2}\/\d{4}|\d{1,2}:\d{2}:\d{2}/.test(subLine);
+                          if (isEquipmentAction && a.createdAt && !hasDateLike) {
+                            const t = formatDateTime(a.createdAt);
+                            if (t) subLine = `${subLine} at ${t}`.trim();
+                          }
+                        } catch (e) {}
+
+                        return (
+                          <div key={a.id || idx} className="bg-white rounded-md p-3 border border-gray-200">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex-1 pr-4">
+                                <p className="font-medium text-sm text-gray-900">{(visibleTitle || (a.title || a.action)) ?? 'System Event'}</p>
+                                <p className="text-xs text-gray-600 mt-1">{subLine}</p>
+                                <div className="mt-1 text-xs text-gray-400">{a.source ? `Source: ${a.source}` : ''}</div>
+                              </div>
+
+                              <div className="w-44 text-right text-xs text-gray-500 flex flex-col items-end gap-1">
+                                <div className="w-full">{a.createdAt ? formatDateTime(a.createdAt) : ''}</div>
+                              </div>
                             </div>
                           </div>
-                          <div className="w-44 text-right text-xs text-gray-500 flex flex-col items-end gap-1">
-                            <div className="w-full">{activity.createdAt ? formatDateTime(activity.createdAt) : ''}</div>
-                          </div>
-                        </div>
-                      </div>
+                        );
+                      })()
                     ))}
 
                     <div className="pt-4 border-t border-gray-200 flex justify-end">
@@ -2630,14 +3306,18 @@ export default function AdminDashboard() {
     <div className="min-h-screen bg-background">
       <Header />
       <div className="flex">
-        <div className="w-64 bg-card shadow-sm">
+        {/* Fixed sidebar (match pattern used in student dashboard) */}
+        <div className="w-64 h-[calc(100vh-4rem)] border-r bg-card fixed top-16 left-0 z-30 overflow-y-auto">
           <Sidebar
             items={sidebarItems}
             activeItem={selectedView}
             onItemClick={handleSidebarClick}
           />
         </div>
-        <div className="flex-1 p-8">{renderContent()}</div>
+        {/* Main content area offset by sidebar width; constrain width to avoid horizontal overflow */}
+        <div className="flex-1 ml-64 px-6 py-8 w-[calc(100%-16rem)]">
+          <div className="max-w-7xl mx-auto">{renderContent()}</div>
+        </div>
       </div>
       <BanUserModal
         isOpen={isBanUserModalOpen}

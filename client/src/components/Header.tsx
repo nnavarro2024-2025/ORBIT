@@ -17,6 +17,104 @@ import { useLocation } from "wouter";
 import ProfileModal from "./modals/ProfileModal";
 import { useState } from "react";
 
+// Helper: parse alert for equipment-related content in a safe, testable way
+function parseEquipmentAlert(alert: any) {
+  const raw = String(alert?.message || '');
+  let visibleTitle = String(alert?.title || '');
+  let titleRequesterEmail: string | null = null;
+
+  try {
+    const m = visibleTitle.match(/[—–-]\s*([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\s*$/);
+    if (m && m[1]) {
+      titleRequesterEmail = m[1];
+      visibleTitle = visibleTitle.replace(/[—–-]\s*[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\s*$/, '').trim();
+    }
+  } catch (e) {
+    titleRequesterEmail = null;
+  }
+
+  // Try JSON-style Needs: { ... }
+  let needsObj: any = null;
+  try {
+    const needsMatch = raw.match(/Needs:\s*(\{[\s\S]*\})/i);
+    if (needsMatch && needsMatch[1]) {
+      try { needsObj = JSON.parse(needsMatch[1]); } catch (e) { needsObj = null; }
+    }
+  } catch (e) { needsObj = null; }
+
+  // Legacy free-text
+  const eqMatch = raw.match(/Requested equipment:\s*([^\[]+)/i);
+  let equipmentList: string[] = [];
+  let othersText: string | null = null;
+
+  const mapToken = (rawToken: string) => {
+    const raw = String(rawToken || '').replace(/_/g, ' ').trim();
+    const lower = raw.toLowerCase();
+    if (lower.includes('others')) return null;
+    if (lower === 'whiteboard') return 'Whiteboard & Markers';
+    if (lower === 'projector') return 'Projector';
+    if (lower === 'extension cord' || lower === 'extension_cord') return 'Extension Cord';
+    if (lower === 'hdmi') return 'HDMI Cable';
+    if (lower === 'extra chairs' || lower === 'extra_chairs') return 'Extra Chairs';
+    return raw.replace(/[.,;]+$/g, '').trim();
+  };
+
+  if (needsObj && Array.isArray(needsObj.items)) {
+    // extract others text from items or from needsObj.others
+    let othersFromItems = '';
+    const mapped = needsObj.items.map((s: string) => {
+      const rawTok = String(s || '');
+      const lower = rawTok.toLowerCase();
+      if (lower.includes('others')) {
+        const trailing = rawTok.replace(/.*?others[:\s-]*/i, '').trim();
+        if (trailing && !othersFromItems) othersFromItems = trailing;
+        return null;
+      }
+      return mapToken(rawTok);
+    }).filter(Boolean) as string[];
+    equipmentList = mapped;
+    othersText = othersFromItems || (needsObj.others ? String(needsObj.others).trim() : null);
+  } else if (eqMatch && eqMatch[1]) {
+    const parts = eqMatch[1].split(/[,;]+/).map(s => String(s).trim()).filter(Boolean);
+    let othersFromParts = '';
+    const mapped = parts.map((p) => {
+      const lower = p.toLowerCase();
+      if (lower.includes('others')) {
+        const trailing = p.replace(/.*?others[:\s-]*/i, '').trim();
+        if (trailing && !othersFromParts) othersFromParts = trailing;
+        return null;
+      }
+      return mapToken(p);
+    }).filter(Boolean) as string[];
+    equipmentList = mapped;
+    // also capture 'Others: ...' trailing token if present
+    const extrasMatch = eqMatch[1].match(/Others?:\s*(.*)$/i);
+    othersText = othersFromParts || (extrasMatch && extrasMatch[1] ? String(extrasMatch[1]).trim() : null);
+  }
+
+  // If we have an others text or detected 'others' markers, show a placeholder in the inline list instead of raw 'Others: ...'
+  if (othersText && equipmentList.length >= 0) {
+    // Ensure we don't duplicate 'and others'
+    if (!equipmentList.includes('and others')) equipmentList.push('and others');
+  }
+
+  // Normalize visible title for equipment alerts
+  try {
+    if (/equipment\s*needs?/i.test(visibleTitle) || /equipment needs submitted/i.test(visibleTitle)) {
+      visibleTitle = 'Equipment or Needs Request';
+    }
+    // remove appended email from title if present
+    const m = visibleTitle.match(/[—–-]\s*([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\s*$/);
+    if (m && m[1]) visibleTitle = visibleTitle.replace(/[—–-]\s*[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\s*$/, '').trim();
+  } catch (e) {}
+
+  // Clean raw snippet for brief display: remove booking tags, remove raw Needs JSON and stray 'Others:' fragments
+  let cleaned = raw.replace(/\s*\[booking:[^\]]+\]/, '').replace(/Needs:\s*\{[\s\S]*\}\s*/i, '').replace(/,?\s*Others?:\s*[^,\]]+/i, '').trim();
+  cleaned = cleaned.replace(/\s{2,}/g, ' ').trim();
+
+  return { visibleTitle, titleRequesterEmail, equipmentList, othersText, cleaned };
+}
+
 export default function Header() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -186,26 +284,75 @@ export default function Header() {
                     .slice()
                     .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
                     .slice(0, 6)
-                    .map((alert: any) => (
-                      <div key={alert.id} className={`p-2 rounded-md ${alert.isRead ? 'opacity-70' : ''}`}>
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1">
-                            <div className="font-medium text-sm text-gray-900">{alert.title}</div>
-                            <div className="text-sm text-gray-700 leading-snug break-words">{alert.message}</div>
-                            <div className="text-[11px] text-gray-400 mt-1">{new Date(alert.createdAt).toLocaleString()}</div>
+                    .map((alert: any) => {
+                      const parsed = parseEquipmentAlert(alert);
+
+                      // Resolve actor email from message/details or fallback to current user
+                      let actorEmail = '';
+                      try {
+                        if (alert.userId) actorEmail = String(alert.userId);
+                        const m = String(alert.message || alert.details || '').match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+                        if (m && m[1]) actorEmail = m[1];
+                      } catch (e) { actorEmail = '' }
+                      if (!actorEmail) actorEmail = user?.email || '';
+
+                      // Try to find the target email (booking owner) different from actor
+                      let targetEmail = '';
+                      try {
+                        const emails = (String(alert.message || alert.details || '').match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || []);
+                        for (const e of emails) {
+                          if (actorEmail && e.toLowerCase() === actorEmail.toLowerCase()) continue;
+                          targetEmail = e; break;
+                        }
+                        if (!targetEmail && parsed.titleRequesterEmail) targetEmail = parsed.titleRequesterEmail;
+                      } catch (e) { targetEmail = parsed.titleRequesterEmail || ''; }
+
+                      // Build a single-line subLine for equipment alerts to match System Activity style
+                      let subLine = alert.isRead ? `READ: ${parsed.cleaned}` : parsed.cleaned;
+                      try {
+                        if (parsed.equipmentList && parsed.equipmentList.length > 0) {
+                          // Join items into a friendly text and ensure 'and others' grammar
+                          const items = parsed.equipmentList.slice();
+                          let itemsText = items.join(', ').replace(/,\s*and others/i, ' and others');
+                          // Determine verb from title (e.g., Prepared vs Requested)
+                          const verb = /prepared/i.test(String(alert.title || '')) ? 'Prepared' : (alert.title || 'requested');
+                          const whoPart = targetEmail ? ` for ${targetEmail}` : '';
+                          // Include the alert creation time inline in the notification subline
+                          const when = alert.createdAt ? new Date(alert.createdAt).toLocaleString() : '';
+                          subLine = `${actorEmail} ${verb} requested equipment${whoPart}. Needs: ${itemsText}`;
+                          if (when) subLine = `${subLine} at ${when}`;
+                        }
+                      } catch (e) {}
+
+                      // Keep timestamps in the notifications dropdown (they are appended inline above).
+
+                      return (
+                        <div key={alert.id} className={`p-2 rounded-md ${alert.isRead ? 'opacity-70' : ''}`}>
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1 pr-4">
+                              <div className="flex items-start justify-between">
+                                <div className="font-medium text-sm text-gray-900">{parsed.visibleTitle}</div>
+                                {!alert.isRead && (
+                                  <div className="ml-4">
+                                    <button
+                                      onClick={() => markAlertReadMutation.mutate(alert.id)}
+                                      className="inline-flex items-center gap-1 px-3 py-1 bg-blue-600 text-white text-xs font-medium rounded disabled:opacity-60"
+                                      disabled={pendingMarkIds.has(alert.id)}
+                                    >
+                                      {pendingMarkIds.has(alert.id) ? 'Marking...' : 'Mark Read'}
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="text-xs text-gray-600 mt-1 break-words">{subLine}</div>
+
+                              {/* 'View other' removed by user request */}
+                            </div>
                           </div>
-                          {!alert.isRead && (
-                            <button
-                              onClick={() => markAlertReadMutation.mutate(alert.id)}
-                              className="ml-2 inline-flex items-center gap-1 px-2 py-1 bg-blue-600 text-white text-xs font-medium rounded disabled:opacity-60"
-                              disabled={pendingMarkIds.has(alert.id)}
-                            >
-                              {pendingMarkIds.has(alert.id) ? 'Marking...' : 'Mark Read'}
-                            </button>
-                          )}
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
 
                   {alertsData.length > 6 && (
                     <div className="pt-2 border-t border-gray-100">

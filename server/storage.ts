@@ -76,6 +76,7 @@ export interface IStorage {
   markAlertAsRead(id: string): Promise<number>;
   markAlertAsReadForUser(id: string, userId: string): Promise<number>;
   markAlertAsReadForAdmin(id: string): Promise<number>;
+  updateSystemAlert(id: string, updates: Partial<SystemAlert>): Promise<SystemAlert | null>;
   
   // Activity logs
   createActivityLog(log: ActivityLog): Promise<ActivityLog>;
@@ -469,6 +470,11 @@ class DatabaseStorage implements IStorage {
     const result = await db.update(systemAlerts).set({ isRead: true }).where(and(eq(systemAlerts.id, id), sql`${systemAlerts.userId} IS NULL`));
     // @ts-ignore
     return (result && (result as any).rowCount) || 0;
+  }
+
+  async updateSystemAlert(id: string, updates: Partial<SystemAlert>): Promise<SystemAlert | null> {
+    const [updated] = await db.update(systemAlerts).set(updates as any).where(eq(systemAlerts.id, id)).returning();
+    return updated || null;
   }
 
   // Activity logs

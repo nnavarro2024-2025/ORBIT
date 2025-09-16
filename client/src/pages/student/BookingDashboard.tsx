@@ -7,8 +7,9 @@ import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
 import BookingModal from "@/components/modals/BookingModal";
 import EditBookingModal from "@/components/modals/EditBookingModal";
-import { Plus, Calendar, Home, ChevronLeft, ChevronRight, Eye, Users, MapPin, AlertTriangle, BarChart3, Settings, Clock, CheckCircle } from "lucide-react";
+import { Plus, Calendar, Home, Eye, Users, MapPin, AlertTriangle, BarChart3, Settings, Clock, CheckCircle } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { useLocation } from 'wouter';
 import {
   Dialog,
@@ -20,42 +21,41 @@ import {
 import { Button } from "@/components/ui/button";
 import { format } from 'date-fns';
 
-// Simple countdown component that shows mm:ss remaining until expiry
-function Countdown({ expiry, onExpire }: { expiry: string | Date; onExpire?: () => void }) {
-  const [now, setNow] = useState(new Date());
-
-  useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(t);
-  }, []);
-
-  const exp = new Date(expiry);
-  const diff = Math.max(0, Math.floor((exp.getTime() - now.getTime()) / 1000));
-  useEffect(() => {
-    if (diff <= 0 && onExpire) {
-      onExpire();
-    }
-  }, [diff]);
-
-  const minutes = Math.floor(diff / 60).toString().padStart(2, '0');
-  const seconds = (diff % 60).toString().padStart(2, '0');
-  return <span className="font-mono">{minutes}:{seconds}</span>;
-}
-
 export default function BookingDashboard() {
-  const { user } = useAuth(); // Keep auth hook for authentication check and role
-  const [, setLocation] = useLocation();
-  const { toast } = useToast();
+  const [showEditBookingModal, setShowEditBookingModal] = useState(false);
+  const [editingBooking, setEditingBooking] = useState<any>(null);
+  const [openOthers, setOpenOthers] = useState<Record<string, boolean>>({});
+  const [openPurpose, setOpenPurpose] = useState<Record<string, boolean>>({});
+  const [selectedView, setSelectedView] = useState("dashboard");
+  // Common hooks used throughout the dashboard
+  const { user } = useAuth();
   const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  // Booking modal state and defaults
   const [showBookingModal, setShowBookingModal] = useState(false);
   const [selectedFacilityForBooking, setSelectedFacilityForBooking] = useState<number | null>(null);
   const [initialStartForBooking, setInitialStartForBooking] = useState<Date | null>(null);
   const [initialEndForBooking, setInitialEndForBooking] = useState<Date | null>(null);
-  // Avoid 'declared but its value is never read' during iterative refactor
-  void initialStartForBooking; void initialEndForBooking;
-  const [showEditBookingModal, setShowEditBookingModal] = useState(false);
-  const [editingBooking, setEditingBooking] = useState<any>(null);
-  const [selectedView, setSelectedView] = useState("dashboard");
+
+  // Small Countdown component (lightweight replacement to satisfy usage)
+  function Countdown({ expiry, onExpire }: { expiry: string | Date | undefined; onExpire?: () => void }) {
+    useEffect(() => {
+      if (!expiry) return;
+      const ms = new Date(expiry).getTime() - Date.now();
+      if (ms <= 0) {
+        onExpire?.();
+        return;
+      }
+      const t = setTimeout(() => onExpire?.(), ms);
+      return () => clearTimeout(t);
+    }, [expiry]);
+    if (!expiry) return <span />;
+    const diff = Math.max(0, new Date(expiry).getTime() - Date.now());
+    const mins = Math.floor(diff / 60000);
+    const secs = Math.floor((diff % 60000) / 1000);
+    return <span>{mins}:{secs.toString().padStart(2, '0')}</span>;
+  }
   // Sidebar items (include admin-only links)
   let sidebarItems: any[] = [];
   try {
@@ -128,8 +128,7 @@ export default function BookingDashboard() {
     }
     setSelectedView(id);
   };
-  const [myBookingsPage, setMyBookingsPage] = useState(0);
-  const itemsPerPage = 10;
+  const itemsPerPage = 5; // show first 5 bookings in My Bookings (no pagination)
   // Activity logs inner tab state
   const [activityTab, setActivityTab] = useState<'booking' | 'notifications'>('booking');
   const [activityBookingPage, setActivityBookingPage] = useState(0);
@@ -167,15 +166,15 @@ export default function BookingDashboard() {
   // land on /booking#dashboard for easier navigation.
   useEffect(() => {
     try {
-      const flag = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('openNotificationsOnce') : null;
-      if (flag === '1') {
-        // Clear the flag immediately
+      // Support two one-time flags: notifications and activity booking
+      const notifyFlag = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('openNotificationsOnce') : null;
+      const activityBookingFlag = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('openActivityBookingOnce') : null;
+
+      if (notifyFlag === '1') {
         try { sessionStorage.removeItem('openNotificationsOnce'); } catch (_) {}
-        // Set the view to activity logs -> notifications
         setSelectedView('activity-logs');
         setActivityTab('notifications');
         setActivityNotificationsPage(0);
-        // Replace URL to main dashboard so reload lands there instead of re-triggering notifications
         try {
           const target = '/booking#dashboard';
           if (window.location.pathname + window.location.hash !== target) {
@@ -184,6 +183,23 @@ export default function BookingDashboard() {
         } catch (e) {
           // ignore
         }
+        return;
+      }
+
+      if (activityBookingFlag === '1') {
+        try { sessionStorage.removeItem('openActivityBookingOnce'); } catch (_) {}
+        setSelectedView('activity-logs');
+        setActivityTab('booking');
+        setActivityBookingPage(0);
+        try {
+          const target = '/booking#dashboard';
+          if (window.location.pathname + window.location.hash !== target) {
+            window.history.replaceState({}, '', target);
+          }
+        } catch (e) {
+          // ignore
+        }
+        return;
       }
     } catch (e) {
       // ignore
@@ -444,7 +460,7 @@ export default function BookingDashboard() {
   });
 
   // React to top-level route '/notifications' so header links open this tab directly
-  const [location] = useLocation();
+  const [location, setLocation] = useLocation();
   useEffect(() => {
     try {
       if (location && location.startsWith('/notifications')) {
@@ -765,8 +781,9 @@ export default function BookingDashboard() {
               ) : (
                 <div className="space-y-4">
                   {userBookings
-                    .slice(myBookingsPage * itemsPerPage, (myBookingsPage + 1) * itemsPerPage)
-                    .map((booking) => {
+                                  // Recent Booking (compact preview) — show latest 5 bookings only, no pagination
+                                  .slice(0, 5)
+                        .map((booking) => {
                     const status = getBookingStatus(booking);
                     const statusColors = {
                       'Active': 'bg-pink-100 text-pink-800 border-pink-200',
@@ -801,7 +818,7 @@ export default function BookingDashboard() {
                           </span>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
                           <div className="bg-gray-50 rounded-lg p-4">
                             <p className="text-sm font-medium text-gray-600 mb-1">Date & Time</p>
                             <p className="font-semibold text-gray-900">
@@ -827,41 +844,118 @@ export default function BookingDashboard() {
 
                           <div className="bg-gray-50 rounded-lg p-4">
                             <p className="text-sm font-medium text-gray-600 mb-1">Purpose</p>
-                            {(booking.purpose || '').length > 30 ? (
-                              <TooltipProvider>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <div className="flex items-center gap-2 cursor-help">
-                                      <Eye className="h-4 w-4 text-pink-600 flex-shrink-0" />
-                                      <p className="text-gray-900 text-sm font-medium">
-                                        View Purpose
-                                      </p>
+                              {(booking.purpose || '').length > 30 ? (
+                                <TooltipProvider>
+                                  <Tooltip>
+                                    <Popover>
+                                      <TooltipTrigger asChild>
+                                        <PopoverTrigger asChild>
+                                          <div className="flex items-center gap-2 cursor-help">
+                                            <Eye className="h-4 w-4 text-pink-600 flex-shrink-0" />
+                                            <p className="text-gray-900 text-sm">
+                                              <span className="font-medium">Purpose</span>
+                                            </p>
+                                          </div>
+                                        </PopoverTrigger>
+                                      </TooltipTrigger>
+                                      <TooltipContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
+                                        <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                          <p className="font-medium text-sm text-gray-800">Full Purpose</p>
+                                        </div>
+                                        <div className="p-3">
+                                          <p className="text-sm text-gray-900 leading-5 break-words font-normal">{booking.purpose || 'No purpose specified'}</p>
+                                        </div>
+                                      </TooltipContent>
+                                      <PopoverContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50 origin-top-left">
+                                        <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                          <p className="font-medium text-sm text-gray-800">Full Purpose</p>
+                                        </div>
+                                        <div className="p-3">
+                                          <p className="text-sm text-gray-900 leading-5 break-words font-normal">{booking.purpose || 'No purpose specified'}</p>
+                                        </div>
+                                      </PopoverContent>
+                                    </Popover>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              ) : (
+                                <p className="text-gray-900 text-sm">
+                                  <span className="font-medium">Purpose:&nbsp;</span>
+                                  <span className="font-normal">{booking.purpose || 'No purpose specified'}</span>
+                                </p>
+                              )}
+                          </div>
+
+                          <div className="bg-gray-50 rounded-lg p-4">
+                            {/* Equipment / Needs box as its own column */}
+                              {booking.equipment && (function() {
+                                const eq = booking.equipment;
+                                const id = String(booking.id || Math.random());
+                                const isOpen = !!openOthers[id];
+                                if ((!Array.isArray(eq.items) || eq.items.length === 0) && !(eq.others && String(eq.others).trim().length > 0)) return null;
+                                return (
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <div className="text-xs font-medium text-gray-700">Equipment or Needs</div>
+                                      {eq.others && String(eq.others).trim().length > 0 && (
+                                        <Popover open={isOpen} onOpenChange={(v) => setOpenOthers(prev => ({ ...prev, [id]: v }))}>
+                                          <TooltipProvider>
+                                            <Tooltip>
+                                              <TooltipTrigger asChild>
+                                                <PopoverTrigger asChild>
+                                                  <button
+                                                    onClick={() => setOpenOthers(prev => ({ ...prev, [id]: !prev[id] }))}
+                                                    className="flex items-center gap-1 text-[11px] text-gray-700"
+                                                    aria-expanded={isOpen}
+                                                  >
+                                                    <Eye className="h-3 w-3 text-pink-600" />
+                                                    <span className="text-gray-700">View other</span>
+                                                  </button>
+                                                </PopoverTrigger>
+                                              </TooltipTrigger>
+
+                                              <TooltipContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
+                                                <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                                  <p className="font-semibold text-sm text-gray-800">Other equipment</p>
+                                                </div>
+                                                <div className="p-3">
+                                                  <p className="whitespace-pre-wrap text-sm text-gray-900 leading-6 break-words font-normal">{String(eq.others).trim()}</p>
+                                                </div>
+                                              </TooltipContent>
+                                            </Tooltip>
+                                          </TooltipProvider>
+
+                                          <PopoverContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50 origin-top-left">
+                                            <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                              <p className="font-semibold text-sm text-gray-800">Other equipment</p>
+                                            </div>
+                                            <div className="p-3">
+                                              <p className="text-sm text-gray-900 leading-5 break-words font-normal">{String(eq.others).trim()}</p>
+                                            </div>
+                                          </PopoverContent>
+                                        </Popover>
+                                      )}
                                     </div>
-                                  </TooltipTrigger>
-                                  <TooltipContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
-                                    <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                                      <p className="font-semibold text-sm text-gray-800">Full Purpose</p>
+
+                                    <div className="flex items-center gap-2 flex-wrap mt-2">
+                                      {/* Render pre-made items as chips */}
+                                      {Array.isArray(eq.items) && eq.items.length > 0 && eq.items.map((it: string, idx: number) => (
+                                        <span key={`eq-${id}-${idx}`} className="text-xs bg-gray-100 text-gray-800 px-2 py-1 rounded-full border border-gray-200">{it}</span>
+                                      ))}
                                     </div>
-                                    <div className="p-4 max-h-48 overflow-y-auto">
-                                      <p className="whitespace-pre-wrap text-sm text-gray-900 leading-6 break-words">
-                                        {booking.purpose || 'No purpose specified'}
-                                      </p>
-                                    </div>
-                                  </TooltipContent>
-                                </Tooltip>
-                              </TooltipProvider>
-                            ) : (
-                              <p className="text-gray-900 text-sm font-medium">
-                                {booking.purpose || 'No purpose specified'}
-                              </p>
-                            )}
+                                  </div>
+                                );
+                              })()}
                           </div>
 
                           <div className="bg-gray-50 rounded-lg p-4">
                             <p className="text-sm font-medium text-gray-600 mb-1">Group Size</p>
                             <p className="font-semibold text-gray-900">
-                                {booking.participants != null ? booking.participants : 1} participant{booking.participants != null && booking.participants > 1 ? 's' : ''}
-                              </p>
+                              <span className="inline-flex items-center gap-2 px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 text-sm font-medium">
+                                <svg className="h-3 w-3 text-gray-600" viewBox="0 0 8 8" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><circle cx="4" cy="4" r="4" /></svg>
+                                <span>{booking.participants != null ? booking.participants : 1}</span>
+                                <span className="text-xs text-gray-600">participant{booking.participants != null && booking.participants > 1 ? 's' : ''}</span>
+                              </span>
+                            </p>
                             <p className="text-sm text-gray-600">
                               {(() => {
                                 const facility = facilities.find(f => f.id === booking.facilityId);
@@ -930,29 +1024,27 @@ export default function BookingDashboard() {
                     );
                   })}
 
-                  {/* Enhanced Pagination */}
+                  {/* Show 'View all' which redirects to Activity Logs -> Booking (no pagination) */}
                   {userBookings.length > itemsPerPage && (
-                    <div className="flex items-center justify-between pt-6 border-t border-gray-200">
-                      <p className="text-sm text-gray-600">
-                        Showing {myBookingsPage * itemsPerPage + 1} to {Math.min((myBookingsPage + 1) * itemsPerPage, userBookings.length)} of {userBookings.length} bookings
-                      </p>
-                      <div className="flex items-center gap-2">
+                    <div className="pt-6 border-t border-gray-200">
+                      <div className="flex items-center justify-end">
                         <button
-                          onClick={() => setMyBookingsPage(prev => Math.max(prev - 1, 0))}
-                          disabled={myBookingsPage === 0}
-                          className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                          onClick={() => {
+                            try {
+                              // Navigate to Activity Logs -> Booking tab
+                              try { sessionStorage.setItem('openActivityBookingOnce', '1'); } catch (_) {}
+                              window.location.hash = 'activity-logs:booking';
+                              setSelectedView('activity-logs');
+                              setActivityTab('booking');
+                            } catch (e) {
+                              // fallback: set state
+                              setSelectedView('activity-logs');
+                              setActivityTab('booking');
+                            }
+                          }}
+                          className="text-pink-600 hover:text-pink-800 font-medium text-sm transition-colors duration-200"
                         >
-                          <ChevronLeft className="h-4 w-4" />
-                        </button>
-                        <span className="px-3 py-1 text-sm font-medium">
-                          {myBookingsPage + 1} of {Math.ceil(userBookings.length / itemsPerPage)}
-                        </span>
-                        <button
-                          onClick={() => setMyBookingsPage(prev => ((prev + 1) * itemsPerPage < userBookings.length ? prev + 1 : prev))}
-                          disabled={(myBookingsPage + 1) * itemsPerPage >= userBookings.length}
-                          className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
-                        >
-                          <ChevronRight className="h-4 w-4" />
+                          View All →
                         </button>
                       </div>
                     </div>
@@ -991,17 +1083,152 @@ export default function BookingDashboard() {
                     <p className="text-gray-600 text-sm">No booking history</p>
                   </div>
                 ) : (
-                  userBookings.slice(activityBookingPage * itemsPerPage, (activityBookingPage + 1) * itemsPerPage).map((booking: any) => (
-                    <div key={booking.id} className="bg-gray-50 rounded-lg p-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="font-medium text-sm text-gray-900">{getFacilityDisplay(booking.facilityId)}</div>
-                          <div className="text-xs text-gray-600">{format(new Date(booking.startTime), 'EEE, MMM d • hh:mm a')} - {format(new Date(booking.endTime), 'hh:mm a')}</div>
+                  <div className="space-y-2">
+                    {userBookings
+                      .slice(activityBookingPage * 10, (activityBookingPage + 1) * 10)
+                      .map((booking) => {
+                      const id = String(booking.id || Math.random());
+                      const eq = booking.equipment || {};
+                      const items = Array.isArray(eq.items) ? eq.items : [];
+                      const hasOthers = eq.others && String(eq.others).trim().length > 0;
+                      return (
+                      <div key={booking.id} className="grid grid-cols-4 gap-4 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors duration-200 items-start">
+                        {/* Column 1: facility, date/time, participants, purpose */}
+                        <div className="col-span-1 min-w-0">
+                          <div className="flex items-start gap-3">
+                            <div className="bg-white p-1.5 rounded-lg shadow-sm flex-shrink-0">
+                              <Calendar className="h-4 w-4 text-gray-600" />
+                            </div>
+                            <div className="min-w-0">
+                              <h4 className="font-medium text-gray-900 text-sm truncate">{getFacilityDisplay(booking.facilityId)}</h4>
+                              <p className="text-xs text-gray-600 truncate">{format(new Date(booking.startTime), 'EEE, MMM d')} • {format(new Date(booking.startTime), 'hh:mm a')}</p>
+                              {booking.participants && (
+                                <div className="mt-1">
+                                  <span className="inline-flex items-center gap-2 px-2 py-0.5 rounded-full bg-gray-100 text-gray-800 text-xs font-medium">
+                                    <svg className="h-3 w-3 text-gray-600" viewBox="0 0 8 8" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><circle cx="4" cy="4" r="4" /></svg>
+                                    <span>{booking.participants}</span>
+                                    <span className="text-[10px]">participant{booking.participants > 1 ? 's' : ''}</span>
+                                  </span>
+                                </div>
+                              )}
+                                <div className="text-[11px] text-gray-800 mt-2">
+                                  {(booking.purpose || '').length > 30 ? (
+                                    <TooltipProvider>
+                                      <Tooltip>
+                                        <Popover>
+                                          <TooltipTrigger asChild>
+                                            <PopoverTrigger asChild>
+                                                  <button className="flex items-center gap-1 text-[11px] text-gray-700" aria-expanded={false}>
+                                                    <Eye className="h-3 w-3 text-pink-600" />
+                                                    <span className="text-gray-700">View purpose</span>
+                                                  </button>
+                                            </PopoverTrigger>
+                                          </TooltipTrigger>
+                                          <TooltipContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
+                                            <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                              <p className="font-medium text-sm text-gray-800">Full Purpose</p>
+                                            </div>
+                                            <div className="p-4 max-h-48 overflow-y-auto">
+                                              <p className="whitespace-pre-wrap text-sm text-gray-900 leading-6 break-words font-normal">{booking.purpose}</p>
+                                            </div>
+                                          </TooltipContent>
+                                          <PopoverContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50 origin-top-left">
+                                            <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                              <p className="font-medium text-sm text-gray-800">Full Purpose</p>
+                                            </div>
+                                            <div className="p-3">
+                                              <p className="text-sm text-gray-900 leading-5 break-words font-normal">{booking.purpose || 'No purpose specified'}</p>
+                                            </div>
+                                          </PopoverContent>
+                                        </Popover>
+                                      </Tooltip>
+                                    </TooltipProvider>
+                                  ) : (
+                                    <p className="text-[11px] text-gray-800"><span className="font-medium">Purpose:&nbsp;</span><span className="font-normal">{booking.purpose || 'No purpose specified'}</span></p>
+                                  )}
+                                </div>
+                            </div>
+                          </div>
                         </div>
-                        <div className="text-sm text-gray-700">{booking.status}</div>
+
+                        {/* Column 2: Equipment / Needs only */}
+                        <div className="col-span-1 min-w-0">
+                          <div className="text-xs font-medium text-gray-700 mb-2 flex items-center gap-2">
+                            <span>Equipment or Needs</span>
+                            {hasOthers && (
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <Popover open={!!openOthers[id]} onOpenChange={(v) => setOpenOthers(prev => ({ ...prev, [id]: v }))}>
+                                    <TooltipTrigger asChild>
+                                      <PopoverTrigger asChild>
+                                        <div className="flex items-center gap-2 cursor-help">
+                                          <Eye className="h-3 w-3 text-pink-600 flex-shrink-0" />
+                                          <p className="text-[11px] text-gray-800 font-medium">View other</p>
+                                        </div>
+                                      </PopoverTrigger>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
+                                      <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                        <p className="font-semibold text-sm text-gray-800">Other equipment</p>
+                                      </div>
+                                      <div className="p-3">
+                                        <p className="whitespace-pre-wrap text-sm text-gray-900 leading-6 break-words font-normal">{String(eq.others).trim()}</p>
+                                      </div>
+                                    </TooltipContent>
+                                    <PopoverContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50 origin-top-left">
+                                      <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                        <p className="font-semibold text-sm text-gray-800">Other equipment</p>
+                                      </div>
+                                      <div className="p-3">
+                                        <p className="text-sm text-gray-900 break-words whitespace-pre-wrap font-normal">{String(eq.others).trim()}</p>
+                                      </div>
+                                    </PopoverContent>
+                                  </Popover>
+                                </Tooltip>
+                              </TooltipProvider>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2 flex-wrap mt-2">
+                            {items.map((it: string, idx: number) => (
+                              <span key={`act-eq-${id}-${idx}`} className="text-xs bg-gray-100 text-gray-800 px-2 py-1 rounded-full border border-gray-200">{it}</span>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Column 3: empty for future use */}
+                        <div className="col-span-1" />
+
+                        {/* Column 4: status badge (right aligned) + view button */}
+                        <div className="col-span-1 flex items-start justify-end">
+                          {(() => {
+                            const status = getBookingStatus(booking);
+                            const statusColors = {
+                              'Active': 'bg-pink-100 text-pink-800',
+                              'Pending': 'bg-pink-50 text-pink-700',
+                              'Pending Request': 'bg-pink-50 text-pink-700',
+                              'Done': 'bg-gray-100 text-gray-800',
+                              'Denied': 'bg-red-100 text-red-800'
+                            };
+                            return (
+                              <div className="flex items-center gap-3">
+                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[status.label as keyof typeof statusColors] || 'bg-gray-100 text-gray-800'}`}>
+                                  {status.label}
+                                </span>
+                                <button
+                                  onClick={() => setSelectedView("my-bookings")}
+                                  className="text-gray-400 hover:text-gray-600 transition-colors duration-200"
+                                >
+                                  <Eye className="h-4 w-4" />
+                                </button>
+                              </div>
+                            );
+                          })()}
+                        </div>
                       </div>
-                    </div>
-                  ))
+                    );
+                  })}
+                  </div>
                 )}
               </div>
             ) : (
@@ -1026,27 +1253,24 @@ export default function BookingDashboard() {
               </div>
             )}
             {/* Pagination footer for Activity Logs */}
-            <div className="pt-4 border-t border-gray-100 mt-4 flex items-center justify-between">
-              {activityTab === 'booking' ? (
-                <p className="text-sm text-gray-600">Showing {activityBookingPage * itemsPerPage + 1} to {Math.min((activityBookingPage + 1) * itemsPerPage, userBookings.length)} of {userBookings.length} bookings</p>
-              ) : (
-                <p className="text-sm text-gray-600">Showing {activityNotificationsPage * itemsPerPage + 1} to {Math.min((activityNotificationsPage + 1) * itemsPerPage, notificationsData.length)} of {notificationsData.length} notifications</p>
-              )}
-
-              <div className="flex items-center gap-2">
+              <div className="pt-4 border-t border-gray-100 mt-4 flex items-center justify-between">
                 {activityTab === 'booking' ? (
-                  <>
-                    <button onClick={() => setActivityBookingPage(p => Math.max(0, p - 1))} disabled={activityBookingPage === 0} className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50">Prev</button>
-                    <button onClick={() => setActivityBookingPage(p => ((p + 1) * itemsPerPage < userBookings.length ? p + 1 : p))} disabled={(activityBookingPage + 1) * itemsPerPage >= userBookings.length} className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50">Next</button>
-                  </>
+                  // Compact summary for Recent Booking booking history (no pagination)
+                  <p className="text-sm text-gray-600">Showing {Math.min(5, userBookings.length)} of {userBookings.length} bookings</p>
                 ) : (
-                  <>
-                    <button onClick={() => setActivityNotificationsPage(p => Math.max(0, p - 1))} disabled={activityNotificationsPage === 0} className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50">Prev</button>
-                    <button onClick={() => setActivityNotificationsPage(p => ((p + 1) * itemsPerPage < notificationsData.length ? p + 1 : p))} disabled={(activityNotificationsPage + 1) * itemsPerPage >= notificationsData.length} className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50">Next</button>
-                  </>
+                  <p className="text-sm text-gray-600">Showing {activityNotificationsPage * itemsPerPage + 1} to {Math.min((activityNotificationsPage + 1) * itemsPerPage, notificationsData.length)} of {notificationsData.length} notifications</p>
                 )}
+
+                <div className="flex items-center gap-2">
+                  {/* Hide Prev/Next for recent bookings compact view */}
+                  {activityTab === 'booking' ? null : (
+                    <>
+                      <button onClick={() => setActivityNotificationsPage(p => Math.max(0, p - 1))} disabled={activityNotificationsPage === 0} className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50">Prev</button>
+                      <button onClick={() => setActivityNotificationsPage(p => ((p + 1) * itemsPerPage < notificationsData.length ? p + 1 : p))} disabled={(activityNotificationsPage + 1) * itemsPerPage >= notificationsData.length} className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50">Next</button>
+                    </>
+                  )}
+                </div>
               </div>
-            </div>
           </div>
         );
 
@@ -1608,107 +1832,211 @@ export default function BookingDashboard() {
                 </button>
               </div>
 
-              {userBookings.length === 0 ? (
-                <div className="text-center py-8">
-                  <div className="bg-gray-100 rounded-full w-12 h-12 flex items-center justify-center mx-auto mb-3">
-                    <Calendar className="h-6 w-6 text-gray-400" />
-                  </div>
-                  <p className="text-gray-600 text-sm">No recent bookings</p>
-                  <button
-                    onClick={() => openBookingModal()}
-                    className="text-pink-600 hover:text-pink-800 font-medium text-sm mt-2 transition-colors duration-200"
-                  >
-                    Make your first booking →
-                  </button>
-                </div>
-              ) : (
-                  <div className="space-y-2">
-                  {userBookings
-                    .slice(0, 5)
-                    .map((booking) => (
-                    <div key={booking.id} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors duration-200">
-                      <div className="flex items-center gap-3 flex-1">
-                        <div className="bg-white p-1.5 rounded-lg shadow-sm">
-                          <Calendar className="h-4 w-4 text-gray-600" />
-                        </div>
-                        <div className="flex-1">
-                          <h4 className="font-medium text-gray-900 text-sm">{getFacilityDisplay(booking.facilityId)}</h4>
-                          <p className="text-xs text-gray-600">
-                            {format(new Date(booking.startTime), 'EEE, MMM d')} • {format(new Date(booking.startTime), 'hh:mm a')}
-                          </p>
-                          {/* Show booking purpose and participants */}
-                          {(booking.purpose || booking.participants) && (
-                            <div className="text-[11px] text-gray-500 mt-1" style={{
-                              wordWrap: 'break-word',
-                              overflowWrap: 'anywhere',
-                              wordBreak: 'break-word',
-                              whiteSpace: 'normal',
-                              maxWidth: '100%'
-                            }}>
-                              {booking.purpose && (
-                                <div className="flex items-center gap-1">
-                                  {booking.purpose.length > 30 ? (
+              <div className="flex items-center gap-2 mb-4">
+                <button
+                  onClick={() => setActivityTab('booking')}
+                  className={`px-3 py-1 rounded ${activityTab === 'booking' ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
+                  Booking History
+                </button>
+                <button
+                  onClick={() => setActivityTab('notifications')}
+                  className={`px-3 py-1 rounded ${activityTab === 'notifications' ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
+                  Notification Logs
+                </button>
+              </div>
+
+              {activityTab === 'booking' ? (
+                <div className="space-y-4">
+                  {userBookings.length === 0 ? (
+                    <div className="text-center py-8">
+                      <p className="text-gray-600 text-sm">No booking history</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {userBookings
+                        // Recent Booking (compact preview) — show latest 5 bookings only, no pagination
+                        .slice(0, 5)
+                        .map((booking) => {
+                          const id = String(booking.id || Math.random());
+                          const eq = booking.equipment || {};
+                          const items = Array.isArray(eq.items) ? eq.items : [];
+                          const hasOthers = eq.others && String(eq.others).trim().length > 0;
+                          return (
+                            <div key={booking.id} className="grid grid-cols-4 gap-4 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors duration-200 items-start">
+                              <div className="col-span-1 min-w-0">
+                                <div className="flex items-start gap-3">
+                                  <div className="bg-white p-1.5 rounded-lg shadow-sm flex-shrink-0">
+                                    <Calendar className="h-4 w-4 text-gray-600" />
+                                  </div>
+                                  <div className="min-w-0">
+                                    <h4 className="font-medium text-gray-900 text-sm truncate">{getFacilityDisplay(booking.facilityId)}</h4>
+                                    <p className="text-xs text-gray-600 truncate">{format(new Date(booking.startTime), 'EEE, MMM d')} • {format(new Date(booking.startTime), 'hh:mm a')}</p>
+                                    {booking.participants && (
+                                      <div className="mt-1">
+                                        <span className="inline-flex items-center gap-2 px-2 py-0.5 rounded-full bg-gray-100 text-gray-800 text-xs font-medium">
+                                          <svg className="h-3 w-3 text-gray-600" viewBox="0 0 8 8" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><circle cx="4" cy="4" r="4" /></svg>
+                                          <span>{booking.participants}</span>
+                                          <span className="text-[10px]">participant{booking.participants > 1 ? 's' : ''}</span>
+                                        </span>
+                                      </div>
+                                    )}
+                                    <div className="text-[11px] text-gray-800 mt-2">
+                                      {(booking.purpose || '').length > 30 ? (
+                                        <TooltipProvider>
+                                          <Tooltip>
+                                            <Popover>
+                                              <TooltipTrigger asChild>
+                                                <PopoverTrigger asChild>
+                                                      <button className="flex items-center gap-1 text-[11px] text-gray-700" aria-expanded={false}>
+                                                        <Eye className="h-3 w-3 text-pink-600" />
+                                                        <span className="text-gray-700">View purpose</span>
+                                                      </button>
+                                                </PopoverTrigger>
+                                              </TooltipTrigger>
+                                              <TooltipContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
+                                                <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                                  <p className="font-medium text-sm text-gray-800">Full Purpose</p>
+                                                </div>
+                                                <div className="p-4 max-h-48 overflow-y-auto">
+                                                  <p className="whitespace-pre-wrap text-sm text-gray-900 leading-6 break-words font-normal">{booking.purpose}</p>
+                                                </div>
+                                              </TooltipContent>
+                                              <PopoverContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50 origin-top-left">
+                                                <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                                  <p className="font-medium text-sm text-gray-800">Full Purpose</p>
+                                                </div>
+                                                <div className="p-3">
+                                                  <p className="text-sm text-gray-900 leading-5 break-words font-normal">{booking.purpose || 'No purpose specified'}</p>
+                                                </div>
+                                              </PopoverContent>
+                                            </Popover>
+                                          </Tooltip>
+                                        </TooltipProvider>
+                                      ) : (
+                                        <p className="text-[11px] text-gray-800"><span className="font-medium">Purpose:&nbsp;</span><span className="font-normal">{booking.purpose || 'No purpose specified'}</span></p>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="col-span-1 min-w-0">
+                                <div className="text-xs font-medium text-gray-700 mb-2 flex items-center gap-2">
+                                  <span>Equipment or Needs</span>
+                                  {hasOthers && (
                                     <TooltipProvider>
                                       <Tooltip>
-                                        <TooltipTrigger asChild>
-                                          <div className="flex items-center gap-1 cursor-help">
-                                            <Eye className="h-3 w-3 text-pink-600 flex-shrink-0" />
-                                            <span>Purpose</span>
-                                          </div>
-                                        </TooltipTrigger>
-                                        <TooltipContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
-                                          <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                                            <p className="font-semibold text-sm text-gray-800">Full Purpose</p>
-                                          </div>
-                                          <div className="p-4 max-h-48 overflow-y-auto">
-                                            <p className="whitespace-pre-wrap text-sm text-gray-900 leading-6 break-words">
-                                              {booking.purpose}
-                                            </p>
-                                          </div>
-                                        </TooltipContent>
+                                        <Popover open={!!openOthers[id]} onOpenChange={(v) => setOpenOthers(prev => ({ ...prev, [id]: v }))}>
+                                          <TooltipTrigger asChild>
+                                            <PopoverTrigger asChild>
+                                              <div className="flex items-center gap-2 cursor-help">
+                                                <Eye className="h-3 w-3 text-pink-600 flex-shrink-0" />
+                                                <p className="text-[11px] text-gray-800 font-medium">View other</p>
+                                              </div>
+                                            </PopoverTrigger>
+                                          </TooltipTrigger>
+                                          <TooltipContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
+                                            <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                              <p className="font-semibold text-sm text-gray-800">Other equipment</p>
+                                            </div>
+                                            <div className="p-3">
+                                              <p className="whitespace-pre-wrap text-sm text-gray-900 leading-6 break-words font-normal">{String(eq.others).trim()}</p>
+                                            </div>
+                                          </TooltipContent>
+                                          <PopoverContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50 origin-top-left">
+                                            <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                              <p className="font-semibold text-sm text-gray-800">Other equipment</p>
+                                            </div>
+                                            <div className="p-3">
+                                              <p className="text-sm text-gray-900 break-words whitespace-pre-wrap font-normal">{String(eq.others).trim()}</p>
+                                            </div>
+                                          </PopoverContent>
+                                        </Popover>
                                       </Tooltip>
                                     </TooltipProvider>
-                                  ) : (
-                                    <span>Purpose: {booking.purpose}</span>
                                   )}
                                 </div>
-                              )}
-                              {booking.participants && (
-                                <span className={booking.purpose ? "block mt-1" : ""}>{booking.participants} participant{booking.participants > 1 ? 's' : ''}</span>
-                              )}
+
+                                <div className="flex items-center gap-2 flex-wrap mt-2">
+                                  {items.map((it: string, idx: number) => (
+                                    <span key={`act-eq-${id}-${idx}`} className="text-xs bg-gray-100 text-gray-800 px-2 py-1 rounded-full border border-gray-200">{it}</span>
+                                  ))}
+                                </div>
+                              </div>
+
+                              <div className="col-span-1" />
+
+                              <div className="col-span-1 flex items-start justify-end">
+                                {(() => {
+                                  const status = getBookingStatus(booking);
+                                  const statusColors = {
+                                    'Active': 'bg-pink-100 text-pink-800',
+                                    'Pending': 'bg-pink-50 text-pink-700',
+                                    'Pending Request': 'bg-pink-50 text-pink-700',
+                                    'Done': 'bg-gray-100 text-gray-800',
+                                    'Denied': 'bg-red-100 text-red-800'
+                                  };
+                                  return (
+                                    <div className="flex items-center gap-3">
+                                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[status.label as keyof typeof statusColors] || 'bg-gray-100 text-gray-800'}`}>
+                                        {status.label}
+                                      </span>
+                                      <button
+                                        onClick={() => setSelectedView("my-bookings")}
+                                        className="text-gray-400 hover:text-gray-600 transition-colors duration-200"
+                                      >
+                                        <Eye className="h-4 w-4" />
+                                      </button>
+                                    </div>
+                                  );
+                                })()}
+                              </div>
                             </div>
-                          )}
+                          );
+                        })}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {notificationsData.length === 0 ? (
+                    <div className="text-center py-8">
+                      <p className="text-gray-600 text-sm">No notifications</p>
+                    </div>
+                  ) : (
+                    notificationsData.slice(activityNotificationsPage * itemsPerPage, (activityNotificationsPage + 1) * itemsPerPage).map((n: any) => (
+                      <div key={n.id} className={`p-3 rounded-md bg-white border ${n.isRead ? 'opacity-70' : ''}`}>
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <div className="font-medium text-sm text-gray-900">{n.title}</div>
+                            <div className="text-xs text-gray-600 mt-1">{n.message}</div>
+                          </div>
+                          <div className="text-xs text-gray-400">{new Date(n.createdAt).toLocaleString()}</div>
                         </div>
                       </div>
-
-                      <div className="flex items-center gap-3">
-                        {(() => {
-                          const status = getBookingStatus(booking);
-                          const statusColors = {
-                            'Active': 'bg-pink-100 text-pink-800',
-                            'Pending': 'bg-pink-50 text-pink-700',
-                            'Pending Request': 'bg-pink-50 text-pink-700',
-                            'Done': 'bg-gray-100 text-gray-800',
-                            'Denied': 'bg-red-100 text-red-800'
-                          };
-                          return (
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[status.label as keyof typeof statusColors] || 'bg-gray-100 text-gray-800'}`}>
-                              {status.label}
-                            </span>
-                          );
-                        })()}
-
-                        <button
-                          onClick={() => setSelectedView("my-bookings")}
-                          className="text-gray-400 hover:text-gray-600 transition-colors duration-200"
-                        >
-                          <Eye className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    ))
+                  )}
                 </div>
               )}
+
+              <div className="pt-4 border-t border-gray-100 mt-4 flex items-center justify-between">
+                {activityTab === 'booking' ? (
+                  // Compact summary for Recent Booking booking history (no pagination)
+                  <p className="text-sm text-gray-600">Showing {Math.min(5, userBookings.length)} of {userBookings.length} bookings</p>
+                ) : (
+                  <p className="text-sm text-gray-600">Showing {activityNotificationsPage * itemsPerPage + 1} to {Math.min((activityNotificationsPage + 1) * itemsPerPage, notificationsData.length)} of {notificationsData.length} notifications</p>
+                )}
+
+                <div className="flex items-center gap-2">
+                  {/* Hide Prev/Next for Recent Booking compact view; keep pagination controls for notifications */}
+                  {activityTab === 'booking' ? null : (
+                    <>
+                      <button onClick={() => setActivityNotificationsPage(p => Math.max(0, p - 1))} disabled={activityNotificationsPage === 0} className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50">Prev</button>
+                      <button onClick={() => setActivityNotificationsPage(p => ((p + 1) * itemsPerPage < notificationsData.length ? p + 1 : p))} disabled={(activityNotificationsPage + 1) * itemsPerPage >= notificationsData.length} className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50">Next</button>
+                    </>
+                  )}
+                </div>
+              </div>
             </div>
           </>
         );

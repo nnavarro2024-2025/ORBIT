@@ -14,7 +14,7 @@ import {
   createFacilityBookingSchema,
   facilityBookings,
 } from "../shared/schema";
-import { eq, and, or, gt, lt, asc, lte } from "drizzle-orm";
+import { eq, and, or, gt, lt, asc, lte, isNotNull } from "drizzle-orm";
 
 // School working hours validation
 function isWithinLibraryHours(date: Date): boolean {
@@ -32,6 +32,29 @@ function isWithinLibraryHours(date: Date): boolean {
 
 function formatLibraryHours(): string {
   return "7:30 AM - 5:00 PM";
+}
+
+// Small helper to format equipment objects for human-friendly display in alerts/activity
+function formatEquipmentForDisplay(eq: any): string {
+  try {
+    if (!eq) return '';
+    const items: string[] = Array.isArray(eq.items) ? eq.items.map((s: string) => String(s).replace(/_/g, ' ').trim()) : [];
+    const mapped = items.map(i => {
+      const key = String(i || '').toLowerCase().trim();
+      if (key === 'whiteboard' || key === 'whiteboard & markers') return 'Whiteboard & Markers';
+      if (key === 'projector') return 'Projector';
+      if (key === 'extension cord' || key === 'extension_cord') return 'Extension Cord';
+      if (key === 'hdmi') return 'HDMI Cable';
+      if (key === 'extra chairs' || key === 'extra_chairs') return 'Extra Chairs';
+      return i;
+    });
+    const others = eq.others ? String(eq.others).trim() : '';
+    const parts = mapped.filter(Boolean);
+    if (others) parts.push(`Others: ${others}`);
+    return parts.join(', ');
+  } catch (e) {
+    return '';
+  }
 }
 
   // =========================
@@ -336,6 +359,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
             console.warn('[Sweep] Failed to cancel expired arrival booking or notify user', innerErr);
           }
         }
+
+        // Sweep: bookings that requested equipment but have started and haven't received an admin Needs response
+        try {
+          const equipmentPending: any[] = await db.select().from(facilityBookings).where(
+            and(
+              or(eq(facilityBookings.status, 'pending'), eq(facilityBookings.status, 'approved')),
+              // has equipment JSON (not null)
+              isNotNull(facilityBookings.equipment as any),
+              // started (startTime <= now)
+              lte(facilityBookings.startTime as any, now as any),
+              // adminResponse does not contain "Needs:"
+              // Note: drizzle doesn't have convenient NOT LIKE across JSON; we filter client-side below
+            )
+          );
+
+          for (const b of equipmentPending) {
+            try {
+              const resp = String(b?.adminResponse || '');
+              if (/Needs:\s*(Prepared|Not Available)/i.test(resp)) continue; // admin already responded
+
+              // No admin response regarding equipment — cancel booking and notify
+              await storage.updateFacilityBooking(b.id, { status: 'cancelled', adminResponse: `${b.adminResponse || ''}${b.adminResponse ? ' | ' : ''}Needs: Not Available (auto)`, updatedAt: new Date() } as any);
+
+              const user = await storage.getUser(b.userId);
+              const facility = await storage.getFacility(b.facilityId);
+              if (user && user.email) {
+                try {
+                  await emailService.sendBookingStatusUpdate(b as any, user as any, facility?.name || `Facility ${b.facilityId}`);
+                } catch (e) {
+                  console.warn('[Sweep-Equipment] Failed sending email', e);
+                }
+              }
+
+              try {
+                await storage.createSystemAlert({
+                  id: randomUUID(),
+                  type: 'booking',
+                  severity: 'low',
+                  title: 'Booking Auto-Cancelled - Equipment Unavailable',
+                  message: `Your booking for ${facility?.name || `Facility ${b.facilityId}`} on ${new Date(b.startTime).toLocaleString()} was automatically cancelled because requested equipment was not confirmed by admins.`,
+                  userId: b.userId,
+                  isRead: false,
+                  createdAt: new Date(),
+                });
+              } catch (e) {
+                console.warn('[Sweep-Equipment] Failed to create system alert', e);
+              }
+            } catch (e) {
+              console.warn('[Sweep-Equipment] Error processing booking', e);
+            }
+          }
+        } catch (e) {
+          console.warn('[Sweep-Equipment] Failed to query equipment-pending bookings', e);
+        }
       } catch (err) {
         console.warn('[Sweep] Error while checking expired pending bookings', err);
       }
@@ -382,69 +459,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Basic API info endpoint
-  app.get("/api", (req: any, res) => {
-    res.json({ 
-      message: "TaskMasterPro API",
-      version: "1.0.0",
-      status: "running",
-      timestamp: new Date().toISOString(),
-      endpoints: {
-        test: "/api/test",
-        facilities: "/api/facilities",
-        auth: "/api/auth/user"
-      }
-    });
-  });
-
-  // Test endpoint to check if server is running
-  app.get("/api/test", (req: any, res) => {
-    res.json({ message: "Server is running!", timestamp: new Date().toISOString() });
-  });
-
-  // Test endpoint to check authentication
-  app.get("/api/test-auth", isAuthenticated, async (req: any, res) => {
-    res.json({ 
-      message: "Authentication working!", 
-      user: req.user.claims.sub,
-      timestamp: new Date().toISOString() 
-    });
-  });
-
-  app.post("/api/auth/sync", isAuthenticated, async (req: any, res) => {
+  // POST sync endpoint used by client to exchange token and ensure local profile is up-to-date.
+  // Clients call POST /api/auth/sync with Authorization: Bearer <token>
+  app.post('/api/auth/sync', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
 
-      const { data: { user }, error } = await supabaseAdmin.auth.admin.getUserById(userId);
-      if (error || !user) return res.status(404).json({ message: "User not found in Supabase Auth" });
-
-      const existingUser = await storage.getUser(user.id);
-
-      // Check Supabase app_metadata for admin role, fallback to existing role or default to student
-      let userRole: "admin" | "student" | "faculty" = "student";
-      if (user.app_metadata?.role === "admin") {
-        userRole = "admin";
-      } else if (existingUser?.role) {
-        userRole = existingUser.role;
+      // Fetch user from Supabase Auth to get the latest user_metadata
+      const { data: { user: supabaseUser }, error: supabaseError } = await supabaseAdmin.auth.admin.getUserById(userId);
+      if (supabaseError || !supabaseUser) {
+        console.error('Error fetching user from Supabase Auth:', supabaseError?.message);
+        return res.status(404).json({ message: 'User not found in authentication system.' });
       }
 
+      // Sync user data with local database
+      const existingUser = await storage.getUser(supabaseUser.id);
       const userRecord = {
-        id: user.id,
-        email: user.email!,
-        firstName: user.user_metadata?.first_name || "",
-        lastName: user.user_metadata?.last_name || "",
-        profileImageUrl: user.user_metadata?.avatar_url || "",
-        role: userRole, // Use the determined role
+        id: supabaseUser.id,
+        email: supabaseUser.email!,
+        firstName: supabaseUser.user_metadata?.first_name || "",
+        lastName: supabaseUser.user_metadata?.last_name || "",
+        profileImageUrl: supabaseUser.user_metadata?.avatar_url || "",
+        role: existingUser?.role || "student",
         status: existingUser?.status || "active",
-        createdAt: existingUser?.createdAt || new Date(user.created_at),
+        createdAt: existingUser?.createdAt || new Date(supabaseUser.created_at),
         updatedAt: new Date(),
       };
 
-      const updatedUser = await storage.upsertUser(userRecord);
-      res.json(updatedUser);
+      const syncedUser = await storage.upsertUser(userRecord);
+      res.json(syncedUser);
     } catch (error) {
-      res.status(500).json({ message: "Failed to sync user data" });
+      console.error('Error syncing user via POST /api/auth/sync:', error);
+      res.status(500).json({ message: 'Failed to sync user' });
     }
+  });
+
+  // Basic API info endpoint
+  app.get("/api", (req: any, res) => {
+    res.json({ status: 'ok', version: '1.0' });
   });
 
   // Endpoint to accept avatar uploads as base64 JSON and upload via service-role (no client-side service key exposure)
@@ -720,6 +772,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
           isRead: false,
           createdAt: new Date(),
         });
+
+        // If booking contains equipment/needs, create a user-management alert instead
+        try {
+          const eq = (booking as any).equipment;
+          const hasItems = eq && Array.isArray(eq.items) && eq.items.length > 0;
+          const hasOthers = eq && eq.others;
+          if (hasItems || hasOthers) {
+            const items = hasItems ? (eq.items as string[]).map((i: string) => i.replace(/_/g, ' ')) : [];
+            const others = hasOthers ? `Others: ${String(eq.others).trim()}` : null;
+            const needsList = [...items, ...(others ? [others] : [])].join(', ');
+            await storage.createSystemAlert({
+              id: randomUUID(),
+              type: 'user',
+              severity: 'low',
+              title: `Equipment Needs Submitted`,
+              message: `${user?.email || userId} Requested equipment: ${needsList}`,
+              userId: null, 
+              isRead: false,
+              createdAt: new Date(),
+            });
+          }
+        } catch (e) {
+          console.warn('[Alerts] Failed to create equipment needs alert', e);
+        }
       } catch (e) {
         console.warn('[Alerts] Failed to create booking request alerts', e);
       }
@@ -753,6 +829,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { bookingId } = req.params;
       const { purpose, startTime, endTime, facilityId, participants } = req.body;
       const userId = req.user.claims.sub;
+
+      // Ensure the booking exists and that the requester is allowed to update it
+      const existingBooking = await storage.getFacilityBooking(bookingId);
+      if (!existingBooking) {
+        return res.status(404).json({ message: "Booking not found." });
+      }
+      // Only the booking owner or an admin may modify a booking
+      if (String(existingBooking.userId) !== String(userId)) {
+        try {
+          const requestingUser = await storage.getUser(userId);
+          if (!requestingUser || requestingUser.role !== 'admin') {
+            return res.status(403).json({ message: "You are not allowed to update this booking." });
+          }
+        } catch (e) {
+          return res.status(403).json({ message: "You are not allowed to update this booking." });
+        }
+      }
 
       // Basic validation for proposed changes
       if (!purpose || !startTime || !endTime) {
@@ -1358,6 +1451,106 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Admin: update equipment needs status for a booking
+  app.post('/api/admin/bookings/:bookingId/needs', isAuthenticated, requireAdmin, async (req:any, res:any) => {
+    try {
+      const { bookingId } = req.params;
+      const { status, note } = req.body; // status: 'prepared' | 'not_available'
+      if (!['prepared', 'not_available'].includes(status)) return res.status(400).json({ message: 'Invalid status' });
+
+      const booking = await storage.getFacilityBooking(bookingId);
+      if (!booking) return res.status(404).json({ message: 'Booking not found' });
+
+      const needsStatusText = status === 'prepared' ? 'Prepared' : 'Not Available';
+      // store needs status in adminResponse for now
+      const updatedAdminResponse = `${booking.adminResponse || ''}${booking.adminResponse ? ' | ' : ''}Needs: ${needsStatusText}${note ? ` — ${note}` : ''}`;
+      await storage.updateFacilityBooking(bookingId, { adminResponse: updatedAdminResponse, updatedAt: new Date() } as any);
+
+      // If admin marked Not Available, notify the user (do not cancel the booking immediately)
+      if (status === 'not_available') {
+        try {
+          const bookingAfter = await storage.getFacilityBooking(bookingId);
+          const user = bookingAfter ? await storage.getUser(bookingAfter.userId) : null;
+          const facility = bookingAfter ? await storage.getFacility(bookingAfter.facilityId) : null;
+
+          // Send notification email (informational only)
+          try {
+            if (user && user.email) {
+              await emailService.sendBookingStatusUpdate(bookingAfter as any, user as any, facility?.name || `Facility ${bookingAfter?.facilityId}`);
+            }
+          } catch (e) {
+            console.warn('[Needs] Failed to send not-available email to user', e);
+          }
+
+          // Create a system alert for the user indicating equipment unavailable
+          try {
+            await storage.createSystemAlert({
+              id: randomUUID(),
+              type: 'booking',
+              severity: 'low',
+              title: 'Requested Equipment Unavailable',
+              message: `An admin has marked requested equipment as not available for your booking for ${facility?.name || `Facility ${bookingAfter?.facilityId}`} on ${bookingAfter ? new Date(bookingAfter.startTime).toLocaleString() : ''}. We have notified you so you can make alternate arrangements.`,
+              userId: bookingAfter?.userId ?? null,
+              isRead: false,
+              createdAt: new Date(),
+            });
+          } catch (e) {
+            console.warn('[Needs] Failed to create not-available alert', e);
+          }
+        } catch (e) {
+          console.warn('[Needs] Error handling not-available notification', e);
+        }
+      }
+
+      // Update related system alert if present (best-effort)
+      try {
+        const alerts = await storage.getSystemAlerts();
+        const found = alerts.find(a => a.title && a.title.startsWith('Equipment Needs Submitted') && a.message && a.message.includes((booking as any).userId || ''));
+        if (found) {
+          await storage.updateSystemAlert(found.id, { message: `${found.message}\nStatus: ${needsStatusText}${note ? ` — ${note}` : ''}`, isRead: false } as any);
+        }
+      } catch (e) {
+        console.warn('[Needs] Failed to update related alert', e);
+      }
+
+      // Log activity
+      try {
+        const adminUserId = req.user.claims.sub;
+        // Resolve emails for admin and booking owner when possible (do not hardcode)
+        const adminUser = adminUserId ? await storage.getUser(adminUserId) : null;
+        const bookingOwner = booking ? await storage.getUser(booking.userId) : null;
+        const adminEmail = adminUser?.email || String(adminUserId || 'admin');
+        const ownerEmail = bookingOwner?.email || String(booking?.userId || 'unknown');
+
+        const eqText = formatEquipmentForDisplay((booking as any).equipment);
+        const when = new Date();
+        const whenText = when.toLocaleString();
+
+        // Build a clear, grammatical details string without removing original data
+        const verb = status === 'prepared' ? 'marked the requested equipment as prepared for' : 'marked the requested equipment as not available for';
+        const itemsPart = eqText ? ` Items: ${eqText}.` : '';
+        const details = `${adminEmail} ${verb} ${ownerEmail} at ${whenText}.${itemsPart}`;
+
+        await storage.createActivityLog({
+          id: randomUUID(),
+          userId: adminUserId,
+          action: status === 'prepared' ? 'Equipment Prepared' : 'Equipment Not Available',
+          details,
+          ipAddress: req.ip,
+          userAgent: req.get('User-Agent'),
+          createdAt: when
+        } as any);
+      } catch (e) {
+        console.warn('[Needs] Failed to create activity log', e);
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('[ADMIN NEEDS] Error updating needs status', error);
+      res.status(500).json({ message: 'Failed to update needs status' });
+    }
+  });
+
   app.post("/api/bookings/:bookingId/deny", isAuthenticated, requireAdmin, async (req: any, res) => {
     try {
       const { bookingId } = req.params;
@@ -1450,14 +1643,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: "approved",
         adminResponse,
         adminId: req.user.claims.sub,
-        updatedAt: new Date(),
       });
-      
 
       // Extend the actual session
-      
-  // ORZ feature removed - previously extended session duration here.
-  // No-op now.
+
+      // ORZ feature removed - previously extended session duration here.
+      // No-op now.
       
 
       // Fetch the associated ORZ session
