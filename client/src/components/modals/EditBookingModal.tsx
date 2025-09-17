@@ -20,6 +20,7 @@ import { format } from "date-fns";
 import { CalendarIcon, Plus, Minus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { CustomTextarea } from "@/components/ui/custom-textarea";
 
 // Small helper: return a short description for known facility names (same helper as BookingModal)
 const getFacilityDescriptionByName = (name?: string) => {
@@ -135,9 +136,25 @@ export default function EditBookingModal({
 }: EditBookingModalProps) {
   const [purpose, setPurpose] = useState("");
   const [facilityId, setFacilityId] = useState("");
+  const PURPOSE_MAX = 200;
+  const OTHERS_MAX = 50;
   const [startTime, setStartTime] = useState<Date | undefined>();
   const [endTime, setEndTime] = useState<Date | undefined>();
   const [participants, setParticipants] = useState(1); // Add participants state
+  const EQUIPMENT_OPTIONS = [
+    { key: 'whiteboard', label: 'Whiteboard & Markers' },
+    { key: 'projector', label: 'Projector' },
+    { key: 'extension_cord', label: 'Extension Cord' },
+    { key: 'hdmi', label: 'HDMI Cable' },
+    { key: 'extra_chairs', label: 'Extra Chairs' },
+    { key: 'others', label: 'Others' },
+  ];
+  const [equipmentState, setEquipmentState] = useState<Record<string, boolean>>(() => {
+    const init: Record<string, boolean> = {};
+    EQUIPMENT_OPTIONS.forEach(o => init[o.key] = false);
+    return init;
+  });
+  const [equipmentOtherText, setEquipmentOtherText] = useState('');
   const { toast } = useToast(); // Add toast
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [lastSubmissionTime, setLastSubmissionTime] = useState(0);
@@ -196,6 +213,15 @@ export default function EditBookingModal({
     if (!start || !end) return false;
     const diff = end.getTime() - start.getTime();
     return diff >= 30 * 60 * 1000;
+  };
+
+  const calculateDuration = (start?: Date, end?: Date) => {
+    if (!start || !end) return "";
+    const diff = end.getTime() - start.getTime();
+    if (diff <= 0) return "";
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    return `${hours}h ${minutes}m`;
   };
 
   const handleSave = async () => {
@@ -332,6 +358,10 @@ export default function EditBookingModal({
         startTime: startTime!.toISOString(),
         endTime: endTime!.toISOString(),
         participants, // Include participants in saved data
+        equipment: {
+          items: Object.keys(equipmentState).filter(k => equipmentState[k]),
+          others: equipmentOtherText.trim() || null,
+        },
       };
   // payload prepared for save
       const result = await onSave(payload);
@@ -404,241 +434,277 @@ export default function EditBookingModal({
     }
   };
 
+  // derive selected facility from facilityId for summary display
+  const selectedFacility = facilityId ? facilities.find(f => f.id === parseInt(facilityId, 10)) : null;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Edit Booking</DialogTitle>
+          <DialogTitle className="text-2xl font-semibold">Edit Booking</DialogTitle>
           <DialogDescription>Update booking details: date, time, participants, and purpose.</DialogDescription>
         </DialogHeader>
-        <div className="grid gap-4 py-4">
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="purpose" className="text-right">
-              Purpose
-            </Label>
-            <Input
-              id="purpose"
-              value={purpose}
-              onChange={(e) => {
-                setPurpose(e.target.value);
-                if (purposeError) setPurposeError(""); // Clear error when user types
-              }}
-              className={`col-span-3 ${purposeError ? "border-red-500" : ""}`}
-            />
-            {purposeError && (
-              <p className="col-span-3 col-start-2 text-sm text-red-600 mt-1">
-                {purposeError}
-              </p>
-            )}
-          </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="facility" className="text-right">
-              Facility
-            </Label>
-            <Select value={facilityId} onValueChange={setFacilityId}>
-              <SelectTrigger className="col-span-3">
-                <SelectValue placeholder="Select a facility" />
-              </SelectTrigger>
-              <SelectContent>
+
+        <div className="grid gap-6">
+          {/* Facility + participants */}
+          <div className="grid md:grid-cols-2 gap-6">
+            <div>
+              <Label className="block text-sm font-medium text-gray-700 mb-2">Facility</Label>
+              <Select value={facilityId} onValueChange={setFacilityId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a facility" />
+                </SelectTrigger>
+                <SelectContent>
                   {facilities.map((facility) => (
-                    <SelectItem
-                      key={facility.id}
-                      value={facility.id.toString()}
-                      available={!!facility.isActive}
-                      description={getFacilityDescriptionByName(facility.name)}
-                    >
+                    <SelectItem key={facility.id} value={facility.id.toString()} description={getFacilityDescriptionByName(facility.name)} available={!!facility.isActive}>
                       {facility.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
-            </Select>
-          </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="participants" className="text-right">
-              Participants
-            </Label>
-            <div className="col-span-3">
-              {/** compute current facility and max capacity similar to BookingModal */}
+              </Select>
+            </div>
+
+            <div>
+              <Label className="block text-sm font-medium text-gray-700 mb-2">Participants</Label>
               {(() => {
                 const currentFacility = facilityId ? facilities.find(f => f.id === parseInt(facilityId)) : null;
                 const maxCapacity = currentFacility && typeof currentFacility.capacity === 'number' && currentFacility.capacity > 0
                   ? currentFacility.capacity
-                  : // fallback by name heuristics
-                  (currentFacility ? (currentFacility.name.toLowerCase().includes('board room') || currentFacility.name.toLowerCase().includes('boardroom') ? 12 : 8) : 8);
+                  : (currentFacility ? (currentFacility.name.toLowerCase().includes('board room') || currentFacility.name.toLowerCase().includes('boardroom') ? 12 : 8) : 8);
 
                 return (
-                  <>
+                  <div className="flex items-center gap-3">
                     <NumberInputWithControls
                       value={participants}
-                      onChange={(val) => setParticipants(Math.min(typeof val === 'string' ? parseInt(val, 10) : val, maxCapacity))}
+                      onChange={(val) => setParticipants(val)}
                       min={1}
                       max={maxCapacity}
                     />
-                    <div className="text-xs text-muted-foreground mt-1">Max capacity: {maxCapacity}</div>
-                  </>
+                    <div className="text-xs text-muted-foreground ml-3">Max: {maxCapacity}</div>
+                  </div>
                 );
               })()}
             </div>
           </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="startTime" className="text-right">
-              Start Time
-            </Label>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant={"outline"}
-                  className={cn(
-                    "col-span-3 justify-start text-left font-normal",
-                    !startTime && "text-muted-foreground"
-                  )}
-                >
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {startTime ? format(startTime, "PPP hh:mm a") : <span>Pick a date and time</span>}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0">
-                <Calendar
-                  mode="single"
-                  selected={startTime}
-                  onSelect={(date) => {
-                    if (date) {
-                      const existingTime = startTime || new Date(); // Use existing time or current time
-                      const newDateWithExistingTime = new Date(
-                        date.getFullYear(),
-                        date.getMonth(),
-                        date.getDate(),
-                        existingTime.getHours(),
-                        existingTime.getMinutes(),
-                        existingTime.getSeconds(),
-                        existingTime.getMilliseconds()
-                      );
-                      setStartTime(newDateWithExistingTime);
-                    }
-                  }}
-                  initialFocus
-                />
-                <div className="p-3 border-t border-border">
-                  <Label htmlFor="startTimeInput" className="sr-only">Time</Label>
+
+          <div className="grid md:grid-cols-2 gap-6">
+            {/* Start Date + Time split (matching BookingModal) */}
+            <div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Start Date</Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant={"outline"} className={cn("w-full text-left pl-3 h-10", !startTime && "text-muted-foreground")}>
+                        {startTime ? format(startTime, "EEE, MMM d, yyyy") : <span>Pick a date</span>}
+                        <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-80 p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={startTime}
+                        onSelect={(date) => {
+                          if (!date) return;
+                          const current = startTime || new Date();
+                          const newDate = new Date(date);
+                          newDate.setHours(current.getHours(), current.getMinutes(), 0, 0);
+                          setStartTime(newDate);
+                        }}
+                        initialFocus
+                        disabled={(date) => date < new Date()}
+                      />
+                    </PopoverContent>
+                  </Popover>
+                </div>
+
+                <div>
+                  <Label className="invisible">Start Time</Label>
                   <Input
-                    id="startTimeInput"
                     type="time"
                     step={300}
                     value={startTime ? format(startTime, "HH:mm") : ""}
                     onChange={(e) => {
                       const timeValue = e.target.value;
                       if (!timeValue) return;
-
-                      // Validate time format (HH:MM)
                       const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
-                      if (!timeRegex.test(timeValue)) {
-                        return; // Invalid time format, don't update
-                      }
-
+                      if (!timeRegex.test(timeValue)) return;
                       const [hours, minutes] = timeValue.split(":").map(Number);
-                      if (isNaN(hours) || isNaN(minutes) || hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
-                        return; // Invalid time values, don't update
-                      }
-
-                      if (startTime) { // If startTime is already a valid Date
-                        const newTimeWithExistingDate = new Date(startTime); // Clone existing date
-                        newTimeWithExistingDate.setHours(hours);
-                        newTimeWithExistingDate.setMinutes(minutes);
-                        setStartTime(newTimeWithExistingDate);
-                      } else { // If startTime is undefined, create a new Date with current date and selected time
-                        const now = new Date();
-                        now.setHours(hours);
-                        now.setMinutes(minutes);
-                        setStartTime(now);
-                      }
+                      const newDate = startTime ? new Date(startTime) : new Date();
+                      newDate.setHours(hours, minutes, 0, 0);
+                      setStartTime(newDate);
                     }}
-                    className="w-full"
+                    className="w-full h-10"
                   />
                 </div>
-              </PopoverContent>
-            </Popover>
-          </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="endTime" className="text-right">
-              End Time
-            </Label>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant={"outline"}
-                  className={cn(
-                    "col-span-3 justify-start text-left font-normal",
-                    !endTime && "text-muted-foreground"
-                  )}
-                >
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {endTime ? format(endTime, "PPP hh:mm a") : <span>Pick a date and time</span>}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0">
-                <Calendar
-                  mode="single"
-                  selected={endTime}
-                  onSelect={(date) => {
-                    if (date) {
-                      const existingTime = endTime || new Date(); // Use existing time or current time
-                      const newDateWithExistingTime = new Date(
-                        date.getFullYear(),
-                        date.getMonth(),
-                        date.getDate(),
-                        existingTime.getHours(),
-                        existingTime.getMinutes(),
-                        existingTime.getSeconds(),
-                        existingTime.getMilliseconds()
-                      );
-                      setEndTime(newDateWithExistingTime);
-                    }
-                  }}
-                  initialFocus
-                />
-                <div className="p-3 border-t border-border">
-                  <Label htmlFor="endTimeInput" className="sr-only">Time</Label>
+              </div>
+            </div>
+
+            <div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-gray-700">End Date</Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant={"outline"} className={cn("w-full text-left pl-3 h-10", !endTime && "text-muted-foreground")}>
+                        {endTime ? format(endTime, "EEE, MMM d, yyyy") : <span>Pick a date</span>}
+                        <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-80 p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={endTime}
+                        onSelect={(date) => {
+                          if (!date) return;
+                          const current = endTime || new Date();
+                          const newDate = new Date(date);
+                          newDate.setHours(current.getHours(), current.getMinutes(), 0, 0);
+                          setEndTime(newDate);
+                        }}
+                        initialFocus
+                        disabled={(date) => date < new Date()}
+                      />
+                    </PopoverContent>
+                  </Popover>
+                </div>
+
+                <div>
+                  <Label className="invisible">End Time</Label>
                   <Input
-                    id="endTimeInput"
                     type="time"
                     step={300}
                     value={endTime ? format(endTime, "HH:mm") : ""}
                     onChange={(e) => {
                       const timeValue = e.target.value;
                       if (!timeValue) return;
-
-                      // Validate time format (HH:MM)
                       const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
-                      if (!timeRegex.test(timeValue)) {
-                        return; // Invalid time format, don't update
-                      }
-
+                      if (!timeRegex.test(timeValue)) return;
                       const [hours, minutes] = timeValue.split(":").map(Number);
-                      if (isNaN(hours) || isNaN(minutes) || hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
-                        return; // Invalid time values, don't update
-                      }
-
-                      if (endTime) { // If endTime is already a valid Date
-                        const newTimeWithExistingDate = new Date(endTime); // Clone existing date
-                        newTimeWithExistingDate.setHours(hours);
-                        newTimeWithExistingDate.setMinutes(minutes);
-                        setEndTime(newTimeWithExistingDate);
-                      } else { // If endTime is undefined, create a new Date with current date and selected time
-                        const now = new Date();
-                        now.setHours(hours);
-                        now.setMinutes(minutes);
-                        setEndTime(now);
-                      }
+                      const newDate = endTime ? new Date(endTime) : new Date();
+                      newDate.setHours(hours, minutes, 0, 0);
+                      setEndTime(newDate);
                     }}
-                    className="w-full"
+                    className="w-full h-10"
                   />
                 </div>
-              </PopoverContent>
-            </Popover>
+              </div>
+            </div>
           </div>
+
+          {/* Equipment checklist — copied from BookingModal */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-3">Additional Equipment or Needs</label>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="space-y-3">
+                <label className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={!!equipmentState['whiteboard']}
+                    onChange={(e) => setEquipmentState(prev => ({ ...prev, ['whiteboard']: e.target.checked }))}
+                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span className="text-sm text-gray-700">Whiteboard &amp; Markers</span>
+                </label>
+
+                <label className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={!!equipmentState['projector']}
+                    onChange={(e) => setEquipmentState(prev => ({ ...prev, ['projector']: e.target.checked }))}
+                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span className="text-sm text-gray-700">Projector</span>
+                </label>
+
+                <label className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={!!equipmentState['extension_cord']}
+                    onChange={(e) => setEquipmentState(prev => ({ ...prev, ['extension_cord']: e.target.checked }))}
+                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span className="text-sm text-gray-700">Extension Cord</span>
+                </label>
+              </div>
+
+              <div className="space-y-3">
+                <label className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={!!equipmentState['hdmi']}
+                    onChange={(e) => setEquipmentState(prev => ({ ...prev, ['hdmi']: e.target.checked }))}
+                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span className="text-sm text-gray-700">HDMI Cable</span>
+                </label>
+
+                <label className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={!!equipmentState['extra_chairs']}
+                    onChange={(e) => setEquipmentState(prev => ({ ...prev, ['extra_chairs']: e.target.checked }))}
+                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span className="text-sm text-gray-700">Extra Chairs</span>
+                </label>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={!!equipmentState['others']}
+                    onChange={(e) => setEquipmentState(prev => ({ ...prev, ['others']: e.target.checked }))}
+                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span className="text-sm text-gray-700">Others</span>
+                </div>
+
+                <div className="mt-2 md:mt-1">
+                  <Input
+                    value={equipmentOtherText}
+                    onChange={(e: any) => {
+                      let val = e.target.value;
+                      if (val.length > OTHERS_MAX) val = val.slice(0, OTHERS_MAX);
+                      setEquipmentOtherText(val);
+                      setEquipmentState(prev => ({ ...prev, ['others']: val.trim().length > 0 }));
+                    }}
+                    placeholder="Describe other needs"
+                    aria-label="Other equipment details"
+                    className="w-full"
+                    maxLength={OTHERS_MAX}
+                  />
+                  {equipmentOtherText ? (
+                    <div>
+                      <div className={`text-xs mt-1 ${equipmentOtherText.length >= OTHERS_MAX ? 'text-red-600' : 'text-gray-500'}`}>{equipmentOtherText.length}/{OTHERS_MAX}</div>
+                      {equipmentOtherText.length >= OTHERS_MAX ? (
+                        <div className="text-xs text-red-600 mt-1">Maximum length reached ({OTHERS_MAX} characters)</div>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Purpose */}
+          <div>
+            <Label className="block text-sm font-medium text-gray-700 mb-2">Purpose</Label>
+            <CustomTextarea value={purpose} onChange={(v) => {
+              if (v && v.length > PURPOSE_MAX) setPurpose(v.slice(0, PURPOSE_MAX));
+              else setPurpose(v);
+              if (purposeError) setPurposeError("");
+            }} placeholder="Describe your purpose for booking this facility" maxLength={PURPOSE_MAX} isInvalid={purpose.length >= PURPOSE_MAX} />
+            {purpose.length >= PURPOSE_MAX && <div className="text-xs text-red-600 mt-1">Maximum length reached ({PURPOSE_MAX} characters)</div>}
+            {purposeError && <div className="text-sm text-red-600 mt-1">{purposeError}</div>}
+          </div>
+
+          {/* Inline warnings */}
           {formValidationWarnings.length > 0 && (
-            <div className="mt-3 text-sm text-red-700 rounded-b-lg px-4 py-3 bg-white border-t border-gray-200">
+            <div className="mt-3 text-sm rounded-b-lg px-4 py-3 bg-white border-t border-gray-200">
               {formValidationWarnings.map((w, idx) => (
                 <div key={idx} className="mb-1">
                   <span className="mr-2">⚠️</span>
@@ -648,18 +714,96 @@ export default function EditBookingModal({
               ))}
             </div>
           )}
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button onClick={() => setShowConfirmDialog(true)} disabled={isSubmitting || !isDurationValid(startTime, endTime)}>
-            {isSubmitting ? "Saving..." : "Save Changes"}
-          </Button>
 
-          {!isDurationValid(startTime, endTime) && (
-            <div className="col-span-4 text-sm text-red-700 mt-2">⚠️ Bookings must be at least 30 minutes long. Please adjust the times before saving.</div>
-          )}
+        </div>
+
+        {/* Booking Summary (matches New Booking modal boxed layout) */}
+        {(selectedFacility || startTime || endTime || purpose) && (
+          <div className="border-t pt-6">
+            <h3 className="font-medium mb-4">Booking Summary</h3>
+            <div className="bg-accent/50 p-4 rounded-lg space-y-2">
+              {selectedFacility && (
+                <div className="flex justify-between">
+                  <span className="text-sm">Facility:</span>
+                  <span className="text-sm font-medium">{selectedFacility.name}</span>
+                </div>
+              )}
+
+              {startTime && endTime && (
+                <>
+                  <div className="flex justify-between">
+                    <span className="text-sm">Date:</span>
+                    <span className="text-sm font-medium">{format(startTime, "EEE, MMM d, yyyy")}</span>
+                  </div>
+
+                  <div className="flex justify-between">
+                    <span className="text-sm">Time:</span>
+                    <span className="text-sm font-medium">{format(startTime, "hh:mm a")} - {format(endTime, "hh:mm a")}</span>
+                  </div>
+
+                  <div className="flex justify-between">
+                    <span className="text-sm">Duration:</span>
+                    <span className="text-sm font-medium">{calculateDuration(startTime, endTime)}</span>
+                  </div>
+                </>
+              )}
+
+              {participants && (
+                <div className="flex justify-between">
+                  <span className="text-sm">Participants:</span>
+                  <span className="text-sm font-medium">{participants}</span>
+                </div>
+              )}
+
+              {purpose && (
+                <div className="flex flex-col space-y-1 pt-2 border-t border-gray-200">
+                  <span className="text-sm text-gray-600">Purpose:</span>
+                  <div className="text-left text-sm font-medium text-gray-900 bg-white p-2 rounded border" style={{ wordWrap: 'break-word', overflowWrap: 'anywhere', wordBreak: 'break-word', whiteSpace: 'pre-wrap', maxWidth: '100%', overflow: 'hidden' }}>
+                    {purpose}
+                  </div>
+                </div>
+              )}
+
+              {(Object.keys(equipmentState).filter(k => equipmentState[k]).length > 0 || equipmentOtherText) && (
+                <div className="flex flex-col space-y-1 pt-2 border-t border-gray-200">
+                  <span className="text-sm text-gray-600">Equipment:</span>
+                  <div className="text-sm font-medium text-gray-900 bg-white p-2 rounded border" style={{ wordWrap: 'break-word', overflowWrap: 'anywhere', wordBreak: 'break-word', whiteSpace: 'pre-wrap', maxWidth: '100%', overflow: 'hidden' }}>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      {Object.keys(equipmentState)
+                        .filter(k => equipmentState[k])
+                        .filter(k => !(k === 'others' && equipmentOtherText))
+                        .map(k => (
+                          <div key={`summary-eq-${k}`} className="text-sm">{EQUIPMENT_OPTIONS.find(o => o.key === k)?.label || k}</div>
+                        ))}
+
+                      {equipmentOtherText ? (
+                        <div className="text-sm sm:col-span-3">Others: {equipmentOtherText}</div>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        <DialogFooter>
+          <div className="w-full flex items-center justify-between gap-4">
+            <div className="flex gap-3 w-1/2">
+              <div className="flex-1">
+                <Button variant="outline" onClick={onClose} className="w-full">Cancel</Button>
+              </div>
+              <div className="flex-1">
+                <Button onClick={() => setShowConfirmDialog(true)} disabled={isSubmitting || !isDurationValid(startTime, endTime)} className="w-full">
+                  {isSubmitting ? "Saving..." : "Save Changes"}
+                </Button>
+              </div>
+            </div>
+
+            <div className="w-1/2 text-right text-sm text-gray-500">
+              {(!isDurationValid(startTime, endTime)) ? <span className="text-red-600">⚠️ Bookings must be at least 30 minutes long.</span> : <span>Validation or submission errors will appear below.</span>}
+            </div>
+          </div>
 
           <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
             <AlertDialogContent>

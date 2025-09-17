@@ -25,7 +25,6 @@ export default function BookingDashboard() {
   const [showEditBookingModal, setShowEditBookingModal] = useState(false);
   const [editingBooking, setEditingBooking] = useState<any>(null);
   const [openOthers, setOpenOthers] = useState<Record<string, boolean>>({});
-  const [openPurpose, setOpenPurpose] = useState<Record<string, boolean>>({});
   const [selectedView, setSelectedView] = useState("dashboard");
   // Common hooks used throughout the dashboard
   const { user } = useAuth();
@@ -129,6 +128,10 @@ export default function BookingDashboard() {
     setSelectedView(id);
   };
   const itemsPerPage = 5; // show first 5 bookings in My Bookings (no pagination)
+  // Full Activity Logs notifications page size
+  const notificationsPerPage = 10;
+  // Full Booking History page size (used by Activity Logs -> Booking view)
+  const bookingsPerPage = 10;
   // Activity logs inner tab state
   const [activityTab, setActivityTab] = useState<'booking' | 'notifications'>('booking');
   const [activityBookingPage, setActivityBookingPage] = useState(0);
@@ -155,51 +158,6 @@ export default function BookingDashboard() {
           setActivityTab('booking');
           setActivityBookingPage(0);
         }
-      }
-    } catch (e) {
-      // ignore
-    }
-  }, []);
-
-  // If the app was navigated from /notifications (App sets sessionStorage flag), open the
-  // notifications tab once and then move the URL to the main dashboard so future reloads
-  // land on /booking#dashboard for easier navigation.
-  useEffect(() => {
-    try {
-      // Support two one-time flags: notifications and activity booking
-      const notifyFlag = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('openNotificationsOnce') : null;
-      const activityBookingFlag = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('openActivityBookingOnce') : null;
-
-      if (notifyFlag === '1') {
-        try { sessionStorage.removeItem('openNotificationsOnce'); } catch (_) {}
-        setSelectedView('activity-logs');
-        setActivityTab('notifications');
-        setActivityNotificationsPage(0);
-        try {
-          const target = '/booking#dashboard';
-          if (window.location.pathname + window.location.hash !== target) {
-            window.history.replaceState({}, '', target);
-          }
-        } catch (e) {
-          // ignore
-        }
-        return;
-      }
-
-      if (activityBookingFlag === '1') {
-        try { sessionStorage.removeItem('openActivityBookingOnce'); } catch (_) {}
-        setSelectedView('activity-logs');
-        setActivityTab('booking');
-        setActivityBookingPage(0);
-        try {
-          const target = '/booking#dashboard';
-          if (window.location.pathname + window.location.hash !== target) {
-            window.history.replaceState({}, '', target);
-          }
-        } catch (e) {
-          // ignore
-        }
-        return;
       }
     } catch (e) {
       // ignore
@@ -457,6 +415,14 @@ export default function BookingDashboard() {
     },
     enabled: !!user,
     staleTime: 30_000,
+  });
+
+  // Mutation to mark a notification as read from the notification logs tab
+  const markNotificationReadMutation = useMutation({
+    mutationFn: async (id: string) => apiRequest('POST', `/api/notifications/${id}/read`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/notifications'] });
+    }
   });
 
   // React to top-level route '/notifications' so header links open this tab directly
@@ -1238,14 +1204,19 @@ export default function BookingDashboard() {
                     <p className="text-gray-600 text-sm">No notifications</p>
                   </div>
                 ) : (
-                  notificationsData.slice(activityNotificationsPage * itemsPerPage, (activityNotificationsPage + 1) * itemsPerPage).map((n: any) => (
+                  notificationsData.slice(activityNotificationsPage * notificationsPerPage, (activityNotificationsPage + 1) * notificationsPerPage).map((n: any) => (
                     <div key={n.id} className={`p-3 rounded-md bg-white border ${n.isRead ? 'opacity-70' : ''}`}>
                       <div className="flex items-start justify-between">
                         <div>
                           <div className="font-medium text-sm text-gray-900">{n.title}</div>
                           <div className="text-xs text-gray-600 mt-1">{n.message}</div>
                         </div>
-                        <div className="text-xs text-gray-400">{new Date(n.createdAt).toLocaleString()}</div>
+                        <div className="flex flex-col items-end gap-2">
+                          <div className="text-xs text-gray-400">{new Date(n.createdAt).toLocaleString()}</div>
+                          {!n.isRead && (
+                            <button className="text-xs px-2 py-1 bg-blue-600 text-white rounded" onClick={() => markNotificationReadMutation.mutate(n.id)}>Mark Read</button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))
@@ -1256,9 +1227,9 @@ export default function BookingDashboard() {
               <div className="pt-4 border-t border-gray-100 mt-4 flex items-center justify-between">
                 {activityTab === 'booking' ? (
                   // Compact summary for Recent Booking booking history (no pagination)
-                  <p className="text-sm text-gray-600">Showing {Math.min(5, userBookings.length)} of {userBookings.length} bookings</p>
+                  <p className="text-sm text-gray-600">Showing {Math.min(bookingsPerPage, userBookings.length)} of {userBookings.length} bookings</p>
                 ) : (
-                  <p className="text-sm text-gray-600">Showing {activityNotificationsPage * itemsPerPage + 1} to {Math.min((activityNotificationsPage + 1) * itemsPerPage, notificationsData.length)} of {notificationsData.length} notifications</p>
+                  <p className="text-sm text-gray-600">Showing {activityNotificationsPage * notificationsPerPage + 1} to {Math.min((activityNotificationsPage + 1) * notificationsPerPage, notificationsData.length)} of {notificationsData.length} notifications</p>
                 )}
 
                 <div className="flex items-center gap-2">
@@ -1266,7 +1237,7 @@ export default function BookingDashboard() {
                   {activityTab === 'booking' ? null : (
                     <>
                       <button onClick={() => setActivityNotificationsPage(p => Math.max(0, p - 1))} disabled={activityNotificationsPage === 0} className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50">Prev</button>
-                      <button onClick={() => setActivityNotificationsPage(p => ((p + 1) * itemsPerPage < notificationsData.length ? p + 1 : p))} disabled={(activityNotificationsPage + 1) * itemsPerPage >= notificationsData.length} className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50">Next</button>
+                      <button onClick={() => setActivityNotificationsPage(p => ((p + 1) * notificationsPerPage < notificationsData.length ? p + 1 : p))} disabled={(activityNotificationsPage + 1) * notificationsPerPage >= notificationsData.length} className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50">Next</button>
                     </>
                   )}
                 </div>
@@ -2004,7 +1975,8 @@ export default function BookingDashboard() {
                       <p className="text-gray-600 text-sm">No notifications</p>
                     </div>
                   ) : (
-                    notificationsData.slice(activityNotificationsPage * itemsPerPage, (activityNotificationsPage + 1) * itemsPerPage).map((n: any) => (
+                    // Recent Booking compact preview: show first `itemsPerPage` notifications (no pagination)
+                    notificationsData.slice(0, itemsPerPage).map((n: any) => (
                       <div key={n.id} className={`p-3 rounded-md bg-white border ${n.isRead ? 'opacity-70' : ''}`}>
                         <div className="flex items-start justify-between">
                           <div>
@@ -2022,19 +1994,15 @@ export default function BookingDashboard() {
               <div className="pt-4 border-t border-gray-100 mt-4 flex items-center justify-between">
                 {activityTab === 'booking' ? (
                   // Compact summary for Recent Booking booking history (no pagination)
-                  <p className="text-sm text-gray-600">Showing {Math.min(5, userBookings.length)} of {userBookings.length} bookings</p>
+                  <p className="text-sm text-gray-600">Showing {Math.min(itemsPerPage, userBookings.length)} of {userBookings.length} bookings</p>
                 ) : (
-                  <p className="text-sm text-gray-600">Showing {activityNotificationsPage * itemsPerPage + 1} to {Math.min((activityNotificationsPage + 1) * itemsPerPage, notificationsData.length)} of {notificationsData.length} notifications</p>
+                  // Compact summary for Recent Booking notifications preview (no pagination)
+                  <p className="text-sm text-gray-600">Showing {Math.min(itemsPerPage, notificationsData.length)} of {notificationsData.length} notifications</p>
                 )}
 
                 <div className="flex items-center gap-2">
-                  {/* Hide Prev/Next for Recent Booking compact view; keep pagination controls for notifications */}
-                  {activityTab === 'booking' ? null : (
-                    <>
-                      <button onClick={() => setActivityNotificationsPage(p => Math.max(0, p - 1))} disabled={activityNotificationsPage === 0} className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50">Prev</button>
-                      <button onClick={() => setActivityNotificationsPage(p => ((p + 1) * itemsPerPage < notificationsData.length ? p + 1 : p))} disabled={(activityNotificationsPage + 1) * itemsPerPage >= notificationsData.length} className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50">Next</button>
-                    </>
-                  )}
+                  {/* Recent Booking compact preview: no Prev/Next controls here */}
+                  {null}
                 </div>
               </div>
             </div>

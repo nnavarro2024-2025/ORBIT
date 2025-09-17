@@ -4,17 +4,26 @@ interface CustomTextareaProps {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  maxLength?: number;
+  isInvalid?: boolean;
 }
 
 export const CustomTextarea: React.FC<CustomTextareaProps> = ({
   value,
   onChange,
   placeholder = "Enter text here..."
+  , maxLength
+  , isInvalid = false
 }) => {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    onChange(e.target.value);
+    const val = e.target.value;
+    if (typeof maxLength === 'number' && val.length > maxLength) {
+      onChange(val.slice(0, maxLength));
+    } else {
+      onChange(val);
+    }
     
     // Auto-resize the textarea vertically
     if (textareaRef.current) {
@@ -45,8 +54,9 @@ export const CustomTextarea: React.FC<CustomTextareaProps> = ({
         value={value}
         onChange={handleChange}
         placeholder={placeholder}
+        maxLength={maxLength}
         data-testid="purpose-textarea"
-        className="block w-full min-h-24 p-3 border border-gray-300 rounded-md resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+        className={`block w-full min-h-24 p-3 border rounded-md resize-none focus:outline-none ${isInvalid ? 'border-red-500 focus:ring-2 focus:ring-red-200' : 'border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500'}`}
         style={{
           width: '100%',
           maxWidth: '100%',
@@ -75,6 +85,11 @@ export const CustomTextarea: React.FC<CustomTextareaProps> = ({
         cols={35}
         rows={4}
       />
+      {typeof maxLength === 'number' && (
+        <div style={{ position: 'absolute', right: 8, bottom: 8, fontSize: 12, color: isInvalid ? '#b91c1c' : '#6b7280' }}>
+          {value.length}/{maxLength}
+        </div>
+      )}
     </div>
   );
 };

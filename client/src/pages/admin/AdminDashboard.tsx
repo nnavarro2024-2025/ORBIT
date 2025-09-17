@@ -147,6 +147,8 @@ export default function AdminDashboard() {
   const [successPage, setSuccessPage] = useState(0);
   const [historyPage, setHistoryPage] = useState(0);
   const [systemPage, setSystemPage] = useState(0);
+  const [bookingAlertsPage, setBookingAlertsPage] = useState(0);
+  const [userAlertsPage, setUserAlertsPage] = useState(0);
   const [itemsPerPage] = useState(10);
   // booking tab state intentionally unused here (Tabs handles internal state)
   const [securityTab, setSecurityTab] = useState<string>('booking');
@@ -304,7 +306,22 @@ export default function AdminDashboard() {
   await updateNeedsMutation.mutateAsync({ bookingId, status, note });
   // optimistically record the status so UI updates immediately
   setNeedsStatusById(prev => ({ ...prev, [bookingId]: status }));
-  toast({ title: 'Updated', description: `Marked needs as ${status} for booking ${bookingId}`, variant: 'default' });
+  // Try to surface a user-friendly booking label instead of a raw UUID
+    try {
+    const bookingObj = (allBookings || []).find((b: any) => String(b.id) === String(bookingId));
+    const bookingLabel = bookingObj ? `${getFacilityName(bookingObj.facilityId)} (${formatDateTime(bookingObj.startTime)})` : 'booking';
+    // Map internal status keys to user-friendly labels
+    const statusLabelMap: Record<string, string> = {
+      prepared: 'Prepared',
+      not_available: 'Not available',
+      'not-available': 'Not available',
+      'not available': 'Not available'
+    };
+    const statusLabel = statusLabelMap[String(status)] || String(status);
+    toast({ title: 'Updated', description: `Marked needs as ${statusLabel} for ${bookingLabel}`, variant: 'default' });
+  } catch (e) {
+    toast({ title: 'Updated', description: `Marked needs as ${status} for booking`, variant: 'default' });
+  }
     } catch (err: any) {
       const msg = err?.message || String(err);
       toast({ title: 'Error', description: msg, variant: 'destructive' });
@@ -1083,7 +1100,7 @@ export default function AdminDashboard() {
                                   <div className="text-right text-xs text-gray-500 mt-1">
                                     {booking.arrivalConfirmationDeadline && !booking.arrivalConfirmed ? (
                                       <div className="flex items-center justify-end gap-3">
-                                        <div>Confirmation required in: <Countdown expiry={booking.arrivalConfirmationDeadline} onExpire={() => { queryClient.invalidateQueries({ queryKey: ['/api/admin/bookings'] }); toast({ title: 'Arrival Confirmation Expired', description: `Arrival confirmation window expired for booking ${booking.id}.` }); }} /></div>
+                                        <div>Confirmation required in: <Countdown expiry={booking.arrivalConfirmationDeadline} onExpire={() => { queryClient.invalidateQueries({ queryKey: ['/api/admin/bookings'] }); try { const label = `${getFacilityName(booking.facilityId)} (${formatDateTime(booking.startTime)})`; toast({ title: 'Arrival Confirmation Expired', description: `Arrival confirmation window expired for ${label}.` }); } catch (e) { toast({ title: 'Arrival Confirmation Expired', description: 'Arrival confirmation window expired for a booking.' }); } }} /></div>
                                         <div>
                                           <Button
                                             onClick={() => confirmArrivalMutation.mutate({ bookingId: booking.id })}
@@ -1851,13 +1868,20 @@ export default function AdminDashboard() {
                     </div>
                     
                     <div className="space-y-3">
-                      {alerts?.filter(a => {
+                      {(() => {
+                        const bookingAlerts = (alerts || []).filter(a => {
                           if (a.type === 'booking') return true;
                           const t = (a.title || '').toLowerCase();
                           return t.includes('booking cancelled') || t.includes('booking canceled');
-                        })
-                        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-                        .map((alert: SystemAlert) => {
+                        }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                        const alertsPerPage = 10;
+                        const page = bookingAlertsPage || 0;
+                        const start = page * alertsPerPage;
+                        const pageItems = bookingAlerts.slice(start, start + alertsPerPage);
+
+                        return (
+                          <>
+                            {pageItems.map((alert: SystemAlert) => {
                           const isHighPriority = alert.severity === 'critical' || alert.severity === 'high';
                           // Precompute parsed alert values so we don't put statements inside JSX
                           const raw = String(alert.message || '');
@@ -2034,6 +2058,21 @@ export default function AdminDashboard() {
                               </div>
                             );
                         })}
+
+                        {/* Pagination controls for booking alerts */}
+                        {bookingAlerts.length > 10 && (
+                          <div className="flex items-center justify-between pt-4 border-t border-gray-200">
+                            <p className="text-sm text-gray-600">Showing {start + 1} to {Math.min(start + 10, bookingAlerts.length)} of {bookingAlerts.length} alerts</p>
+                            <div className="flex items-center gap-2">
+                              <button onClick={() => setBookingAlertsPage(prev => Math.max(prev - 1, 0))} disabled={page === 0} className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"><ChevronLeft className="h-4 w-4" /></button>
+                              <span className="px-3 py-1 text-sm font-medium">{page + 1} of {Math.ceil(bookingAlerts.length / alertsPerPage)}</span>
+                              <button onClick={() => setBookingAlertsPage(prev => (bookingAlerts.length > (prev + 1) * alertsPerPage ? prev + 1 : prev))} disabled={bookingAlerts.length <= (page + 1) * alertsPerPage} className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"><ChevronRight className="h-4 w-4" /></button>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                      );
+                      })()}
                     </div>
                     
                     {(!alerts || alerts.filter(a => {
@@ -2067,16 +2106,23 @@ export default function AdminDashboard() {
                     </div>
                     
                     <div className="space-y-3">
-                      {alerts?.filter(a => {
+                      {(() => {
+                        const userAlerts = (alerts || []).filter(a => {
                           const t = (a.title || '').toLowerCase();
                           const m = (a.message || '').toLowerCase();
                           // Include user management events and equipment/needs submission alerts here
                           return t.includes('user banned') || t.includes('user unbanned') || 
                                  t.includes('suspension') || m.includes('banned') || m.includes('unbanned') ||
                                  t.includes('equipment') || t.includes('needs') || m.includes('equipment') || m.includes('needs');
-                        })
-                        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-                        .map((alert: SystemAlert) => {
+                        }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                        const alertsPerPage = 10;
+                        const page = userAlertsPage || 0;
+                        const start = page * alertsPerPage;
+                        const pageItems = userAlerts.slice(start, start + alertsPerPage);
+
+                        return (
+                          <>
+                            {pageItems.map((alert: SystemAlert) => {
                           const formattedMessage = formatAlertMessage(alert.message);
                           // If this alert relates to equipment/needs, also append the createdAt time inline
                           const isEquipmentRelated = /equipment|needs/i.test(String(alert.title || '') + ' ' + String(alert.message || ''));
@@ -2151,6 +2197,21 @@ export default function AdminDashboard() {
                             </div>
                           );
                         })}
+
+                        {/* Pagination controls for user activity alerts */}
+                        {userAlerts.length > 10 && (
+                          <div className="flex items-center justify-between pt-4 border-t border-gray-200">
+                            <p className="text-sm text-gray-600">Showing {start + 1} to {Math.min(start + 10, userAlerts.length)} of {userAlerts.length} activities</p>
+                            <div className="flex items-center gap-2">
+                              <button onClick={() => setUserAlertsPage(prev => Math.max(prev - 1, 0))} disabled={page === 0} className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"><ChevronLeft className="h-4 w-4" /></button>
+                              <span className="px-3 py-1 text-sm font-medium">{page + 1} of {Math.ceil(userAlerts.length / alertsPerPage)}</span>
+                              <button onClick={() => setUserAlertsPage(prev => (userAlerts.length > (prev + 1) * alertsPerPage ? prev + 1 : prev))} disabled={userAlerts.length <= (page + 1) * alertsPerPage} className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"><ChevronRight className="h-4 w-4" /></button>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                      );
+                      })()}
                     </div>
                     
                     {(!alerts || alerts.filter(a => {
@@ -2865,15 +2926,26 @@ export default function AdminDashboard() {
                   <div className="space-y-3">
                     {pendingBookings.slice(0,5).map((booking) => (
                       <div key={booking.id} className="bg-gray-50 rounded-lg p-3 hover:bg-gray-100 transition-colors duration-200">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <h4 className="font-medium text-gray-900">{getFacilityName(booking.facilityId)}</h4>
-                            <p className="text-sm text-gray-600">{getUserEmail(booking.userId)} • {new Date(booking.startTime).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</p>
+                        <button
+                          type="button"
+                          className="w-full text-left"
+                          onClick={() => {
+                            setSelectedView('booking-management');
+                            setBookingTab('requests');
+                            try { setLocation(`/admin#booking-${booking.id}`); } catch (e) { /* ignore */ }
+                          }}
+                          aria-label={`Open booking request ${booking.id}`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <h4 className="font-medium text-gray-900">{getFacilityName(booking.facilityId)}</h4>
+                              <p className="text-sm text-gray-600">{getUserEmail(booking.userId)} • {new Date(booking.startTime).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</p>
+                            </div>
+                            <div>
+                              {renderStatusBadge(booking.status)}
+                            </div>
                           </div>
-                          <div>
-                            {renderStatusBadge(booking.status)}
-                          </div>
-                        </div>
+                        </button>
                       </div>
                     ))}
 

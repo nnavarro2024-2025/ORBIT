@@ -382,6 +382,9 @@ class DatabaseStorage implements IStorage {
   }
 
   async checkUserFacilityBookings(userId: string, facilityId: number, excludeBookingId?: string): Promise<FacilityBooking[]> {
+    // Only consider bookings that are still active (approved or pending) AND whose endTime is in the future.
+    // This allows users to create a new booking for the same facility after their previous booking has already ended.
+    const now = new Date();
     let query = db.select().from(facilityBookings)
       .where(
         and(
@@ -391,11 +394,14 @@ class DatabaseStorage implements IStorage {
           or(
             eq(facilityBookings.status, "approved"),
             eq(facilityBookings.status, "pending")
-          )
+          ),
+          // Only consider bookings with endTime > now (still ongoing/future)
+          gt(facilityBookings.endTime, now)
         )
       );
 
     if (excludeBookingId) {
+      const nowEx = new Date();
       query = db.select().from(facilityBookings).where(
         and(
           eq(facilityBookings.userId, userId),
@@ -404,6 +410,7 @@ class DatabaseStorage implements IStorage {
             eq(facilityBookings.status, "approved"),
             eq(facilityBookings.status, "pending")
           ),
+          gt(facilityBookings.endTime, nowEx),
           ne(facilityBookings.id, excludeBookingId)
         )
       );

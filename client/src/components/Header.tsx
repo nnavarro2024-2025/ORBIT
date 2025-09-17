@@ -15,7 +15,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useLocation } from "wouter";
 import ProfileModal from "./modals/ProfileModal";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 // Helper: parse alert for equipment-related content in a safe, testable way
 function parseEquipmentAlert(alert: any) {
@@ -122,6 +122,8 @@ export default function Header() {
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
   const [pendingMarkIds, setPendingMarkIds] = useState<Set<string>>(new Set());
+  // Hidden alerts per-user (client-side only). Persist in localStorage so hides survive reload.
+  const [hiddenAlertIds, setHiddenAlertIds] = useState<Set<string>>(new Set());
 
   // Admin alerts (notifications)
   const isAdmin = !!(user && user.role === 'admin');
@@ -208,7 +210,39 @@ export default function Header() {
   const userAlertsFiltered = Array.isArray(userAlerts) && user ? userAlerts.filter((a: any) => a.userId === user.id) : [];
   const alertsData = isAdmin ? adminAlerts : userAlertsFiltered;
   const alertsLoading = isAdmin ? adminLoading : userLoading;
-  const unreadCount = Array.isArray(alertsData) ? alertsData.filter((a: any) => !a.isRead).length : 0;
+  // Unread count should reflect only visible (non-hidden) alerts in the bell
+  const unreadCount = Array.isArray(alertsData) ? alertsData.filter((a: any) => !a.isRead && !hiddenAlertIds.has(a.id)).length : 0;
+
+  // Load persisted hidden alert IDs for the current user from localStorage
+  const hiddenStorageKey = user ? `orbit:hiddenAlerts:${user.id}` : null;
+
+  useEffect(() => {
+    try {
+      if (!hiddenStorageKey) return;
+      const raw = localStorage.getItem(hiddenStorageKey);
+      if (!raw) return;
+      const arr = JSON.parse(raw || '[]');
+      if (Array.isArray(arr)) setHiddenAlertIds(new Set(arr));
+    } catch (e) {
+      // ignore parse errors
+    }
+  }, [hiddenStorageKey]);
+
+  const persistHiddenIds = (nextSet: Set<string>) => {
+    try {
+      if (!hiddenStorageKey) return;
+      localStorage.setItem(hiddenStorageKey, JSON.stringify(Array.from(nextSet)));
+    } catch (e) {}
+  };
+
+  const hideAlertInBell = (id: string) => {
+    setHiddenAlertIds(prev => {
+      const next = new Set(prev);
+      next.add(id);
+      persistHiddenIds(next);
+      return next;
+    });
+  };
 
   const handleLogout = async () => {
     const { error } = await supabase.auth.signOut();
@@ -278,12 +312,13 @@ export default function Header() {
               <DropdownMenuLabel className="font-medium p-2">Notifications</DropdownMenuLabel>
               {alertsLoading ? (
                 <div className="p-3 text-sm text-gray-500">Loading...</div>
-              ) : Array.isArray(alertsData) && alertsData.length > 0 ? (
+              ) : Array.isArray(alertsData) && alertsData.filter((a: any) => !hiddenAlertIds.has(a.id)).length > 0 ? (
                 <div className="space-y-2">
                   {alertsData
                     .slice()
                     .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-                    .slice(0, 6)
+                    .filter((a: any) => !hiddenAlertIds.has(a.id))
+                    .slice(0, 5)
                     .map((alert: any) => {
                       const parsed = parseEquipmentAlert(alert);
 
@@ -332,8 +367,8 @@ export default function Header() {
                             <div className="flex-1 pr-4">
                               <div className="flex items-start justify-between">
                                 <div className="font-medium text-sm text-gray-900">{parsed.visibleTitle}</div>
-                                {!alert.isRead && (
-                                  <div className="ml-4">
+                                <div className="ml-4 flex items-center gap-2">
+                                  {!alert.isRead && (
                                     <button
                                       onClick={() => markAlertReadMutation.mutate(alert.id)}
                                       className="inline-flex items-center gap-1 px-3 py-1 bg-blue-600 text-white text-xs font-medium rounded disabled:opacity-60"
@@ -341,8 +376,17 @@ export default function Header() {
                                     >
                                       {pendingMarkIds.has(alert.id) ? 'Marking...' : 'Mark Read'}
                                     </button>
-                                  </div>
-                                )}
+                                  )}
+                                  {/* Dismiss/hide from bell only (client-side). Does not delete or mark as read server-side. */}
+                                  <button
+                                    onClick={() => hideAlertInBell(alert.id)}
+                                    aria-label="Dismiss notification"
+                                    title="Remove from bell"
+                                    className="inline-flex items-center justify-center w-6 h-6 text-gray-500 hover:text-gray-800 rounded"
+                                  >
+                                    ×
+                                  </button>
+                                </div>
                               </div>
 
                               <div className="text-xs text-gray-600 mt-1 break-words">{subLine}</div>
@@ -354,7 +398,10 @@ export default function Header() {
                       );
                     })}
 
-                  {alertsData.length > 6 && (
+                  {/* If some alerts are hidden, offer a small control to restore them */}
+                  {/* hidden alerts are persisted per-user in localStorage; dismissed items are removed from bell UI */}
+
+                  {alertsData.length > 5 && (
                     <div className="pt-2 border-t border-gray-100">
                       <button
                         onClick={() => {
@@ -374,7 +421,18 @@ export default function Header() {
                   )}
                 </div>
               ) : (
-                <div className="p-3 text-sm text-gray-500">No notifications</div>
+                <div className="p-4">
+                  <div className="text-sm text-gray-700">No notifications</div>
+                  <div className="text-xs text-gray-500 mt-2">Check the Notification Logs for older items.</div>
+                  <div className="mt-3">
+                    <button
+                      onClick={() => { if (isAdmin) setLocation('/admin#activity:notifications'); else setLocation('/activity-logs:notifications'); }}
+                      className="text-sm text-pink-600 hover:text-pink-700"
+                    >
+                      View Notification Logs
+                    </button>
+                  </div>
+                </div>
               )}
             </DropdownMenuContent>
           </DropdownMenu>

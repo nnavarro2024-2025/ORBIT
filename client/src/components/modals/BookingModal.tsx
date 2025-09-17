@@ -139,8 +139,8 @@ const isWithinLibraryHours = (date: Date): boolean => {
   // 5:00 PM = 17 * 60 = 1020 minutes
   const libraryOpenTime = 7 * 60 + 30; // 7:30 AM
   const libraryCloseTime = 17 * 60; // 5:00 PM
-  
   return timeInMinutes >= libraryOpenTime && timeInMinutes <= libraryCloseTime;
+
 };
 
 const formatLibraryHours = (): string => {
@@ -302,6 +302,8 @@ export default function BookingModal({
     return init;
   });
   const [equipmentOtherText, setEquipmentOtherText] = useState('');
+  const PURPOSE_MAX = 200;
+  const OTHERS_MAX = 50;
 
   const form = useForm<BookingFormData>({
     resolver: zodResolver(bookingSchema),
@@ -933,7 +935,8 @@ export default function BookingModal({
                       <Input
                         value={equipmentOtherText}
                         onChange={(e: any) => {
-                          const val = e.target.value;
+                          let val = e.target.value;
+                          if (val.length > OTHERS_MAX) val = val.slice(0, OTHERS_MAX);
                           setEquipmentOtherText(val);
                           // Auto-toggle the 'others' checkbox based on input content
                           setEquipmentState(prev => ({ ...prev, ['others']: val.trim().length > 0 }));
@@ -941,11 +944,22 @@ export default function BookingModal({
                         placeholder="Describe other needs"
                         aria-label="Other equipment details"
                         className="w-full"
+                        maxLength={OTHERS_MAX}
                       />
+                      {equipmentOtherText ? (
+                        <div>
+                          <div className={`text-xs mt-1 ${equipmentOtherText.length >= OTHERS_MAX ? 'text-red-600' : 'text-gray-500'}`}>{equipmentOtherText.length}/{OTHERS_MAX}</div>
+                          {equipmentOtherText.length >= OTHERS_MAX ? (
+                            <div className="text-xs text-red-600 mt-1">Maximum length reached ({OTHERS_MAX} characters)</div>
+                          ) : null}
+                        </div>
+                      ) : null}
+
                     </div>
                   </div>
                 </div>
               </div>
+
             </div>
 
             <div className="grid md:grid-cols-2 gap-6">
@@ -1135,11 +1149,24 @@ export default function BookingModal({
                   <div style={{ display: 'block', width: '100%', maxWidth: '100%' }}>
                     <CustomTextarea
                       value={field.value || ""}
-                      onChange={field.onChange}
+                      onChange={(v) => {
+                        // enforce max length at UI level
+                        if (v && v.length > PURPOSE_MAX) {
+                          field.onChange(v.slice(0, PURPOSE_MAX));
+                        } else {
+                          field.onChange(v);
+                        }
+                      }}
                       placeholder="Describe your purpose for booking this facility"
+                      maxLength={PURPOSE_MAX}
+                      isInvalid={!!(field.value && field.value.length >= PURPOSE_MAX)}
                     />
                   </div>
                   <FormMessage />
+                  {/* Inline helper / error shown when at or over max length or when empty and touched */}
+                  {field.value && field.value.length >= PURPOSE_MAX ? (
+                    <div className="text-xs text-red-600 mt-1">Maximum length reached ({PURPOSE_MAX} characters)</div>
+                  ) : null}
                 </FormItem>
               )}
             />
@@ -1155,41 +1182,44 @@ export default function BookingModal({
                       <span className="text-sm font-medium">{selectedFacility.name}</span>
                     </div>
                   )}
-                      {form.watch("startTime") && form.watch("endTime") && (
-                        <>
-                          <div className="flex justify-between">
-                            <span className="text-sm">Date:</span>
-                            <span className="text-sm font-medium">
-                              {format(form.watch("startTime"), "EEE, MMM d, yyyy")}
-                            </span>
-                          </div>
 
-                          <div className="flex justify-between">
-                            <span className="text-sm">Time:</span>
-                            <span className="text-sm font-medium">
-                              {format(form.watch("startTime"), "hh:mm a")} - {format(form.watch("endTime"), "hh:mm a")}
-                            </span>
-                          </div>
+                  {form.watch("startTime") && form.watch("endTime") && (
+                    <>
+                      <div className="flex justify-between">
+                        <span className="text-sm">Date:</span>
+                        <span className="text-sm font-medium">
+                          {format(form.watch("startTime"), "EEE, MMM d, yyyy")}
+                        </span>
+                      </div>
 
-                          <div className="flex justify-between">
-                            <span className="text-sm">Duration:</span>
-                            <span className="text-sm font-medium">
-                              {calculateDuration(form.watch("startTime"), form.watch("endTime"))}
-                            </span>
-                          </div>
-                        </>
-                      )}
+                      <div className="flex justify-between">
+                        <span className="text-sm">Time:</span>
+                        <span className="text-sm font-medium">
+                          {format(form.watch("startTime"), "hh:mm a")} - {format(form.watch("endTime"), "hh:mm a")}
+                        </span>
+                      </div>
+
+                      <div className="flex justify-between">
+                        <span className="text-sm">Duration:</span>
+                        <span className="text-sm font-medium">
+                          {calculateDuration(form.watch("startTime"), form.watch("endTime"))}
+                        </span>
+                      </div>
+                    </>
+                  )}
+
                   {form.watch("participants") && (
                     <div className="flex justify-between">
                       <span className="text-sm">Participants:</span>
                       <span className="text-sm font-medium">{form.watch("participants")}</span>
                     </div>
                   )}
+
                   {form.watch("purpose") && (
                     <div className="flex flex-col space-y-1 pt-2 border-t border-gray-200">
                       <span className="text-sm text-gray-600">Purpose:</span>
                       <div 
-                        className="text-sm font-medium text-gray-900 bg-white p-2 rounded border"
+                        className="text-left text-sm font-medium text-gray-900 bg-white p-2 rounded border"
                         style={{
                           wordWrap: 'break-word',
                           overflowWrap: 'anywhere',
@@ -1200,6 +1230,35 @@ export default function BookingModal({
                         }}
                       >
                         {form.watch("purpose")}
+                      </div>
+                    </div>
+                  )}
+                  {(Object.keys(equipmentState).filter(k => equipmentState[k]).length > 0 || equipmentOtherText) && (
+                    <div className="flex flex-col space-y-1 pt-2 border-t border-gray-200">
+                      <span className="text-sm text-gray-600">Equipment:</span>
+                      <div
+                        className="text-sm font-medium text-gray-900 bg-white p-2 rounded border"
+                        style={{
+                          wordWrap: 'break-word',
+                          overflowWrap: 'anywhere',
+                          wordBreak: 'break-word',
+                          whiteSpace: 'pre-wrap',
+                          maxWidth: '100%',
+                          overflow: 'hidden'
+                        }}
+                      >
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          {Object.keys(equipmentState)
+                            .filter(k => equipmentState[k])
+                            .filter(k => !(k === 'others' && equipmentOtherText))
+                            .map(k => (
+                              <div key={`summary-eq-${k}`} className="text-sm">{EQUIPMENT_OPTIONS.find(o => o.key === k)?.label || k}</div>
+                            ))}
+
+                          {equipmentOtherText ? (
+                            <div className="text-sm sm:col-span-3">Others: {equipmentOtherText}</div>
+                          ) : null}
+                        </div>
                       </div>
                     </div>
                   )}
