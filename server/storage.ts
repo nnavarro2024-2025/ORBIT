@@ -66,6 +66,10 @@ export interface IStorage {
   // Check only approved bookings for conflicts (used when creating new pending requests)
   checkApprovedBookingConflicts(facilityId: number, startTime: Date, endTime: Date, excludeBookingId?: string): Promise<FacilityBooking[]>;
   checkUserOverlappingBookings(userId: string, startTime: Date, endTime: Date, excludeBookingId?: string): Promise<FacilityBooking[]>;
+  // Check user bookings for any overlapping pending or approved bookings (across facilities)
+  checkUserAnyOverlappingBookings(userId: string, startTime: Date, endTime: Date, excludeBookingId?: string): Promise<FacilityBooking[]>;
+  // Check if user has any active booking (pending or approved) whose endTime is in the future
+  checkUserHasActiveBooking(userId: string, excludeBookingId?: string): Promise<FacilityBooking[]>;
   cancelAllUserBookings(userId: string, adminId: string, reason: string): Promise<number>;
   getPendingFacilityBookings(): Promise<FacilityBooking[]>;
   getFacilityBookingsByDateRange(start: Date, end: Date): Promise<FacilityBooking[]>;
@@ -249,9 +253,54 @@ class DatabaseStorage implements IStorage {
   }
 
   // Facility booking operations
+  // Application-level conflict error so callers can translate to 409
+  public ConflictError = class ConflictError extends Error {
+    public conflicts: FacilityBooking[];
+    constructor(message: string, conflicts: FacilityBooking[] = []) {
+      super(message);
+      this.conflicts = conflicts;
+      this.name = 'ConflictError';
+    }
+  };
+
   async createFacilityBooking(booking: InsertFacilityBooking): Promise<FacilityBooking> {
-    const [newBooking] = await db.insert(facilityBookings).values(booking as any).returning();
-    return newBooking;
+    // Run inside a DB transaction and obtain an advisory lock keyed by facility id to reduce race windows
+    const facilityId = booking.facilityId;
+    try {
+      const result = await db.transaction(async (tx) => {
+        // Acquire advisory lock for this facility within the transaction
+        // Note: drizzle's sql helper allows running raw SQL
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(${facilityId})`);
+
+        // Re-check for overlapping pending or approved bookings inside the transaction
+        const now = new Date();
+        const overlaps = await tx.select().from(facilityBookings).where(
+          and(
+            eq(facilityBookings.facilityId, facilityId),
+            or(eq(facilityBookings.status, 'approved'), eq(facilityBookings.status, 'pending')),
+            and(
+              lt(facilityBookings.startTime, booking.endTime),
+              gt(facilityBookings.endTime, booking.startTime)
+            )
+          )
+        );
+
+        if (Array.isArray(overlaps) && overlaps.length > 0) {
+          // Throw a known ConflictError so route can translate to 409
+          throw new (this.ConflictError)('Booking conflict detected', overlaps as FacilityBooking[]);
+        }
+
+        // No conflicts - insert booking
+        const [created] = await tx.insert(facilityBookings).values(booking as any).returning();
+        return created;
+      });
+      return result as FacilityBooking;
+    } catch (err: any) {
+      // Re-throw ConflictError so callers can handle it
+      if (err && err.name === 'ConflictError') throw err;
+      console.error('❌ [STORAGE] createFacilityBooking failed:', err);
+      throw err;
+    }
   }
 
   async getFacilityBooking(id: string): Promise<FacilityBooking | undefined> {
@@ -260,6 +309,11 @@ class DatabaseStorage implements IStorage {
   }
 
   async updateFacilityBooking(id: string, updates: Partial<FacilityBooking>): Promise<void> {
+    try {
+      if (updates && (updates as any).equipment) {
+        try { console.log('[storage] updateFacilityBooking - writing equipment for booking', id, (updates as any).equipment); } catch (e) {}
+      }
+    } catch (e) {}
     await db.update(facilityBookings).set(updates).where(eq(facilityBookings.id, id));
   }
 
@@ -347,11 +401,8 @@ class DatabaseStorage implements IStorage {
       .where(
         and(
           eq(facilityBookings.userId, userId),
-          // Only check active bookings (approved or pending)
-          or(
-            eq(facilityBookings.status, "approved"),
-            eq(facilityBookings.status, "pending")
-          ),
+          // Only check approved (scheduled/active) bookings for overlap
+          eq(facilityBookings.status, "approved"),
           // Check for time overlap: new booking overlaps with existing if:
           // new start < existing end AND new end > existing start
           and(
@@ -365,14 +416,66 @@ class DatabaseStorage implements IStorage {
       query = db.select().from(facilityBookings).where(
         and(
           eq(facilityBookings.userId, userId),
-          or(
-            eq(facilityBookings.status, "approved"),
-            eq(facilityBookings.status, "pending")
-          ),
+          eq(facilityBookings.status, "approved"),
           and(
             lt(facilityBookings.startTime, endTime),
             gt(facilityBookings.endTime, startTime)
           ),
+          ne(facilityBookings.id, excludeBookingId)
+        )
+      );
+    }
+
+    return query;
+  }
+
+  async checkUserAnyOverlappingBookings(userId: string, startTime: Date, endTime: Date, excludeBookingId?: string): Promise<FacilityBooking[]> {
+    // Check for both pending and approved bookings for this user that overlap the requested time
+    let query = db.select().from(facilityBookings)
+      .where(
+        and(
+          eq(facilityBookings.userId, userId),
+          or(eq(facilityBookings.status, "approved"), eq(facilityBookings.status, "pending")),
+          and(
+            lt(facilityBookings.startTime, endTime),
+            gt(facilityBookings.endTime, startTime)
+          )
+        )
+      );
+
+    if (excludeBookingId) {
+      query = db.select().from(facilityBookings).where(
+        and(
+          eq(facilityBookings.userId, userId),
+          or(eq(facilityBookings.status, "approved"), eq(facilityBookings.status, "pending")),
+          and(
+            lt(facilityBookings.startTime, endTime),
+            gt(facilityBookings.endTime, startTime)
+          ),
+          ne(facilityBookings.id, excludeBookingId)
+        )
+      );
+    }
+
+    return query;
+  }
+
+  async checkUserHasActiveBooking(userId: string, excludeBookingId?: string): Promise<FacilityBooking[]> {
+    const now = new Date();
+    let query = db.select().from(facilityBookings).where(
+      and(
+        eq(facilityBookings.userId, userId),
+        or(eq(facilityBookings.status, 'approved'), eq(facilityBookings.status, 'pending')),
+        gt(facilityBookings.endTime, now)
+      )
+    );
+
+    if (excludeBookingId) {
+      query = db.select().from(facilityBookings).where(
+        and(
+          eq(facilityBookings.userId, userId),
+          or(eq(facilityBookings.status, 'approved'), eq(facilityBookings.status, 'pending')),
+          gt(facilityBookings.endTime, now),
           ne(facilityBookings.id, excludeBookingId)
         )
       );
@@ -390,11 +493,8 @@ class DatabaseStorage implements IStorage {
         and(
           eq(facilityBookings.userId, userId),
           eq(facilityBookings.facilityId, facilityId),
-          // Only check active bookings (approved or pending)
-          or(
-            eq(facilityBookings.status, "approved"),
-            eq(facilityBookings.status, "pending")
-          ),
+          // Only check approved (scheduled/active) bookings
+          eq(facilityBookings.status, "approved"),
           // Only consider bookings with endTime > now (still ongoing/future)
           gt(facilityBookings.endTime, now)
         )
@@ -406,10 +506,7 @@ class DatabaseStorage implements IStorage {
         and(
           eq(facilityBookings.userId, userId),
           eq(facilityBookings.facilityId, facilityId),
-          or(
-            eq(facilityBookings.status, "approved"),
-            eq(facilityBookings.status, "pending")
-          ),
+          eq(facilityBookings.status, "approved"),
           gt(facilityBookings.endTime, nowEx),
           ne(facilityBookings.id, excludeBookingId)
         )
@@ -450,12 +547,81 @@ class DatabaseStorage implements IStorage {
 
   // System alerts
   async createSystemAlert(alert: SystemAlert): Promise<SystemAlert> {
-    const [newAlert] = await db.insert(systemAlerts).values(alert as any).returning();
-    return newAlert;
+    try {
+      try { console.log('[storage][DEBUG] createSystemAlert called title="' + String(alert.title) + '" userId=' + String(alert.userId)); } catch (e) {}
+
+      // Normalization helper: extract first meaningful line and strip noisy timestamps
+      const normalizeFirstLine = (text: string | undefined) => {
+        try {
+          const raw = String(text || '');
+          const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+          const first = lines.length > 0 ? lines[0] : '';
+          // Remove common date/time patterns (MM/DD/YYYY, YYYY-MM-DD, HH:MM:SS, AM/PM)
+          return first.replace(/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/g, '')
+                      .replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z?\b/g, '')
+                      .replace(/\b\d{1,2}:\d{2}:\d{2}\b/g, '')
+                      .replace(/\b\d{1,2}:\d{2}\s?(AM|PM)\b/gi, '')
+                      .replace(/\s{2,}/g, ' ')
+                      .replace(/^(An admin updated the equipment request at[:\s]*)/i, '')
+                      .trim();
+        } catch (e) { return String(text || '').trim(); }
+      };
+
+      // Choose a lookback window: admin/global alerts get a longer window
+      const FIVE_MIN = 5 * 60 * 1000;
+      const ONE_DAY = 24 * 60 * 60 * 1000;
+      const lookbackMs = alert.userId == null ? ONE_DAY : FIVE_MIN;
+      const cutoff = new Date(Date.now() - lookbackMs);
+
+      // Build user filter: match same userId (including NULL for global/admin)
+      const userCondition = alert.userId == null ? sql`${systemAlerts.userId} IS NULL` : eq(systemAlerts.userId, alert.userId as any);
+
+      // Find recent candidate alerts with same title and user scope
+      const candidates: SystemAlert[] = await db.select().from(systemAlerts).where(
+        and(
+          eq(systemAlerts.title, alert.title as any),
+          userCondition,
+          gte(systemAlerts.createdAt, cutoff as any)
+        )
+      ).orderBy(desc(systemAlerts.createdAt));
+
+      const incomingKey = normalizeFirstLine(alert.message);
+      for (const cand of (candidates || [])) {
+        const candKey = normalizeFirstLine(cand.message as any);
+        if (candKey && candKey === incomingKey) {
+          // Found a near-duplicate: update existing alert's message and updatedAt, return it
+          try {
+            const [updated] = await db.update(systemAlerts).set({ message: alert.message, updatedAt: new Date() } as any).where(eq(systemAlerts.id, cand.id)).returning();
+            try { console.log('[storage][DEBUG] createSystemAlert deduped to existing id=' + String(cand.id)); } catch (e) {}
+            return updated || cand;
+          } catch (e) {
+            // If update fails, fall back to inserting a new alert below
+            console.warn('[storage][WARN] Failed to update existing alert during dedupe, proceeding to insert new alert', e);
+            break;
+          }
+        }
+      }
+
+      // No duplicate found -> insert new alert
+      const [newAlert] = await db.insert(systemAlerts).values(alert as any).returning();
+      try { console.log('[storage][DEBUG] createSystemAlert inserted id=' + String(newAlert?.id) + ' userId=' + String(newAlert?.userId)); } catch (e) {}
+      return newAlert;
+    } catch (e) {
+      console.error('[storage][ERROR] createSystemAlert failed for title="' + String(alert.title) + '" userId=' + String(alert.userId), e);
+      throw e;
+    }
   }
 
   async getSystemAlerts(): Promise<SystemAlert[]> {
-    return db.select().from(systemAlerts).orderBy(desc(systemAlerts.createdAt));
+    // Order alerts by most-recent activity: prefer updatedAt when present, otherwise createdAt
+    try {
+  // Use raw COALESCE on column names to avoid type-level references to generated column objects
+  // Await the query so any DB errors (e.g. missing column) are caught and handled below.
+  return await db.select().from(systemAlerts).orderBy(desc(sql`COALESCE(system_alerts.updated_at, system_alerts.created_at)`));
+    } catch (e) {
+      // Fallback for drivers that may not support COALESCE in this helper
+      return await db.select().from(systemAlerts).orderBy(desc(systemAlerts.createdAt));
+    }
   }
 
   async markAlertAsRead(id: string): Promise<number> {
@@ -480,7 +646,10 @@ class DatabaseStorage implements IStorage {
   }
 
   async updateSystemAlert(id: string, updates: Partial<SystemAlert>): Promise<SystemAlert | null> {
-    const [updated] = await db.update(systemAlerts).set(updates as any).where(eq(systemAlerts.id, id)).returning();
+    // Ensure updatedAt is set so updated alerts surface in admin lists ordered by recent activity
+    const toUpdate = { ...(updates as any) };
+    if (!toUpdate.updatedAt) toUpdate.updatedAt = new Date();
+    const [updated] = await db.update(systemAlerts).set(toUpdate as any).where(eq(systemAlerts.id, id)).returning();
     return updated || null;
   }
 

@@ -13,27 +13,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+// select/calendar/popover UI are unused in this read-only edit modal
 import { format } from "date-fns";
-import { CalendarIcon, Plus, Minus } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Plus, Minus } from "lucide-react";
+// cn utility no longer used in this file
 import { useToast } from "@/hooks/use-toast";
 import { CustomTextarea } from "@/components/ui/custom-textarea";
 
-// Small helper: return a short description for known facility names (same helper as BookingModal)
-const getFacilityDescriptionByName = (name?: string) => {
-  if (!name) return '';
-  const lower = name.toLowerCase();
-  if (lower.includes('collaborative learning room 1') || lower.includes('collaborative learning room 2') || lower.includes('collaborative learning')) {
-    return 'Collaborative space for group study and small projects (up to 8 people).';
-  }
-  if (lower.includes('board room') || lower.includes('boardroom')) {
-    return 'Formal boardroom for meetings and presentations (up to 12 people).';
-  }
-  return 'Comfortable study space suitable for individual or small group use.';
-};
+// facility description helper is no longer needed here
 
 // Library working hours validation functions
 const isWithinLibraryHours = (date: Date): boolean => {
@@ -42,15 +29,15 @@ const isWithinLibraryHours = (date: Date): boolean => {
   const timeInMinutes = hours * 60 + minutes;
   
   // 7:30 AM = 7 * 60 + 30 = 450 minutes
-  // 5:00 PM = 17 * 60 = 1020 minutes
+  // 7:00 PM = 19 * 60 = 1140 minutes
   const libraryOpenTime = 7 * 60 + 30; // 7:30 AM
-  const libraryCloseTime = 17 * 60; // 5:00 PM
+  const libraryCloseTime = 19 * 60; // 7:00 PM
   
   return timeInMinutes >= libraryOpenTime && timeInMinutes <= libraryCloseTime;
 };
 
 const formatLibraryHours = (): string => {
-  return "7:30 AM - 5:00 PM";
+  return "7:30 AM - 7:00 PM";
 };
 
 // Custom Number Input with Controls (copied from BookingModal.tsx)
@@ -185,6 +172,28 @@ export default function EditBookingModal({
       setStartTime(computedStart);
       setEndTime(computedEnd);
       setParticipants(booking.participants || 1); // Initialize participants
+      // Initialize equipment state from booking.equipment when present
+      try {
+        const eq = booking.equipment;
+        if (eq) {
+          const items: string[] = Array.isArray(eq.items) ? eq.items.map((s: any) => String(s)) : [];
+          setEquipmentState(prev => {
+            const next: Record<string, boolean> = { ...prev };
+            Object.keys(next).forEach(k => {
+              next[k] = items.includes(k) || false;
+            });
+            // If booking has others text, ensure the 'others' checkbox reflects it
+            if (eq.others && String(eq.others).trim().length > 0) {
+              next['others'] = true;
+            }
+            return next;
+          });
+          setEquipmentOtherText(eq.others || "");
+        }
+      } catch (e) {
+        // Non-fatal: if equipment shape is unexpected, leave defaults
+        console.warn('[EditBookingModal] Failed to initialize equipment from booking', e);
+      }
     }
   }, [booking]);
 
@@ -364,7 +373,9 @@ export default function EditBookingModal({
         },
       };
   // payload prepared for save
-      const result = await onSave(payload);
+  // DEBUG: log payload the client is sending to the server
+  try { console.log('[client] EditBookingModal - save payload', payload); } catch (e) {}
+  const result = await onSave(payload);
 
       setIsSubmitting(false);
       setLastSubmissionTime(Date.now());
@@ -439,7 +450,7 @@ export default function EditBookingModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+  <DialogContent className="w-full h-full md:w-auto md:h-auto md:max-w-2xl md:max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-2xl font-semibold">Edit Booking</DialogTitle>
           <DialogDescription>Update booking details: date, time, participants, and purpose.</DialogDescription>
@@ -450,18 +461,7 @@ export default function EditBookingModal({
           <div className="grid md:grid-cols-2 gap-6">
             <div>
               <Label className="block text-sm font-medium text-gray-700 mb-2">Facility</Label>
-              <Select value={facilityId} onValueChange={setFacilityId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a facility" />
-                </SelectTrigger>
-                <SelectContent>
-                  {facilities.map((facility) => (
-                    <SelectItem key={facility.id} value={facility.id.toString()} description={getFacilityDescriptionByName(facility.name)} available={!!facility.isActive}>
-                      {facility.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                <div className="py-2 px-3 bg-gray-50 border rounded text-sm text-gray-800">{(facilities.find(f => f.id === parseInt(facilityId || '0')) || {}).name || '—'}</div>
             </div>
 
             <div>
@@ -488,54 +488,17 @@ export default function EditBookingModal({
           </div>
 
           <div className="grid md:grid-cols-2 gap-6">
-            {/* Start Date + Time split (matching BookingModal) */}
+            {/* Start Date + Time (read-only) */}
             <div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label>Start Date</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button variant={"outline"} className={cn("w-full text-left pl-3 h-10", !startTime && "text-muted-foreground")}>
-                        {startTime ? format(startTime, "EEE, MMM d, yyyy") : <span>Pick a date</span>}
-                        <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-80 p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={startTime}
-                        onSelect={(date) => {
-                          if (!date) return;
-                          const current = startTime || new Date();
-                          const newDate = new Date(date);
-                          newDate.setHours(current.getHours(), current.getMinutes(), 0, 0);
-                          setStartTime(newDate);
-                        }}
-                        initialFocus
-                        disabled={(date) => date < new Date()}
-                      />
-                    </PopoverContent>
-                  </Popover>
+                  <div className="py-2 px-3 bg-gray-50 border rounded text-sm text-gray-800">{startTime ? format(startTime, "EEE, MMM d, yyyy") : '—'}</div>
                 </div>
 
                 <div>
                   <Label className="invisible">Start Time</Label>
-                  <Input
-                    type="time"
-                    step={300}
-                    value={startTime ? format(startTime, "HH:mm") : ""}
-                    onChange={(e) => {
-                      const timeValue = e.target.value;
-                      if (!timeValue) return;
-                      const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
-                      if (!timeRegex.test(timeValue)) return;
-                      const [hours, minutes] = timeValue.split(":").map(Number);
-                      const newDate = startTime ? new Date(startTime) : new Date();
-                      newDate.setHours(hours, minutes, 0, 0);
-                      setStartTime(newDate);
-                    }}
-                    className="w-full h-10"
-                  />
+                  <div className="py-2 px-3 bg-gray-50 border rounded text-sm text-gray-800">{startTime ? format(startTime, "hh:mm a") : '—'}</div>
                 </div>
               </div>
             </div>
@@ -544,52 +507,16 @@ export default function EditBookingModal({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label className="text-gray-700">End Date</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button variant={"outline"} className={cn("w-full text-left pl-3 h-10", !endTime && "text-muted-foreground")}>
-                        {endTime ? format(endTime, "EEE, MMM d, yyyy") : <span>Pick a date</span>}
-                        <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-80 p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={endTime}
-                        onSelect={(date) => {
-                          if (!date) return;
-                          const current = endTime || new Date();
-                          const newDate = new Date(date);
-                          newDate.setHours(current.getHours(), current.getMinutes(), 0, 0);
-                          setEndTime(newDate);
-                        }}
-                        initialFocus
-                        disabled={(date) => date < new Date()}
-                      />
-                    </PopoverContent>
-                  </Popover>
+                  <div className="py-2 px-3 bg-gray-50 border rounded text-sm text-gray-800">{endTime ? format(endTime, "EEE, MMM d, yyyy") : '—'}</div>
                 </div>
 
                 <div>
                   <Label className="invisible">End Time</Label>
-                  <Input
-                    type="time"
-                    step={300}
-                    value={endTime ? format(endTime, "HH:mm") : ""}
-                    onChange={(e) => {
-                      const timeValue = e.target.value;
-                      if (!timeValue) return;
-                      const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
-                      if (!timeRegex.test(timeValue)) return;
-                      const [hours, minutes] = timeValue.split(":").map(Number);
-                      const newDate = endTime ? new Date(endTime) : new Date();
-                      newDate.setHours(hours, minutes, 0, 0);
-                      setEndTime(newDate);
-                    }}
-                    className="w-full h-10"
-                  />
+                  <div className="py-2 px-3 bg-gray-50 border rounded text-sm text-gray-800">{endTime ? format(endTime, "hh:mm a") : '—'}</div>
                 </div>
               </div>
             </div>
+
           </div>
 
           {/* Equipment checklist — copied from BookingModal */}

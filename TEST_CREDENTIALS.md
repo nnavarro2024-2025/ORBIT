@@ -50,7 +50,7 @@ These test accounts are automatically created when the server starts up in devel
 
 Remember that the system enforces school working hours:
 
-- **Operating Hours**: 7:30 AM - 5:00 PM
+- **Operating Hours**: 7:30 AM - 7:00 PM
 - Bookings outside these hours will be rejected
 - Facilities show as "School Closed" outside operating hours
 

@@ -124,7 +124,7 @@ export default function Login() {
                 />
               </div>
               <div className="text-center mb-3">
-                <p className="text-sm text-gray-700 font-medium">Integrated Library Facility Management System</p>
+                <p className="text-sm text-gray-700 font-bold">Integrated Library Facility Management System</p>
               </div>
             </div>
 
@@ -165,7 +165,7 @@ export default function Login() {
                   className="w-full bg-pink-600 hover:bg-pink-700 text-white font-medium text-sm py-2 px-4 rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
                   disabled={loading}
                 >
-                  {loading ? "Signing in..." : "Sign In"}
+                  {loading ? "Signing in..." : "Login"}
                 </button>
                 <div className="my-2 border-t border-gray-100" />
                 <button
@@ -174,7 +174,7 @@ export default function Login() {
                   className="w-full bg-pink-600 hover:bg-pink-700 text-white font-medium text-sm py-2 px-4 rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
                   disabled={loading}
                 >
-                  {loading ? "Signing in..." : "Sign in with UIC Account"}
+                  {loading ? "Signing in..." : "Sign up with UIC Account"}
                 </button>
               </div>
             </form>
@@ -330,7 +330,7 @@ export default function Login() {
                   onClick={() => { setShowCreateModal(false); signInWithGoogle(); }}
                   className="w-full bg-pink-600 hover:bg-pink-700 text-white font-medium py-2 rounded-lg"
                 >
-                  Sign in with UIC Account
+                  Sign up with UIC Account
                 </Button>
               </div>
             </div>

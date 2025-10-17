@@ -40,7 +40,7 @@ export default function Landing() {
                 className="h-12 sm:h-14 md:h-16 w-auto object-contain"
               />
             </div>
-            <p className="text-lg sm:text-xl lg:text-2xl text-gray-700 mb-3 sm:mb-4 font-light">ORBIT - Integrated Library Facility Management System</p>
+            <p className="text-lg sm:text-xl lg:text-2xl text-gray-700 mb-3 sm:mb-4 font-bold">ORBIT - Integrated Library Facility Management System</p>
             <p className="text-base sm:text-lg text-gray-600 max-w-3xl mx-auto leading-snug">
               Easily find and reserve school rooms and facilities — manage your bookings in one place.
             </p>

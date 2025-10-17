@@ -13,7 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import BanUserModal from "@/components/modals/BanUserModal";
 import UnavailableReasonModal from "@/components/modals/UnavailableReasonModal";
 import UserEmailDisplay from "@/components/UserEmailDisplay";
-import {
+  import {
   Shield,
   Dock,
   Calendar,
@@ -33,12 +33,14 @@ import {
   ChevronRight,
   Eye,
   Monitor,
+  X,
 } from "lucide-react";
 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { User, FacilityBooking, SystemAlert, ActivityLog, Facility } from "../../../../shared/schema";
 import { Button } from "@/components/ui/button";
+import AvailabilityGrid from '@/components/AvailabilityGrid';
 
 // Small countdown component for admin UI
 function Countdown({ expiry, onExpire }: { expiry: string | Date | undefined; onExpire?: () => void }) {
@@ -108,17 +110,19 @@ export default function AdminDashboard() {
 
 
   // Render a colored badge for booking status
+  // Render a colored badge for booking status.
+  // Treat 'pending' bookings as scheduled in the UI (server remains canonical).
   function renderStatusBadge(statusRaw: any) {
     const s = String(statusRaw || '').toLowerCase();
     let label = (statusRaw && String(statusRaw)) || 'Unknown';
     let classes = 'text-sm font-medium px-2 py-1 rounded-full';
 
     if (s === 'pending' || s === 'request' || s === 'requested') {
-      label = 'Pending';
-      classes += ' bg-yellow-100 text-yellow-800';
-    } else if (s === 'approved' || s === 'completed' || s === 'completed') {
-      // treat approved that have ended as Completed elsewhere; styling for completed/approved
-      label = (label === 'approved') ? 'Approved' : label;
+      // Present pending as scheduled to the user (auto-scheduled server-side flow)
+      label = 'Scheduled';
+      classes += ' bg-green-100 text-green-800';
+    } else if (s === 'approved' || s === 'completed') {
+      label = (s === 'approved') ? 'Approved' : 'Completed';
       classes += ' bg-green-100 text-green-800';
     } else if (s === 'denied' || s === 'cancelled' || s === 'canceled') {
       label = (s === 'denied') ? 'Denied' : 'Cancelled';
@@ -186,6 +190,60 @@ export default function AdminDashboard() {
     }
   }, [location]);
 
+  // Also accept hash-style navigation (e.g. /admin#activity:notifications) which
+  // header links may use — open Security -> Booking tab when requested.
+  useEffect(() => {
+    const isReloadNavigation = () => {
+      try {
+        // modern NavigationTiming
+        const navEntries = (performance && performance.getEntriesByType) ? performance.getEntriesByType('navigation') as PerformanceNavigationTiming[] : [];
+        if (Array.isArray(navEntries) && navEntries[0] && (navEntries[0] as any).type) {
+          return (navEntries[0] as any).type === 'reload' || (navEntries[0] as any).type === 'back_forward';
+        }
+        // fallback (deprecated) API
+        if ((performance as any).navigation && typeof (performance as any).navigation.type === 'number') {
+          // 1 === TYPE_RELOAD
+          return (performance as any).navigation.type === 1;
+        }
+      } catch (e) {
+        // ignore
+      }
+      return false;
+    };
+
+    const handleHash = () => {
+      try {
+        const rawHash = window.location.hash?.replace('#', '') || '';
+        if (!rawHash) return;
+        // Accept patterns like 'activity:notifications' or 'activity/notifications'
+        const normalized = rawHash.replace('/', ':');
+        const parts = normalized.split(':');
+        if (parts[0] === 'activity' && parts[1] === 'notifications') {
+          setSelectedView('security');
+          setSecurityTab('booking');
+          // Only normalize the URL to the overview if this navigation was a reload
+          // (we don't want to replace the URL when a user clicked the bell).
+          if (isReloadNavigation()) {
+            try {
+              const overviewTarget = '/admin#overview';
+              if (window.location.pathname + window.location.hash !== overviewTarget) {
+                window.history.replaceState({}, '', overviewTarget);
+              }
+            } catch (e) { /* ignore */ }
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    };
+
+    // Run once on mount
+    handleHash();
+    // Listen for future hash changes
+    window.addEventListener('hashchange', handleHash);
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
+
   // If App set a one-time flag for admin alerts, open the Security->Booking tab once
   // then replace the URL to the main admin overview so reloads land on the dashboard.
   useEffect(() => {
@@ -196,9 +254,15 @@ export default function AdminDashboard() {
         setSelectedView('security');
         setSecurityTab('booking');
         try {
-          const target = '/admin#overview';
-          if (window.location.pathname + window.location.hash !== target) {
-            window.history.replaceState({}, '', target);
+          // Only normalize the URL to the overview if this was a reload navigation
+          const navEntries = (performance && performance.getEntriesByType) ? performance.getEntriesByType('navigation') as PerformanceNavigationTiming[] : [];
+          const isReload = (Array.isArray(navEntries) && navEntries[0] && (navEntries[0] as any).type && ((navEntries[0] as any).type === 'reload' || (navEntries[0] as any).type === 'back_forward'))
+            || ((performance as any).navigation && (performance as any).navigation.type === 1);
+          if (isReload) {
+            const target = '/admin#overview';
+            if (window.location.pathname + window.location.hash !== target) {
+              window.history.replaceState({}, '', target);
+            }
           }
         } catch (e) {
           // ignore
@@ -290,7 +354,7 @@ export default function AdminDashboard() {
     const currentMinute = now.getMinutes();
     const currentTimeInMinutes = currentHour * 60 + currentMinute;
     const libraryOpenTime = 7 * 60 + 30; // 7:30 AM
-    const libraryCloseTime = 17 * 60; // 5:00 PM
+  const libraryCloseTime = 19 * 60; // 7:00 PM
     return currentTimeInMinutes < libraryOpenTime || currentTimeInMinutes > libraryCloseTime;
   };
   const queryClient = useQueryClient();
@@ -299,6 +363,13 @@ export default function AdminDashboard() {
   const [updatingNeedsIds, setUpdatingNeedsIds] = useState<Set<string>>(new Set());
   // Local map to track admin-updated needs status so UI reflects updates immediately
   const [needsStatusById, setNeedsStatusById] = useState<Record<string, 'prepared' | 'not_available'>>({});
+  // Per-booking, per-item equipment status map: bookingId -> { itemLabel: 'prepared'|'not_available' }
+  const [bookingItemStatus, setBookingItemStatus] = useState<Record<string, Record<string, 'prepared' | 'not_available'>>>({});
+
+  // Equipment check modal state
+  const [showEquipmentModal, setShowEquipmentModal] = useState(false);
+  const [equipmentModalBooking, setEquipmentModalBooking] = useState<null | any>(null);
+  const [equipmentModalItemStatuses, setEquipmentModalItemStatuses] = useState<Record<string, 'prepared' | 'not_available' | undefined>>({});
 
   const markBookingNeeds = async (bookingId: string, status: 'prepared' | 'not_available', note?: string) => {
     try {
@@ -334,33 +405,274 @@ export default function AdminDashboard() {
     }
   };
 
+  // Attempt to extract an items list from a booking record. Support multiple shapes:
+  // - booking.equipment.items + booking.equipment.others
+  // - booking.adminResponse containing a JSON block like `Needs: { ... }`
+  // - legacy free-text 'Requested equipment: ...'
+  const parseEquipmentItemsFromBooking = (booking: any): string[] => {
+    try {
+      const out: string[] = [];
+      // 1) canonical booking.equipment shape
+      const eq = booking?.equipment || null;
+      if (eq) {
+        if (Array.isArray(eq.items)) {
+          for (const i of eq.items) {
+            const t = String(i || '').replace(/_/g, ' ').trim();
+            if (!/^others[:\s]*$/i.test(t) && t.length) out.push(t);
+          }
+        }
+        if (eq.others && String(eq.others).trim()) out.push(String(eq.others).trim());
+      }
+
+      // 2) adminResponse JSON block e.g. `Needs: { "items": [...], "others": "..." }`
+      if (out.length === 0 && booking?.adminResponse) {
+        try {
+          const resp = String(booking.adminResponse || '');
+          // First try: direct JSON block immediately after Needs:
+          let m = resp.match(/Needs:\s*(\{[\s\S]*\})/i);
+          // Second try: some server flows append an overall marker then an em-dash and a JSON note:
+          // e.g. `Needs: Prepared — {"items":{...}}` or `Needs: Not Available - { ... }`
+          if (!m) {
+            m = resp.match(/[—\-]\s*(\{[\s\S]*\})\s*$/);
+          }
+          if (m && m[1]) {
+            const tryParse = (txt: string) => {
+              try {
+                return JSON.parse(txt);
+              } catch (e) {
+                try {
+                  return JSON.parse(txt.replace(/'/g, '"'));
+                } catch (_e) {
+                  return null;
+                }
+              }
+            };
+
+            const obj = tryParse(m[1]);
+            if (obj) {
+              // Support either { items: ["a","b"] } or { items: { "a": "prepared" } }
+              if (Array.isArray(obj.items)) {
+                for (const it of obj.items) {
+                  const t = String(it || '').replace(/_/g, ' ').trim();
+                  if (!/^others[:\s]*$/i.test(t) && t.length) out.push(t);
+                }
+              } else if (obj.items && typeof obj.items === 'object') {
+                // keys are item names (legacy note storage); collect keys as items
+                for (const k of Object.keys(obj.items)) {
+                  const t = String(k || '').replace(/_/g, ' ').trim();
+                  if (!/^others[:\s]*$/i.test(t) && t.length) out.push(t);
+                }
+              }
+              if (obj.others && String(obj.others).trim()) out.push(String(obj.others).trim());
+            }
+          }
+        } catch (e) {}
+      }
+
+      // 3) legacy free-text: 'Requested equipment: ...'
+      if (out.length === 0 && booking?.adminResponse) {
+        try {
+          const resp = String(booking.adminResponse || '');
+          const eqMatch = resp.match(/Requested equipment:\s*([^\n\[]+)/i);
+          if (eqMatch && eqMatch[1]) {
+            const parts = eqMatch[1].split(/[,;]+/).map((s: string) => String(s).trim()).filter(Boolean);
+            for (const p of parts) {
+              if (/others?/i.test(p)) {
+                const trailing = p.replace(/.*?others[:\s-]*/i, '').trim();
+                if (trailing) out.push(trailing);
+                continue;
+              }
+              out.push(p.replace(/_/g, ' ').trim());
+            }
+          }
+        } catch (e) {}
+      }
+
+      return out.filter(Boolean);
+    } catch (e) {
+      return [];
+    }
+  };
+
+  // Silence some unused-variable TypeScript warnings during iterative refactor
+  // These are intentional no-ops to avoid noisy compile errors while we iterate on admin UI.
+  void pendingBookingsPage; void setPendingBookingsPage;
+  void updatingNeedsIds; void setUpdatingNeedsIds;
+  void markBookingNeeds;
+  // No-op handlers marked as used
+  const _noopHandlersUsed = () => { void handleApproveNoop; void handleDenyNoop; };
+  void _noopHandlersUsed;
+
+  const openEquipmentModal = (booking: any) => {
+    try {
+      // If modal is already open for this booking, do nothing.
+      if (showEquipmentModal && equipmentModalBooking && String(equipmentModalBooking.id) === String(booking?.id)) {
+        return;
+      }
+      // Open modal first so clicks always surface the modal immediately.
+      setEquipmentModalBooking(booking);
+      setShowEquipmentModal(true);
+      try {
+        // small dev-only visual feedback so admins can see the handler fired
+        if (process.env.NODE_ENV === 'development') {
+          try { toast({ title: 'Debug', description: `Opening equipment modal for booking ${String(booking?.id)}`, variant: 'default' }); } catch (_) {}
+        }
+      } catch (_) {}
+      const items = parseEquipmentItemsFromBooking(booking);
+      // Always show modal even if items are empty so admin can see there are no items
+      const existing = bookingItemStatus[String(booking.id)] || {};
+      const initStatuses: Record<string, 'prepared' | 'not_available' | undefined> = {};
+      // Try to prefill from optimistic local state first
+      items.forEach(it => { initStatuses[it] = existing[it]; });
+
+      // If we don't have per-item statuses in local map, attempt to parse persisted adminResponse JSON
+      // If we don't have per-item statuses in local map, attempt to parse persisted adminResponse JSON
+      try {
+        const resp = String(booking?.adminResponse || '');
+        // look for a JSON object after Needs: or trailing after an em-dash/hyphen
+        const m1 = resp.match(/Needs:\s*(\{[\s\S]*\})/i);
+        const m2 = resp.match(/[—\-]\s*(\{[\s\S]*\})\s*$/);
+        const jsonTxt = (m1 && m1[1]) ? m1[1] : (m2 && m2[1]) ? m2[1] : null;
+        if (jsonTxt) {
+          // tolerant parse
+          let parsed: any = null;
+          try { parsed = JSON.parse(jsonTxt); } catch (e) { try { parsed = JSON.parse(jsonTxt.replace(/'/g, '"')); } catch (e) { parsed = null; } }
+          if (parsed && parsed.items && typeof parsed.items === 'object') {
+            // items may be an object mapping item->status or an array
+            if (!Array.isArray(parsed.items)) {
+              for (const [k, v] of Object.entries(parsed.items)) {
+                const name = String(k).replace(/_/g, ' ').trim();
+                if (items.includes(name) && !initStatuses[name]) {
+                  const val = (String(v).toLowerCase().includes('prepared')) ? 'prepared' : (String(v).toLowerCase().includes('not') ? 'not_available' : undefined);
+                  if (val) initStatuses[name] = val;
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        // keep modal open and surface debug info in dev
+        try { if (process.env.NODE_ENV === 'development') console.debug('[openEquipmentModal] parse error', e, booking?.adminResponse); } catch (_) {}
+      }
+
+  // (removed dev console output to avoid noisy repeated logs on click)
+      setEquipmentModalItemStatuses(initStatuses);
+      // booking already set above and modal opened immediately
+    } catch (e) {
+      // ensure modal is cleared on error
+      // leave modal open so admin can see the empty state; clear item statuses to avoid stale UI
+      setEquipmentModalItemStatuses({});
+    }
+  };
+
+  const confirmEquipmentModal = async () => {
+    if (!equipmentModalBooking) return;
+    const bookingId = String(equipmentModalBooking.id);
+    // Persist overall status: if all marked prepared -> prepared, else not_available
+    const statuses = { ...equipmentModalItemStatuses };
+    const allPrepared = Object.values(statuses).length > 0 && Object.values(statuses).every(v => v === 'prepared');
+    const overall: 'prepared' | 'not_available' = allPrepared ? 'prepared' : 'not_available';
+    // Optimistically store per-item statuses locally
+    setBookingItemStatus(prev => ({ ...prev, [bookingId]: Object.entries(statuses).reduce((acc, [k, v]) => { if (v) acc[k] = v; return acc; }, {} as Record<string, 'prepared'|'not_available'>) }));
+    // Also set booking-level needs status for compatibility with existing UI
+    setNeedsStatusById(prev => ({ ...prev, [bookingId]: overall }));
+    // Use updateNeedsMutation to persist overall status and include per-item details in `note`
+    try {
+      await updateNeedsMutation.mutateAsync({ bookingId, status: overall, note: JSON.stringify({ items: statuses }) });
+      try { toast({ title: 'Saved', description: `Marked needs as ${overall}`, variant: 'default' }); } catch (e) {}
+    } catch (e: any) {
+      try { toast({ title: 'Save failed', description: e?.message || String(e), variant: 'destructive' }); } catch (e) {}
+    }
+    setShowEquipmentModal(false);
+    setEquipmentModalBooking(null);
+    setEquipmentModalItemStatuses({});
+  };
+
   // Mutation to update needs status
   const updateNeedsMutation = useMutation({
     mutationFn: async ({ bookingId, status, note }: { bookingId: string; status: 'prepared' | 'not_available'; note?: string }) => {
       const res = await apiRequest('POST', `/api/admin/bookings/${bookingId}/needs`, { status, note });
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables: any) => {
+      // Optimistic UI: immediately reflect the updated equipment statuses in the
+      // admin bell by prepending a temporary alert constructed from the mutation
+      // variables (bookingId, status, note). The Header parsing will pick up the
+      // JSON payload in `note` to render per-item prepared/not-available icons.
+      try {
+        const { bookingId, status, note } = variables || {};
+        const payloadJson = note && typeof note === 'string' ? note : (note ? JSON.stringify(note) : JSON.stringify({ items: {} }));
+        // Create a human summary from the payload if possible
+        let humanSummary = '';
+        try {
+          const parsed = JSON.parse(payloadJson || '{}');
+          if (parsed && parsed.items) {
+            if (Array.isArray(parsed.items)) humanSummary = parsed.items.join(', ');
+            else if (typeof parsed.items === 'object') humanSummary = Object.keys(parsed.items).join(', ');
+          }
+        } catch (e) { /* ignore */ }
+
+        const title = 'Equipment Needs Submitted';
+        const message = humanSummary ? `${humanSummary}\n\n${payloadJson}` : `${status === 'prepared' ? 'Marked prepared' : 'Marked not available'}\n\n${payloadJson}`;
+        const tmpId = (typeof crypto !== 'undefined' && (crypto as any).randomUUID) ? (crypto as any).randomUUID() : `tmp-${Date.now()}`;
+        const tmpAlert = {
+          id: tmpId,
+          type: 'booking',
+          severity: 'low',
+          title,
+          message,
+          userId: null,
+          isRead: false,
+          createdAt: new Date().toISOString(),
+        };
+
+        queryClient.setQueryData(['/api/admin/alerts'], (old: any) => {
+          const arr = Array.isArray(old) ? old.slice() : [];
+          // prepend temporary alert so it's visible immediately
+          arr.unshift(tmpAlert);
+          return arr;
+        });
+      } catch (e) {
+        // non-fatal - continue to invalidate caches below
+      }
+
+      // Ensure authoritative data is fetched after optimistic update
       queryClient.invalidateQueries({ queryKey: ['/api/admin/bookings'] });
       queryClient.invalidateQueries({ queryKey: ['/api/admin/alerts'] });
       queryClient.invalidateQueries({ queryKey: ['/api/admin/activity'] });
+    },
+    onError: (err: any) => {
+      try {
+        const msg = err?.message || String(err);
+        toast({ title: 'Failed to save needs', description: msg, variant: 'destructive' });
+      } catch (e) {}
     }
   });
 
   function renderEquipmentLine(booking: FacilityBooking | any) {
     try {
-      const eq = booking.equipment || booking.equipment || null;
+      const eq = booking.equipment || null;
       if (!eq) return null;
-  const rawItems = Array.isArray(eq.items) ? eq.items.map((s: string) => s.replace(/_/g, ' ')) : [];
-  // filter out placeholder 'others' tokens if present in items array
-  const items = rawItems.filter((s: string) => !/^others[:\s]*$/i.test(String(s).trim()));
-      if (items.length === 0) return null;
+  const rawItems = Array.isArray(eq.items) ? eq.items.map((s: string) => String(s).replace(/_/g, ' ')).filter(Boolean) : [];
+  const othersText = eq.others && String(eq.others).trim() ? String(eq.others).trim() : null;
+  // Treat `others` as description only; do not include it in the items list used for display.
+  const allItems = rawItems.filter((s: string) => !/^others[:\s]*$/i.test(String(s).trim()));
+  if (allItems.length === 0 && !othersText) return null;
+  const displayItems = allItems.slice(0, 3);
+  const hasMore = allItems.length > 3;
+      const bookingStatuses = bookingItemStatus[String(booking.id)] || {};
+      const coloredSpan = (it: string) => {
+        const s = bookingStatuses[it];
+        if (s === 'prepared') return <span className="text-green-600 font-medium">{it}</span>;
+        if (s === 'not_available') return <span className="text-red-600 font-medium">{it}</span>;
+        return <span>{it}</span>;
+      };
       return (
         <div className="mt-2">
-            <div className="flex items-center gap-3">
-            <div className="text-xs font-medium text-gray-700">Equipment or Needs:</div>
-            {eq.others && (() => {
-                                    const id = String(booking.id || Math.random());
+          <div className="flex items-center gap-3">
+            <div className="text-xs font-medium text-gray-700">Equipment:</div>
+            {othersText && (() => {
+              const id = String(booking.id || Math.random());
               const isOpen = !!openOthers[id];
               return (
                 <Popover open={isOpen} onOpenChange={(v) => setOpenOthers(prev => ({ ...prev, [id]: v }))}>
@@ -368,42 +680,46 @@ export default function AdminDashboard() {
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <PopoverTrigger asChild>
-                          <button
-                            onClick={() => setOpenOthers(prev => ({ ...prev, [id]: !prev[id] }))}
-                            className="ml-2 text-xs text-blue-600 hover:underline cursor-pointer"
-                            aria-expanded={isOpen}
-                          >
-                            View other
-                          </button>
+                          <button onClick={() => setOpenOthers(prev => ({ ...prev, [id]: !prev[id] }))} className="ml-2 text-xs text-blue-600 hover:underline cursor-pointer" aria-expanded={isOpen}>view other</button>
                         </PopoverTrigger>
                       </TooltipTrigger>
                       <TooltipContent side="top" align="start" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
-                        <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                          <p className="font-semibold text-sm text-gray-800 text-left">Other equipment</p>
-                        </div>
-                        <div className="p-3">
-                          <p className="text-sm text-gray-900 leading-5 break-words text-left">{String(eq.others)}</p>
-                        </div>
+                        <div className="bg-gray-50 px-4 py-2 border-b border-gray-200"><p className="font-semibold text-sm text-gray-800 text-left">Other equipment</p></div>
+                        <div className="p-3"><p className="text-sm text-gray-900 leading-5 break-words text-left">{othersText}</p></div>
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
                   <PopoverContent side="top" align="start" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50 origin-top-left">
-                    <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                      <p className="font-semibold text-sm text-gray-800 text-left">Other equipment</p>
-                    </div>
-                    <div className="p-3">
-                      <p className="text-sm text-gray-900 leading-5 break-words text-left">{String(eq.others)}</p>
-                    </div>
+                    <div className="bg-gray-50 px-4 py-2 border-b border-gray-200"><p className="font-semibold text-sm text-gray-800 text-left">Other equipment</p></div>
+                    <div className="p-3"><p className="text-sm text-gray-900 leading-5 break-words text-left">{othersText}</p></div>
                   </PopoverContent>
                 </Popover>
               );
             })()}
           </div>
-          {items.length > 0 && (
+          {displayItems.length > 0 && (
             <div className="mt-1 grid grid-cols-1 md:grid-cols-2 gap-x-3 gap-y-1 text-xs text-gray-600">
-              {items.map((it: string, idx: number) => (
-                <div key={idx} className="truncate">{it}</div>
+              {displayItems.map((it: string, idx: number) => (
+                <div key={idx} className="truncate">{coloredSpan(it)}</div>
               ))}
+              {hasMore && (() => {
+                const extra = allItems.slice(displayItems.length);
+                const count = extra.length;
+                return (
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button className="ml-2 text-xs text-blue-600">+{count} more</button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-56 p-2 z-50">
+                      <div className="text-sm">
+                        {extra.map((it: string, idx: number) => (
+                          <div key={idx} className="py-1">{coloredSpan(it)}</div>
+                        ))}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                );
+              })()}
             </div>
           )}
         </div>
@@ -531,15 +847,55 @@ export default function AdminDashboard() {
   });
 
   // Map query results into the local state used by helper functions
-  useEffect(() => { if (Array.isArray(usersDataQ)) setUsersData(usersDataQ); }, [usersDataQ, setUsersData]);
-  useEffect(() => { if (Array.isArray(activitiesData)) setActivities(activitiesData); }, [activitiesData, setActivities]);
-  useEffect(() => { if (Array.isArray(facilitiesData)) setFacilities(facilitiesData); }, [facilitiesData, setFacilities]);
-  useEffect(() => { if (currentUserData) setUser(currentUserData); }, [currentUserData, setUser]);
+  useEffect(() => {
+    try {
+      if (!Array.isArray(usersDataQ)) return;
+      // Compare by IDs to avoid creating a new state object every render
+      const same = Array.isArray(usersData) && usersData.length === usersDataQ.length && usersData.every((u: any, i: number) => String(u?.id) === String(usersDataQ[i]?.id));
+      if (!same) setUsersData(usersDataQ);
+    } catch (e) {
+      // ignore
+    }
+  }, [usersDataQ, usersData]);
+
+  useEffect(() => {
+    try {
+      if (!Array.isArray(activitiesData)) return;
+      const same = Array.isArray(activities) && activities.length === activitiesData.length && activities.every((a: any, i: number) => String(a?.id) === String(activitiesData[i]?.id));
+      if (!same) setActivities(activitiesData);
+    } catch (e) {
+      // ignore
+    }
+  }, [activitiesData, activities]);
+
+  useEffect(() => {
+    try {
+      if (!Array.isArray(facilitiesData)) return;
+      const same = Array.isArray(facilities) && facilities.length === facilitiesData.length && facilities.every((f: any, i: number) => String(f?.id) === String(facilitiesData[i]?.id));
+      if (!same) setFacilities(facilitiesData);
+    } catch (e) {
+      // ignore
+    }
+  }, [facilitiesData, facilities]);
+
+  useEffect(() => {
+    try {
+      if (!currentUserData) return;
+      const different = !user || String(currentUserData?.id) !== String(user?.id) || String(currentUserData?.email) !== String(user?.email);
+      if (different) setUser(currentUserData);
+    } catch (e) {
+      // ignore
+    }
+  }, [currentUserData, user]);
 
   // Derived lists used in the UI
   const allBookings: FacilityBooking[] = Array.isArray(adminBookingsData) ? adminBookingsData : [];
   const activeBookings: FacilityBooking[] = allBookings.filter(b => b.status === 'approved' && new Date(b.startTime) <= new Date() && new Date(b.endTime) >= new Date());
-  const upcomingBookings: FacilityBooking[] = allBookings.filter(b => b.status === 'approved' && new Date(b.startTime) > new Date());
+  // Upcoming bookings: include both approved future bookings and any pending bookings
+  // (the UI treats pending as scheduled for admins; the server remains canonical).
+  const futureApproved: FacilityBooking[] = allBookings.filter(b => b.status === 'approved' && new Date(b.startTime) > new Date());
+  const pendingFromApi: FacilityBooking[] = Array.isArray(pendingBookingsData) ? (pendingBookingsData.filter((b: any) => new Date(b.startTime) > new Date())) : [];
+  const upcomingBookings: FacilityBooking[] = [...futureApproved, ...pendingFromApi].sort((a,b) => new Date(String(a.startTime)).getTime() - new Date(String(b.startTime)).getTime());
   const recentBookings: FacilityBooking[] = allBookings
     .filter(b => {
       // include denied bookings; include approved bookings only if they have ended
@@ -555,6 +911,20 @@ export default function AdminDashboard() {
     })
     .sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   const pendingBookings: FacilityBooking[] = Array.isArray(pendingBookingsData) ? pendingBookingsData : [];
+
+  // Deduplicate scheduled bookings count: union of upcoming (approved future + pending API) and any pending items
+  const scheduledSet = new Set<string>();
+  try {
+    for (const b of upcomingBookings) {
+      if (b && b.id) scheduledSet.add(String(b.id));
+    }
+    for (const b of pendingBookings) {
+      if (b && b.id) scheduledSet.add(String(b.id));
+    }
+  } catch (e) {
+    // ignore
+  }
+  const scheduledCount = scheduledSet.size;
 
   // When bookings are (re)fetched, derive any persisted needs status stored in adminResponse
   // The server currently stores a marker like "Needs: Prepared" or "Needs: Not Available" inside adminResponse.
@@ -576,7 +946,83 @@ export default function AdminDashboard() {
         }
       });
       // merge server-derived values into local optimistic map (server should be canonical)
-      setNeedsStatusById(prev => ({ ...prev, ...derived }));
+      setNeedsStatusById(prev => {
+        try {
+          // if no derived keys, avoid creating a new object
+          const derivedKeys = Object.keys(derived);
+          if (derivedKeys.length === 0) return prev;
+          // check if any derived value actually differs from prev
+          let changed = false;
+          for (const k of derivedKeys) {
+            if (String(prev[k]) !== String(derived[k])) { changed = true; break; }
+          }
+          if (!changed) return prev;
+          return { ...prev, ...derived };
+        } catch (e) {
+          return prev;
+        }
+      });
+    } catch (e) {
+      // ignore
+    }
+  }, [adminBookingsData, pendingBookingsData]);
+  // Hydrate per-item booking statuses from adminResponse JSON block when bookings arrive
+  useEffect(() => {
+    try {
+      const map: Record<string, Record<string, 'prepared'|'not_available'>> = {};
+      const all = Array.isArray(adminBookingsData) ? adminBookingsData.concat(pendingBookingsData || []) : (pendingBookingsData || []);
+      (all || []).forEach((b: any) => {
+        try {
+          const resp = String(b?.adminResponse || '');
+          // look for JSON object after Needs: or trailing after em-dash/hyphen
+          const m1 = resp.match(/Needs:\s*(\{[\s\S]*\})/i);
+          const m2 = resp.match(/[—\-]\s*(\{[\s\S]*\})\s*$/);
+          const jsonTxt = (m1 && m1[1]) ? m1[1] : (m2 && m2[1]) ? m2[1] : null;
+          if (!jsonTxt) return;
+          let parsed: any = null;
+          try { parsed = JSON.parse(jsonTxt); } catch (e) { try { parsed = JSON.parse(jsonTxt.replace(/'/g, '"')); } catch (e) { parsed = null; } }
+          if (parsed && parsed.items && typeof parsed.items === 'object' && !Array.isArray(parsed.items)) {
+            const per: Record<string, 'prepared'|'not_available'> = {};
+            for (const [k, v] of Object.entries(parsed.items)) {
+              const name = String(k).replace(/_/g, ' ').trim();
+              const val = (String(v).toLowerCase().includes('prepared')) ? 'prepared' : (String(v).toLowerCase().includes('not') ? 'not_available' : undefined);
+              if (val) per[name] = val;
+            }
+            if (Object.keys(per).length > 0 && b?.id) map[b.id] = per;
+          }
+        } catch (e) {
+          // ignore per-book parse errors
+        }
+      });
+      // merge into bookingItemStatus but avoid no-op updates
+      setBookingItemStatus(prev => {
+        try {
+          const next = { ...prev } as Record<string, Record<string, 'prepared'|'not_available'>>;
+          let changed = false;
+          for (const bid of Object.keys(map)) {
+            const existing = prev[bid] || {};
+            const incoming = map[bid] || {};
+            // quick shallow equality check for keys and values
+            const existingKeys = Object.keys(existing).sort();
+            const incomingKeys = Object.keys(incoming).sort();
+            if (existingKeys.length !== incomingKeys.length) {
+              changed = true;
+            } else {
+              for (let i = 0; i < existingKeys.length && !changed; i++) {
+                const k = existingKeys[i];
+                if (String(existing[k]) !== String(incoming[k])) { changed = true; break; }
+              }
+            }
+            if (changed) {
+              next[bid] = { ...(next[bid] || {}), ...(incoming || {}) };
+            }
+          }
+          if (!changed) return prev;
+          return next;
+        } catch (e) {
+          return prev;
+        }
+      });
     } catch (e) {
       // ignore
     }
@@ -584,9 +1030,11 @@ export default function AdminDashboard() {
 
   // Mutations
   const approveBookingMutation = useMutation({
-    mutationFn: async ({ bookingId, adminResponse }: any) => {
-      const res = await apiRequest('POST', `/api/bookings/${bookingId}/approve`, { adminResponse });
-      return res.json?.();
+    // Approval is now handled automatically by the server. Keep a no-op mutation here
+    // so existing callers in the UI don't cause runtime errors. It will still
+    // invalidate queries so the UI refreshes to reflect server-side scheduling.
+    mutationFn: async (_: any) => {
+      return Promise.resolve({});
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/admin/bookings'] });
@@ -598,10 +1046,8 @@ export default function AdminDashboard() {
   });
 
   const denyBookingMutation = useMutation({
-    mutationFn: async ({ bookingId, adminResponse }: any) => {
-      const res = await apiRequest('POST', `/api/bookings/${bookingId}/deny`, { adminResponse });
-      return res.json?.();
-    },
+    // Deny is removed; keep a safe no-op to avoid runtime errors if UI calls it.
+    mutationFn: async (_: any) => Promise.resolve({}),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/admin/bookings'] });
       queryClient.invalidateQueries({ queryKey: ['/api/bookings/pending'] });
@@ -610,6 +1056,36 @@ export default function AdminDashboard() {
       queryClient.invalidateQueries({ queryKey: ['/api/admin/activity'] });
     },
   });
+
+  // keep references to no-op mutations/handlers to avoid "declared but its value is never read" during iterative edits
+  void approveBookingMutation; void denyBookingMutation;
+
+  // Friendly handlers to replace approve/deny button actions in the UI.
+  const handleApproveNoop = (_bookingId: any) => {
+    try {
+      toast({ title: 'Auto-scheduled', description: 'Bookings are scheduled automatically; manual approval has been removed.', variant: 'default' });
+    } catch (e) {}
+  void _bookingId;
+    queryClient.invalidateQueries({ queryKey: ['/api/admin/bookings'] });
+    queryClient.invalidateQueries({ queryKey: ['/api/bookings/pending'] });
+    queryClient.invalidateQueries({ queryKey: ['/api/admin/alerts'] });
+    queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] });
+    queryClient.invalidateQueries({ queryKey: ['/api/admin/activity'] });
+  };
+
+  const handleDenyNoop = (_bookingId: any) => {
+    try {
+      toast({ title: 'Action removed', description: 'Manual denial has been removed. The system handles scheduling automatically.', variant: 'default' });
+    } catch (e) {}
+  void _bookingId;
+    queryClient.invalidateQueries({ queryKey: ['/api/admin/bookings'] });
+    queryClient.invalidateQueries({ queryKey: ['/api/bookings/pending'] });
+    queryClient.invalidateQueries({ queryKey: ['/api/admin/alerts'] });
+    queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] });
+    queryClient.invalidateQueries({ queryKey: ['/api/admin/activity'] });
+  };
+
+  void handleApproveNoop; void handleDenyNoop;
 
   const confirmArrivalMutation = useMutation({
     mutationFn: async ({ bookingId }: any) => {
@@ -857,9 +1333,9 @@ export default function AdminDashboard() {
         <h2 className="text-2xl font-bold text-gray-900">{title}</h2>
         {subtitle && <p className="text-gray-600 mt-1">{subtitle}</p>}
       </div>
-      <div className="flex items-center gap-3">
+      <div className="flex flex-col md:flex-row gap-2 items-start md:items-center">
         {badges?.map((b, i) => (
-          <div key={i} className={`${b.className || 'bg-gray-100 text-gray-800'} px-3 py-1 rounded-full text-sm font-medium`}>
+          <div key={i} className={`w-full md:w-auto ${b.className || 'bg-gray-100 text-gray-800'} px-3 py-1 rounded-full text-sm font-medium`}>
             {b.text}
           </div>
         ))}
@@ -962,39 +1438,28 @@ export default function AdminDashboard() {
               <div className="flex items-center justify-between mb-6">
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900">Facility Booking Management</h2>
-                  <p className="text-gray-600 mt-1">Monitor active bookings, pending requests, and booking history</p>
+                  <p className="text-gray-600 mt-1">Monitor active bookings, scheduled reservations, and booking history</p>
                 </div>
-                <div className="flex items-center gap-3">
-                  <div className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium">
-                    {activeBookings?.length || 0} Active
-                  </div>
-                  <div className="bg-pink-100 text-pink-800 px-3 py-1 rounded-full text-sm font-medium">
-                    {upcomingBookings?.length || 0} Upcoming
-                  </div>
-                  <div className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-medium">
-                    {pendingBookings?.length || 0} Pending
-                  </div>
+                <div className="flex flex-col md:flex-row gap-2 items-start md:items-center">
+                  <div className="w-full md:w-auto bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium">{activeBookings?.length || 0} Active</div>
+                  <div className="w-full md:w-auto bg-pink-100 text-pink-800 px-3 py-1 rounded-full text-sm font-medium">{(upcomingBookings?.length || pendingBookings?.length) || 0} Scheduled</div>
                 </div>
               </div>
 
               <Tabs value={bookingTab} onValueChange={(v) => setBookingTab(v)} className="space-y-6">
-                <TabsList className="grid w-full grid-cols-3">
-                  <TabsTrigger value="active" className="flex items-center gap-2">
+                <TabsList className="grid w-full grid-cols-1 md:grid-cols-2 gap-2">
+                  <TabsTrigger value="active" className="w-full whitespace-normal flex items-center justify-start gap-2 text-left md:justify-center md:text-center">
                     <CheckCircle className="h-4 w-4 text-green-600" />
                     Active Bookings
                   </TabsTrigger>
-                  <TabsTrigger value="pendingList" className="flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-yellow-600" />
-                    Pending
-                  </TabsTrigger>
-                  <TabsTrigger value="requests" className="flex items-center gap-2">
-                    <Calendar className="h-4 w-4 text-purple-600" />
-                    Booking Requests
+                  <TabsTrigger value="pendingList" className="w-full whitespace-normal flex items-center justify-start gap-2 text-left md:justify-center md:text-center">
+                    <Clock className="h-4 w-4 text-green-600" />
+                    Scheduled
                   </TabsTrigger>
                 </TabsList>
 
-                <TabsContent value="active" className="space-y-4">
-                  <div className="bg-gray-50 rounded-lg p-6">
+                <TabsContent value="active" className="space-y-4 mt-6 md:mt-0">
+                  <div className="bg-gray-50 rounded-lg p-6 mt-4 md:mt-0">
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-lg font-semibold text-gray-900">Currently Active Facility Bookings</h3>
                       <span className="text-sm text-gray-600">{activeBookings?.length || 0} bookings</span>
@@ -1006,7 +1471,7 @@ export default function AdminDashboard() {
                           ?.slice(activeBookingsPage * itemsPerPage, (activeBookingsPage + 1) * itemsPerPage)
                           .map((booking: FacilityBooking) => (
                           <div key={booking.id} className="bg-white rounded-lg p-4 border border-gray-200 hover:border-green-300 transition-colors duration-200">
-                            <div className="flex items-center gap-6">
+                            <div className="flex flex-col md:flex-row items-start md:items-center gap-4 md:gap-6">
                               <div className="flex items-center gap-4">
                                 <div className="bg-green-100 p-2 rounded-lg">
                                   <CheckCircle className="h-5 w-5 text-green-600" />
@@ -1024,8 +1489,8 @@ export default function AdminDashboard() {
                                 </div>
                               </div>
                               
-                              <div className="flex items-center gap-6">
-                                <div className="text-right">
+                              <div className="flex flex-col md:flex-row items-start md:items-center gap-4 md:gap-6">
+                                <div className="md:text-right text-left">
                                   {booking.purpose && (() => {
                                     const id = String(booking.id || Math.random());
                                     const isOpen = !!openPurpose[id];
@@ -1079,24 +1544,26 @@ export default function AdminDashboard() {
                                   <p className="text-sm font-medium text-gray-900">Ends</p>
                                   <p className="text-sm text-gray-600">{formatDateTime(booking.endTime)}</p>
                                 </div>
-                                <div className="inline-grid gap-2 justify-items-stretch items-start">
-                                  <span className="justify-self-stretch px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">Active</span>
-                                  { (booking.status === 'approved' && !!booking.equipment) && (
-                                    getNeedsStatusForBooking(booking) ? (
-                                      getNeedsStatusForBooking(booking) === 'prepared' ? (
-                                        <div className="justify-self-stretch inline-flex items-center justify-center h-6 min-w-[72px] px-3 rounded-full bg-emerald-100 text-emerald-800 text-xs font-medium truncate">Prepared</div>
-                                      ) : (
-                                        <div className="justify-self-stretch inline-flex items-center justify-center h-6 min-w-[72px] px-3 rounded-full bg-red-100 text-red-800 text-xs font-medium truncate">Not Available</div>
-                                      )
-                                    ) : (
-                                      <div className="justify-self-stretch inline-flex items-center justify-center h-6 min-w-[72px] px-3 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 truncate">NEEDS</div>
-                                    )
+                                <div className="flex flex-col md:flex-row gap-2 items-start md:items-center">
+                                  <span className="w-full md:w-auto px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">Active</span>
+                                  { ((booking.status === 'approved' || String(booking.status).toLowerCase() === 'pending') && !!booking.equipment) && (
+                                    (() => {
+                                      const ns = getNeedsStatusForBooking(booking);
+                                      if (ns === 'prepared') {
+                                        return <div className="w-full md:w-auto inline-flex items-center justify-center h-6 min-w-[72px] px-3 rounded-full bg-emerald-100 text-emerald-800 text-xs font-medium truncate">Prepared</div>;
+                                      }
+                                      // Do not render a persistent "Not Available" badge in the booking list per UX request.
+                                      if (ns === 'not_available') {
+                                        return null;
+                                      }
+                                      return <div className="w-full md:w-auto inline-flex items-center justify-center h-6 min-w-[72px] px-3 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 truncate">NEEDS</div>;
+                                    })()
                                   )}
                                 </div>
                                 {/* removed: admin-facing pending-notice per request */}
 
                                 {/* Arrival confirmation countdown and admin action: if arrivalConfirmationDeadline exists and not yet confirmed, show confirmation countdown and a Confirm button */}
-                                {booking.status === 'approved' && (
+                                {(booking.status === 'approved' || String(booking.status).toLowerCase() === 'pending') && (
                                   <div className="text-right text-xs text-gray-500 mt-1">
                                     {booking.arrivalConfirmationDeadline && !booking.arrivalConfirmed ? (
                                       <div className="flex items-center justify-end gap-3">
@@ -1120,14 +1587,11 @@ export default function AdminDashboard() {
                                 )}
                                 {/* Equipment line and admin actions */}
                                 <div className="ml-4">
-                                  {(booking.status === 'approved' && new Date(booking.startTime) > new Date()) && renderEquipmentLine(booking)}
-                                  {isAdmin && !!booking.equipment && (booking.status === 'approved' && new Date(booking.startTime) > new Date()) && (
-                                    !getNeedsStatusForBooking(booking) ? (
-                                      <div className="flex items-center gap-2 mt-2">
-                                        <Button size="sm" disabled={updatingNeedsIds.has(booking.id)} aria-busy={updatingNeedsIds.has(booking.id)} onClick={() => markBookingNeeds(booking.id, 'prepared')} aria-label={`Mark equipment prepared for ${booking.id}`}>✅ Prepared</Button>
-                                        <Button size="sm" variant="outline" disabled={updatingNeedsIds.has(booking.id)} aria-busy={updatingNeedsIds.has(booking.id)} onClick={() => markBookingNeeds(booking.id, 'not_available')} aria-label={`Mark equipment not available for ${booking.id}`}>❌ Not Available</Button>
-                                      </div>
-                                    ) : null
+                                  {((booking.status === 'approved' || String(booking.status).toLowerCase() === 'pending') && new Date(booking.startTime) > new Date()) && renderEquipmentLine(booking)}
+                                  {isAdmin && !!booking.equipment && ((booking.status === 'approved' || String(booking.status).toLowerCase() === 'pending') && new Date(booking.startTime) > new Date()) && !getNeedsStatusForBooking(booking) && (
+                                    <div className="flex items-center gap-2 mt-2">
+                                      <Button size="sm" onClick={() => openEquipmentModal(booking)} aria-label={`Check equipment for ${booking.id}`}>🔎 Check Equipment</Button>
+                                    </div>
                                   )}
                                 </div>
                               </div>
@@ -1174,10 +1638,10 @@ export default function AdminDashboard() {
                     )}
                   </div>
                 </TabsContent>
-                <TabsContent value="pendingList" className="space-y-4">
+                <TabsContent value="pendingList" className="space-y-4 mt-6 md:mt-0">
                   <div className="bg-gray-50 rounded-lg p-6">
                     <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-lg font-semibold text-gray-900">Pending Facility Bookings</h3>
+                      <h3 className="text-lg font-semibold text-gray-900">Scheduled Facility Bookings</h3>
                       <span className="text-sm text-gray-600">{upcomingBookings?.length || 0} bookings</span>
                     </div>
                     
@@ -1187,7 +1651,7 @@ export default function AdminDashboard() {
                           ?.slice(upcomingBookingsPage * itemsPerPage, (upcomingBookingsPage + 1) * itemsPerPage)
                           .map((booking: FacilityBooking) => (
                           <div key={booking.id} className="bg-white rounded-lg p-4 border border-gray-200 hover:border-pink-200 transition-colors duration-200">
-                            <div className="flex items-center justify-between">
+                            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                               <div className="flex items-center gap-4">
                                 <div className="bg-pink-100 p-2 rounded-lg">
                                   <Clock className="h-5 w-5 text-pink-600" />
@@ -1272,45 +1736,28 @@ export default function AdminDashboard() {
                                   <p className="text-sm text-gray-600">{formatDateTime(booking.endTime)}</p>
                                 </div>
                                 <div className="inline-grid gap-2 justify-items-stretch items-start">
-                                  <span className="justify-self-stretch inline-flex items-center justify-center h-6 min-w-[96px] px-3 rounded-full text-xs font-medium bg-pink-100 text-pink-800">Scheduled</span>
-                                  { (booking.status === 'approved' && !!booking.equipment) && (
-                                    getNeedsStatusForBooking(booking) ? (
-                                      getNeedsStatusForBooking(booking) === 'prepared' ? (
-                                        <div className="justify-self-stretch inline-flex items-center justify-center h-6 min-w-[72px] px-3 rounded-full bg-emerald-100 text-emerald-800 text-xs font-medium truncate">Prepared</div>
-                                      ) : (
-                                        <div className="justify-self-stretch inline-flex items-center justify-center h-6 min-w-[72px] px-3 rounded-full bg-red-100 text-red-800 text-xs font-medium truncate">Not Available</div>
-                                      )
-                                    ) : (
-                                      <div className="justify-self-stretch inline-flex items-center justify-center h-6 min-w-[96px] px-3 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">NEEDS</div>
-                                    )
-                                  )}
+                                  <div className="flex flex-col md:flex-row gap-2 items-start md:items-center">
+                                    <span className="w-full md:w-auto inline-flex items-center justify-center h-6 min-w-[96px] px-3 rounded-full text-xs font-medium bg-pink-100 text-pink-800">Scheduled</span>
+                                    { ((booking.status === 'approved' || String(booking.status).toLowerCase() === 'pending') && !!booking.equipment) && (
+                                      (() => {
+                                        const ns = getNeedsStatusForBooking(booking);
+                                        if (ns === 'prepared') {
+                                          return <div className="w-full md:w-auto inline-flex items-center justify-center h-6 min-w-[72px] px-3 rounded-full bg-emerald-100 text-emerald-800 text-xs font-medium truncate">Prepared</div>;
+                                        }
+                                        // Hide Not Available badge in list to match requested UX.
+                                        if (ns === 'not_available') return null;
+                                        return <div className="w-full md:w-auto inline-flex items-center justify-center h-6 min-w-[96px] px-3 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">NEEDS</div>;
+                                      })()
+                                    )}
+                                  </div>
                                 </div>
                                 {/* Equipment line and admin actions for pending */}
                                 <div className="ml-4">
-                                  {(booking.status === 'approved' && new Date(booking.startTime) > new Date()) && renderEquipmentLine(booking)}
-                                  {isAdmin && !!booking.equipment && (booking.status === 'approved' && new Date(booking.startTime) > new Date()) && (
-                                    !getNeedsStatusForBooking(booking) ? (
-                                      <div className="flex items-center gap-2 mt-2">
-                                        <Button
-                                          disabled={updatingNeedsIds.has(booking.id)}
-                                          aria-busy={updatingNeedsIds.has(booking.id)}
-                                          onClick={() => markBookingNeeds(booking.id, 'prepared')}
-                                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700"
-                                        >
-                                          <CheckCircle className="h-3 w-3" />
-                                          <span className="truncate">Prepared</span>
-                                        </Button>
-                                        <Button
-                                          disabled={updatingNeedsIds.has(booking.id)}
-                                          aria-busy={updatingNeedsIds.has(booking.id)}
-                                          onClick={() => markBookingNeeds(booking.id, 'not_available')}
-                                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium border border-red-200 text-red-700 bg-white hover:bg-red-50"
-                                        >
-                                          <XCircle className="h-3 w-3" />
-                                          <span className="truncate">Not Available</span>
-                                        </Button>
-                                      </div>
-                                    ) : null
+                                  {((booking.status === 'approved' || String(booking.status).toLowerCase() === 'pending') && new Date(booking.startTime) > new Date()) && renderEquipmentLine(booking)}
+                                  {isAdmin && !!booking.equipment && ((booking.status === 'approved' || String(booking.status).toLowerCase() === 'pending') && new Date(booking.startTime) > new Date()) && !getNeedsStatusForBooking(booking) && (
+                                    <div className="flex items-center gap-2 mt-2">
+                                      <Button size="sm" onClick={() => openEquipmentModal(booking)} aria-label={`Check equipment for ${booking.id}`}>🔎 Check Equipment</Button>
+                                    </div>
                                   )}
                                 </div>
                               </div>
@@ -1356,211 +1803,7 @@ export default function AdminDashboard() {
                     )}
                   </div>
                 </TabsContent>
-                <TabsContent value="requests" className="space-y-4">
-                  <div className="bg-gray-50 rounded-lg p-6">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-lg font-semibold text-gray-900">Booking Requests</h3>
-                      <span className="text-sm text-gray-600">{pendingBookings?.length || 0} requests</span>
-                    </div>
-                    
-                    {pendingBookings && pendingBookings.length > 0 ? (
-                      <div className="space-y-3">
-                        {pendingBookings
-                          ?.slice(pendingBookingsPage * itemsPerPage, (pendingBookingsPage + 1) * itemsPerPage)
-                          .map((booking: FacilityBooking) => (
-                          <div key={booking.id} className="bg-white rounded-lg p-4 border border-gray-200 hover:border-yellow-300 transition-colors duration-200">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-4">
-                                <div className="bg-yellow-100 p-2 rounded-lg">
-                                  <Clock className="h-5 w-5 text-yellow-600" />
-                                </div>
-                                <div>
-                                  <h4 className="font-medium text-gray-900">{getUserEmail(booking.userId)}</h4>
-                                  <p className="text-sm text-gray-600">{getFacilityName(booking.facilityId)}</p>
-                                  <div className="flex items-center gap-2 mt-1">
-                                    <span className="text-xs font-medium text-gray-500">Participants:</span>
-                                    <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">{booking.participants || 0}</span>
-                                  </div>
-                                </div>
-                              </div>
-                              
-                              <div className="flex items-center gap-6">
-                                <div className="text-right">
-                                  <TooltipProvider>
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <div className="flex items-center gap-1 cursor-help justify-end">
-                                          {booking.purpose && booking.purpose.length > 30 ? (
-                                            <>
-                                              <Eye className="h-3 w-3 text-pink-600" />
-                                              <span className="text-xs text-pink-600">View purpose</span>
-                                            </>
-                                          ) : (
-                                            <div className="text-right">
-                                              <p className="text-sm font-medium text-gray-900">Purpose</p>
-                                              <p className="text-sm text-gray-600 max-w-[200px] truncate">
-                                                {booking.purpose || 'No purpose specified'}
-                                              </p>
-                                            </div>
-                                          )}
-                                        </div>
-                                      </TooltipTrigger>
-                                      <TooltipContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
-                                        <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                                          <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
-                                        </div>
-                                        <div className="p-3">
-                                          <p className="text-sm text-gray-900 leading-5 break-words text-left">
-                                            {booking.purpose || 'No purpose specified'}
-                                          </p>
-                                        </div>
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  </TooltipProvider>
-                                </div>
-                                <div className="text-right">
-                                  <p className="text-sm font-medium text-gray-900">Starts</p>
-                                  <p className="text-sm text-gray-600">{formatDateTime(booking.startTime)}</p>
-                                </div>
-                                <div className="text-right">
-                                  <p className="text-sm font-medium text-gray-900">Ends</p>
-                                  <p className="text-sm text-gray-600">{formatDateTime(booking.endTime)}</p>
-                                </div>
-                                <div className="flex items-center gap-3">
-                                  <span className="inline-flex items-center justify-center h-6 min-w-[140px] px-3 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">Pending Request</span>
-                                  { (booking.status === 'approved' && !!booking.equipment) && (
-                                    getNeedsStatusForBooking(booking) ? (
-                                      getNeedsStatusForBooking(booking) === 'prepared' ? (
-                                        <div className="inline-flex items-center justify-center h-6 min-w-[72px] px-3 rounded-full bg-emerald-100 text-emerald-800 text-xs font-medium truncate">Prepared</div>
-                                      ) : (
-                                        <div className="inline-flex items-center justify-center h-6 min-w-[72px] px-3 rounded-full bg-red-100 text-red-800 text-xs font-medium truncate">Not Available</div>
-                                      )
-                                    ) : (
-                                      <div className="inline-flex items-center justify-center h-6 min-w-[96px] px-3 rounded-full text-xs font-medium bg-yellow-50 text-yellow-800">NEEDS</div>
-                                    )
-                                  )}
-                                </div>
-                                <div className="flex flex-col items-start gap-2">
-                                  <button
-                                    onClick={() =>
-                                      approveBookingMutation.mutate({
-                                        bookingId: booking.id,
-                                      })
-                                    }
-                                    className="inline-flex items-center justify-center gap-1 px-2 bg-emerald-600 text-white text-xs font-medium rounded-md hover:bg-emerald-700 transition-colors duration-200 h-7 min-w-[88px]"
-                                  >
-                                    <CheckCircle className="h-3 w-3" />
-                                    <span className="truncate">Approve</span>
-                                  </button>
-                                  <button
-                                    onClick={() =>
-                                      denyBookingMutation.mutate({
-                                        bookingId: booking.id,
-                                      })
-                                    }
-                                    className="inline-flex items-center justify-center gap-1 px-2 bg-red-600 text-white text-xs font-medium rounded-md hover:bg-red-700 transition-colors duration-200 h-7 min-w-[88px]"
-                                  >
-                                    <XCircle className="h-3 w-3" />
-                                    <span className="truncate">Deny</span>
-                                  </button>
-                                  { (booking.status === 'approved' && !!booking.equipment) && (
-                                    getNeedsStatusForBooking(booking) ? (
-                                      null
-                                    ) : (
-                                      <div className="flex items-center gap-2 mt-2">
-                                        <Button
-                                          disabled={updatingNeedsIds.has(booking.id)}
-                                          aria-busy={updatingNeedsIds.has(booking.id)}
-                                          onClick={() => markBookingNeeds(booking.id, 'prepared')}
-                                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700"
-                                        >
-                                          <CheckCircle className="h-3 w-3" />
-                                          <span className="truncate">Prepared</span>
-                                        </Button>
-                                        <Button
-                                          disabled={updatingNeedsIds.has(booking.id)}
-                                          aria-busy={updatingNeedsIds.has(booking.id)}
-                                          onClick={() => markBookingNeeds(booking.id, 'not_available')}
-                                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium border border-red-200 text-red-700 bg-white hover:bg-red-50"
-                                        >
-                                          <XCircle className="h-3 w-3" />
-                                          <span className="truncate">Not Available</span>
-                                        </Button>
-                                      </div>
-                                    )
-                                  )}
-                                </div>
-                                {/* Equipment line and admin actions for booking requests */}
-                                <div className="ml-4">
-                                  {(booking.status === 'approved' && new Date(booking.startTime) > new Date()) && renderEquipmentLine(booking)}
-                                  {isAdmin && !!booking.equipment && (booking.status === 'approved' && new Date(booking.startTime) > new Date()) && (
-                                    !getNeedsStatusForBooking(booking) ? (
-                                      <div className="flex items-center gap-2 mt-2">
-                                        <Button
-                                          disabled={updatingNeedsIds.has(booking.id)}
-                                          aria-busy={updatingNeedsIds.has(booking.id)}
-                                          onClick={() => markBookingNeeds(booking.id, 'prepared')}
-                                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700"
-                                        >
-                                          <CheckCircle className="h-3 w-3" />
-                                          <span className="truncate">Prepared</span>
-                                        </Button>
-                                        <Button
-                                          disabled={updatingNeedsIds.has(booking.id)}
-                                          aria-busy={updatingNeedsIds.has(booking.id)}
-                                          onClick={() => markBookingNeeds(booking.id, 'not_available')}
-                                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium border border-red-200 text-red-700 bg-white hover:bg-red-50"
-                                        >
-                                          <XCircle className="h-3 w-3" />
-                                          <span className="truncate">Not Available</span>
-                                        </Button>
-                                      </div>
-                                    ) : null
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                        
-                        {/* Pagination for booking requests */}
-                        {pendingBookings.length > itemsPerPage && (
-                          <div className="flex items-center justify-between pt-4 border-t border-gray-200">
-                              <p className="text-sm text-gray-600">
-                              Showing {pendingBookingsPage * itemsPerPage + 1} to {Math.min((pendingBookingsPage + 1) * itemsPerPage, pendingBookings.length)} of {pendingBookings.length} results
-                            </p>
-                            <div className="flex items-center gap-2">
-                              <button
-                                onClick={() => setPendingBookingsPage(prev => Math.max(prev - 1, 0))}
-                                disabled={pendingBookingsPage === 0}
-                                className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
-                              >
-                                <ChevronLeft className="h-4 w-4" />
-                              </button>
-                              <span className="px-3 py-1 text-sm font-medium">
-                                {pendingBookingsPage + 1} of {Math.ceil(pendingBookings.length / itemsPerPage)}
-                              </span>
-                              <button
-                                onClick={() => setPendingBookingsPage(prev => (pendingBookings && (prev + 1) * itemsPerPage < pendingBookings.length ? prev + 1 : prev))}
-                                disabled={!pendingBookings || (pendingBookingsPage + 1) * itemsPerPage >= pendingBookings.length}
-                                className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
-                              >
-                                <ChevronRight className="h-4 w-4" />
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="text-center py-8">
-                        <div className="bg-gray-100 rounded-full w-12 h-12 flex items-center justify-center mx-auto mb-3">
-                          <Calendar className="h-6 w-6 text-gray-400" />
-                        </div>
-                        <p className="text-gray-600 text-sm">No pending facility booking requests</p>
-                      </div>
-                    )}
-                  </div>
-                </TabsContent>
+                {/* Booking Requests tab removed: server now auto-schedules bookings. */}
                 
               </Tabs>
             </div>
@@ -1578,29 +1821,25 @@ export default function AdminDashboard() {
                   <h2 className="text-2xl font-bold text-gray-900">User Management</h2>
                   <p className="text-gray-600 mt-1">Manage facility booking users and suspended accounts</p>
                 </div>
-                <div className="flex items-center gap-3">
-                  <div className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">
-                    {bookingUsers?.length || 0} Booking Users
-                  </div>
-                  <div className="bg-red-100 text-red-800 px-3 py-1 rounded-full text-sm font-medium">
-                    {bannedUsers?.length || 0} Suspended
-                  </div>
+                <div className="flex flex-col md:flex-row gap-2 items-start md:items-center">
+                  <div className="w-full md:w-auto bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">{bookingUsers?.length || 0} Booking Users</div>
+                  <div className="w-full md:w-auto bg-red-100 text-red-800 px-3 py-1 rounded-full text-sm font-medium">{bannedUsers?.length || 0} Suspended</div>
                 </div>
               </div>
 
               <Tabs value={userTab} onValueChange={(v: string) => setUserTab(v)} className="space-y-6">
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="booking-users" className="flex items-center gap-2">
+                <TabsList className="grid w-full grid-cols-2 md:grid-cols-2 gap-2">
+                  <TabsTrigger value="booking-users" className="w-full whitespace-normal flex items-center justify-start gap-2 text-left md:justify-center md:text-center">
                     <Users className="h-4 w-4 text-blue-600" />
                     Booking Users
                   </TabsTrigger>
-                  <TabsTrigger value="banned-users" className="flex items-center gap-2">
+                  <TabsTrigger value="banned-users" className="w-full whitespace-normal flex items-center justify-start gap-2 text-left md:justify-center md:text-center">
                     <UserX className="h-4 w-4 text-red-600" />
                     Suspended
                   </TabsTrigger>
                 </TabsList>
 
-                <TabsContent value="booking-users" className="space-y-4">
+                <TabsContent value="booking-users" className="space-y-4 mt-6 md:mt-0">
                   <div className="bg-gray-50 rounded-lg p-6">
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-lg font-semibold text-gray-900">Facility Booking Users</h3>
@@ -1615,7 +1854,7 @@ export default function AdminDashboard() {
                           const userBookings = activeBookings?.filter(booking => booking.userId === userItem.id);
                           return (
                             <div key={userItem.id} className="bg-white rounded-lg p-4 border border-gray-200 hover:border-blue-300 transition-colors duration-200">
-                              <div className="flex items-center justify-between">
+                              <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
                                 <div className="flex items-center gap-4">
                                   <div className="bg-blue-100 p-2 rounded-lg">
                                     <UserIcon className="h-5 w-5 text-blue-600" />
@@ -1699,7 +1938,7 @@ export default function AdminDashboard() {
 
                 {/* ORZ Station Users UI removed */}
 
-                <TabsContent value="banned-users" className="space-y-4">
+                <TabsContent value="banned-users" className="space-y-4 mt-6 md:mt-0">
                   <div className="bg-gray-50 rounded-lg p-6">
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-lg font-semibold text-gray-900">Suspended Users</h3>
@@ -1712,7 +1951,7 @@ export default function AdminDashboard() {
                           ?.slice(bannedUsersPage * itemsPerPage, (bannedUsersPage + 1) * itemsPerPage)
                           .map((userItem: User) => (
                           <div key={userItem.id} className="bg-white rounded-lg p-4 border border-red-200 hover:border-red-300 transition-colors duration-200">
-                            <div className="flex items-center justify-between">
+                            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
                               <div className="flex items-center gap-4">
                                 <div className="bg-red-100 p-2 rounded-lg">
                                   <UserX className="h-5 w-5 text-red-600" />
@@ -1833,28 +2072,24 @@ export default function AdminDashboard() {
                   <h2 className="text-2xl font-bold text-gray-900">System Alerts</h2>
                   <p className="text-gray-600 mt-1 text-sm">Monitor system security alerts and notifications</p>
                 </div>
-                <div className="flex items-center gap-3">
-                  <div className="bg-orange-100 text-orange-800 px-3 py-1 rounded-full text-sm font-medium">
-                    {securityUnread || 0} Unread
-                  </div>
-                  <div className="bg-gray-100 text-gray-800 px-3 py-1 rounded-full text-sm font-medium">
-                    {securityTotal || 0} Total
-                  </div>
+                <div className="flex flex-col md:flex-row gap-2 items-start md:items-center">
+                  <div className="w-full md:w-auto bg-orange-100 text-orange-800 px-3 py-1 rounded-full text-sm font-medium">{securityUnread || 0} Unread</div>
+                  <div className="w-full md:w-auto bg-gray-100 text-gray-800 px-3 py-1 rounded-full text-sm font-medium">{securityTotal || 0} Total</div>
                 </div>
               </div>
 
               <Tabs value={securityTab} onValueChange={(v: string) => setSecurityTab(v)} className="space-y-6">
                 <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="booking" onClick={() => setSecurityTab('booking')} className="flex items-center gap-2">
+                  <TabsTrigger value="booking" onClick={() => setSecurityTab('booking')} className="w-full whitespace-normal flex items-center justify-start gap-2 text-left md:justify-center md:text-center">
                     <AlertTriangle className="h-4 w-4 text-orange-600" />
                     Booking Alerts
                   </TabsTrigger>
-                  <TabsTrigger value="users" onClick={() => setSecurityTab('users')} className="flex items-center gap-2">
+                  <TabsTrigger value="users" onClick={() => setSecurityTab('users')} className="w-full whitespace-normal flex items-center justify-start gap-2 text-left md:justify-center md:text-center">
                     <Users className="h-4 w-4 text-blue-600" />
                     User Management
                   </TabsTrigger>
                 </TabsList>
-                <TabsContent value="booking" className="space-y-4">
+                <TabsContent value="booking" className="space-y-4 mt-6 md:mt-0">
                   <div className="bg-gray-50 rounded-lg p-6">
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-lg font-semibold text-gray-900">Booking System Alerts</h3>
@@ -1993,7 +2228,7 @@ export default function AdminDashboard() {
                                         )}
                                         <div className="mt-1">
                                           <p className="text-xs text-gray-600 break-words break-all whitespace-pre-wrap max-w-full">
-                                            {needsObj ? cleaned : (alert.isRead ? `READ: ${cleaned}` : cleaned)}
+                                            {needsObj ? cleaned : cleaned}
                                           </p>
 
                                           {(equipmentList && equipmentList.length > 0) && (
@@ -2089,7 +2324,7 @@ export default function AdminDashboard() {
                     )}
                   </div>
                 </TabsContent>
-                <TabsContent value="users" className="space-y-4">
+                <TabsContent value="users" className="space-y-4 mt-6 md:mt-0">
                   <div className="bg-gray-50 rounded-lg p-6">
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-lg font-semibold text-gray-900">User Management Activities</h3>
@@ -2157,16 +2392,20 @@ export default function AdminDashboard() {
                                       <p className="font-medium text-sm text-gray-900">{alert.title}</p>
                                       <p className="text-xs text-gray-600 mt-1 break-words break-all whitespace-pre-wrap max-w-full">{formattedMessageWithTime}</p>
                                       {/* source not available on SystemAlert type */}
-                                      {isUnbanActivity && (
-                                        <div className="mt-2 inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                          <UserCheck className="h-3 w-3" />
-                                          User Restored
-                                        </div>
-                                      )}
-                                      {isBanActivity && (
-                                        <div className="mt-2 inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                                          <UserX className="h-3 w-3" />
-                                          User Suspended
+                                      { (isUnbanActivity || isBanActivity) && (
+                                        <div className="mt-2 flex flex-col md:flex-row gap-2 items-start md:items-center">
+                                          {isUnbanActivity && (
+                                            <div className="w-full md:w-auto inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                              <UserCheck className="h-3 w-3" />
+                                              User Restored
+                                            </div>
+                                          )}
+                                          {isBanActivity && (
+                                            <div className="w-full md:w-auto inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                              <UserX className="h-3 w-3" />
+                                              User Suspended
+                                            </div>
+                                          )}
                                         </div>
                                       )}
                                     </div>
@@ -2246,7 +2485,7 @@ export default function AdminDashboard() {
 
         const statusClass = (statusRaw: any) => {
           const s = String(statusRaw || '').toLowerCase();
-          if (s === 'pending' || s === 'request' || s === 'requested') return 'text-yellow-600';
+          if (s === 'pending' || s === 'request' || s === 'requested') return 'text-green-600';
           if (s === 'approved' || s === 'completed') return 'text-green-600';
           if (s === 'denied' || s === 'cancelled' || s === 'canceled') return 'text-red-600';
           if (s === 'expired' || s === 'void') return 'text-gray-600';
@@ -2261,31 +2500,31 @@ export default function AdminDashboard() {
                   <h2 className="text-2xl font-bold text-gray-900">Admin Activity Logs</h2>
                   <p className="text-gray-600 mt-1 text-sm">Centralized booking and system logs — detailed view for auditing and troubleshooting</p>
                 </div>
-                <div className="flex items-center gap-3">
-                  <div className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium">{successfullyBooked.length || 0} Successful</div>
-                  <div className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-medium">{bookingHistory.length || 0} History</div>
-                  <div className="bg-gray-100 text-gray-800 px-3 py-1 rounded-full text-sm font-medium">{systemActivity.length || 0} System</div>
+                <div className="flex flex-col md:flex-row gap-2 items-start md:items-center">
+                  <div className="w-full md:w-auto bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium">{successfullyBooked.length || 0} Successful</div>
+                  <div className="w-full md:w-auto bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-medium">{bookingHistory.length || 0} History</div>
+                  <div className="w-full md:w-auto bg-gray-100 text-gray-800 px-3 py-1 rounded-full text-sm font-medium">{systemActivity.length || 0} System</div>
                 </div>
               </div>
 
               <Tabs value={settingsTab} onValueChange={(v: string) => setSettingsTab(v)} className="space-y-6">
-                <TabsList className="grid w-full grid-cols-3">
-                  <TabsTrigger value="success" className="flex items-center gap-2">
+                <TabsList className="grid w-full grid-cols-1 md:grid-cols-3 gap-2">
+                  <TabsTrigger value="success" className="w-full whitespace-normal flex items-center justify-start gap-2 text-left md:justify-center md:text-center">
                     <CheckCircle className="h-4 w-4 text-green-600" />
                     Successfully Booked
                   </TabsTrigger>
-                  <TabsTrigger value="history" className="flex items-center gap-2">
+                  <TabsTrigger value="history" className="w-full whitespace-normal flex items-center justify-start gap-2 text-left md:justify-center md:text-center">
                     <BarChart3 className="h-4 w-4 text-yellow-600" />
                     Booking History
                   </TabsTrigger>
-                  <TabsTrigger value="system" className="flex items-center gap-2">
+                  <TabsTrigger value="system" className="w-full whitespace-normal flex items-center justify-start gap-2 text-left md:justify-center md:text-center">
                     <Activity className="h-4 w-4 text-gray-600" />
                     System Activity
                   </TabsTrigger>
                 </TabsList>
 
-                <TabsContent value="success" className="space-y-2">
-                  <div className="bg-gray-50 rounded-lg p-6">
+                <TabsContent value="success" className="space-y-2 mt-6 md:mt-0">
+                  <div className="bg-gray-50 rounded-lg p-6 mt-0">
                     <h3 className="text-lg font-semibold text-gray-900">Successfully Booked</h3>
                     <p className="text-sm text-gray-600 mt-1">Completed bookings which were approved and had confirmed arrival.</p>
                     {successfullyBooked.length > 0 ? (
@@ -2293,27 +2532,68 @@ export default function AdminDashboard() {
                         <div className="space-y-2 mt-3">
                           {successfullyBooked.slice(successPage * itemsPerPage, (successPage + 1) * itemsPerPage).map((b: FacilityBooking) => (
                             <div key={b.id} className="bg-white rounded-md p-3 border border-gray-200">
-                              <div className="flex items-center gap-4">
+                              <div className="flex flex-col md:flex-row items-start md:items-center gap-4">
                                 {/* Left: user email + room + participants */}
-                                <div className="flex-1">
+                                <div className="flex-1 min-w-0">
                                   <h4 className="font-medium text-sm text-gray-900">{getUserEmail(b.userId)}</h4>
                                   <p className="text-xs text-gray-600">{getFacilityName(b.facilityId)}</p>
                                   <p className="text-xs text-gray-500 mt-1">Participants: <span className="text-xs text-gray-700">{b.participants || 0}</span></p>
                                 </div>
 
-                                {/* Right: single-row compact layout: Purpose | Starts : Ends | Status */}
-                                <div className="flex-1 flex items-center">
-                                  <div className="flex-1 flex items-center justify-end gap-3 text-xs text-gray-500 truncate">
+                                {/* Right: stacked on mobile, inline on md+: Purpose | Starts : Ends | Status */}
+                                <div className="w-full md:flex-1 flex flex-col md:flex-row items-start md:items-center min-w-0">
+                                  <div className="w-full md:flex-1 flex items-center justify-start md:justify-end gap-2 text-xs text-gray-500 min-w-0">
                                     <span className="text-xs text-gray-500">Purpose:</span>
-                                    <span className="text-sm text-gray-900 truncate max-w-[220px]">{b.purpose || ''}</span>
-                                    <span className="text-xs text-gray-400">|</span>
-                                    <span className="text-xs text-gray-500">Starts:</span>
-                                    <span className="text-xs text-gray-900">{formatDateTime(b.startTime)}</span>
-                                    <span className="text-xs text-gray-400">|</span>
-                                    <span className="text-xs text-gray-500">Ends:</span>
-                                    <span className="text-xs text-gray-900">{formatDateTime(b.endTime)}</span>
+                                    {b.purpose ? (() => {
+                                      const id = `purpose-${b.id}`;
+                                      const isOpen = !!openPurpose[id];
+                                      return (
+                                        <div className="flex items-center gap-2">
+                                          <Popover open={isOpen} onOpenChange={(v) => setOpenPurpose(prev => ({ ...prev, [id]: v }))}>
+                                            <TooltipProvider>
+                                              <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                  <PopoverTrigger asChild>
+                                                    <button
+                                                      onClick={() => setOpenPurpose(prev => ({ ...prev, [id]: !prev[id] }))}
+                                                      className="flex items-center gap-1 cursor-help text-xs text-pink-600"
+                                                      aria-expanded={isOpen}
+                                                    >
+                                                      <Eye className="h-3 w-3 text-pink-600" />
+                                                      <span>View</span>
+                                                    </button>
+                                                  </PopoverTrigger>
+                                                </TooltipTrigger>
+                                                <TooltipContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
+                                                  <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                                    <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
+                                                  </div>
+                                                  <div className="p-3">
+                                                    <p className="text-sm text-gray-900 leading-5 break-words text-left">{b.purpose}</p>
+                                                  </div>
+                                                </TooltipContent>
+                                              </Tooltip>
+                                            </TooltipProvider>
+                                            <PopoverContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50 origin-top-left">
+                                              <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                                <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
+                                              </div>
+                                              <div className="p-3">
+                                                <p className="text-sm text-gray-900 leading-5 break-words text-left">{b.purpose}</p>
+                                              </div>
+                                            </PopoverContent>
+                                          </Popover>
+                                        </div>
+                                      );
+                                    })() : null}
+                                    <span className="text-xs text-gray-400 whitespace-nowrap">|</span>
+                                    <span className="text-xs text-gray-500 whitespace-nowrap">Starts:</span>
+                                    <span className="text-xs text-gray-900 whitespace-nowrap">{formatDateTime(b.startTime)}</span>
+                                    <span className="text-xs text-gray-400 whitespace-nowrap">|</span>
+                                    <span className="text-xs text-gray-500 whitespace-nowrap">Ends:</span>
+                                    <span className="text-xs text-gray-900 whitespace-nowrap">{formatDateTime(b.endTime)}</span>
                                   </div>
-                                  <div className="w-36 text-right ml-4 flex items-center justify-end gap-2">
+                                  <div className="w-full md:w-36 text-right mt-2 md:mt-0 md:ml-4 flex items-center justify-end gap-2 md:whitespace-nowrap">
                                     <span className="text-xs text-gray-400">|</span>
                                     <span className={`text-xs font-medium ${statusClass(b.status)} capitalize`}>Status: {String(b.status || '')}</span>
                                   </div>
@@ -2356,8 +2636,8 @@ export default function AdminDashboard() {
                   </div>
                 </TabsContent>
 
-                <TabsContent value="history" className="space-y-2">
-                  <div className="bg-gray-50 rounded-lg p-6">
+                <TabsContent value="history" className="space-y-2 mt-6 md:mt-0">
+                <div className="bg-gray-50 rounded-lg p-6 mt-0">
                     <h3 className="text-lg font-semibold text-gray-900">Booking History</h3>
                     <p className="text-sm text-gray-600 mt-1">Past bookings including denied, cancelled or expired reservations for audit purposes.</p>
                     {bookingHistory.length > 0 ? (
@@ -2365,27 +2645,127 @@ export default function AdminDashboard() {
                         <div className="space-y-2 mt-3">
                           {bookingHistory.slice(historyPage * itemsPerPage, (historyPage + 1) * itemsPerPage).map((b: FacilityBooking) => (
                             <div key={b.id} className="bg-white rounded-md p-3 border border-gray-200">
-                              <div className="flex items-center justify-between gap-3">
+                              <div className="flex flex-col md:flex-row items-start md:items-center gap-3">
                                 {/* Left: user email + room + participants */}
-                                <div className="flex-1">
+                                <div className="flex-1 min-w-0">
                                   <h4 className="font-medium text-sm text-gray-900">{getUserEmail(b.userId)}</h4>
                                   <p className="text-xs text-gray-600">{getFacilityName(b.facilityId)}</p>
                                   <p className="text-xs text-gray-500 mt-1">Participants: <span className="text-xs text-gray-700">{b.participants || 0}</span></p>
                                 </div>
 
-                                {/* Right: single-row compact layout: Purpose | Starts : Ends | Status */}
-                                <div className="flex-1 flex items-center">
-                                  <div className="flex-1 flex items-center justify-end gap-3 text-xs text-gray-500 truncate">
-                                    <span className="text-xs text-gray-500">Purpose:</span>
-                                    <span className="text-sm text-gray-900 truncate max-w-[220px]">{b.purpose || ''}</span>
-                                    <span className="text-xs text-gray-400">|</span>
-                                    <span className="text-xs text-gray-500">Starts:</span>
-                                    <span className="text-xs text-gray-900">{formatDateTime(b.startTime)}</span>
-                                    <span className="text-xs text-gray-400">|</span>
-                                    <span className="text-xs text-gray-500">Ends:</span>
-                                    <span className="text-xs text-gray-900">{formatDateTime(b.endTime)}</span>
+                                {/* Right: on mobile purpose stacks above dates; on md+ it is a single-line with truncation */}
+                                <div className="w-full md:flex-1 flex flex-col md:flex-row items-start md:items-center min-w-0">
+                                  <div className="w-full md:flex-1 min-w-0">
+                                    {/* Purpose: block on mobile, inline + truncate on md+ */}
+                                    <div className="block md:hidden text-sm text-gray-900 mb-1">
+                                      {b.purpose && (() => {
+                                        const id = `purpose-${b.id}`;
+                                        const isOpen = !!openPurpose[id];
+                                        return (
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-xs text-gray-500">Purpose:</span>
+                                            <Popover open={isOpen} onOpenChange={(v) => setOpenPurpose(prev => ({ ...prev, [id]: v }))}>
+                                              <TooltipProvider>
+                                                <Tooltip>
+                                                  <TooltipTrigger asChild>
+                                                    <PopoverTrigger asChild>
+                                                      <button
+                                                        onClick={() => setOpenPurpose(prev => ({ ...prev, [id]: !prev[id] }))}
+                                                        className="flex items-center gap-1 cursor-help text-xs text-pink-600"
+                                                        aria-expanded={isOpen}
+                                                      >
+                                                        <Eye className="h-3 w-3 text-pink-600" />
+                                                        <span>View</span>
+                                                      </button>
+                                                    </PopoverTrigger>
+                                                  </TooltipTrigger>
+                                                  <TooltipContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
+                                                    <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                                      <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
+                                                    </div>
+                                                    <div className="p-3">
+                                                      <p className="text-sm text-gray-900 leading-5 break-words text-left">{b.purpose}</p>
+                                                    </div>
+                                                  </TooltipContent>
+                                                </Tooltip>
+                                              </TooltipProvider>
+                                              <PopoverContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50 origin-top-left">
+                                                <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                                  <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
+                                                </div>
+                                                <div className="p-3">
+                                                  <p className="text-sm text-gray-900 leading-5 break-words text-left">{b.purpose}</p>
+                                                </div>
+                                              </PopoverContent>
+                                            </Popover>
+                                          </div>
+                                        );
+                                      })()}
+                                    </div>
+
+                                    <div className="hidden md:flex items-center justify-start gap-2 text-xs text-gray-500 min-w-0">
+                                      <span className="text-xs text-gray-500">Purpose:</span>
+                                      {b.purpose ? (() => {
+                                        const id = `purpose-${b.id}`;
+                                        const isOpen = !!openPurpose[id];
+                                        return (
+                                          <div className="flex items-center gap-2">
+                                            <Popover open={isOpen} onOpenChange={(v) => setOpenPurpose(prev => ({ ...prev, [id]: v }))}>
+                                              <TooltipProvider>
+                                                <Tooltip>
+                                                  <TooltipTrigger asChild>
+                                                    <PopoverTrigger asChild>
+                                                      <button
+                                                        onClick={() => setOpenPurpose(prev => ({ ...prev, [id]: !prev[id] }))}
+                                                        className="flex items-center gap-1 cursor-help text-xs text-pink-600"
+                                                        aria-expanded={isOpen}
+                                                      >
+                                                        <Eye className="h-3 w-3 text-pink-600" />
+                                                        <span>View</span>
+                                                      </button>
+                                                    </PopoverTrigger>
+                                                  </TooltipTrigger>
+                                                  <TooltipContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
+                                                    <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                                      <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
+                                                    </div>
+                                                    <div className="p-3">
+                                                      <p className="text-sm text-gray-900 leading-5 break-words text-left">{b.purpose}</p>
+                                                    </div>
+                                                  </TooltipContent>
+                                                </Tooltip>
+                                              </TooltipProvider>
+                                              <PopoverContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50 origin-top-left">
+                                                <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                                  <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
+                                                </div>
+                                                <div className="p-3">
+                                                  <p className="text-sm text-gray-900 leading-5 break-words text-left">{b.purpose}</p>
+                                                </div>
+                                              </PopoverContent>
+                                            </Popover>
+                                          </div>
+                                        );
+                                      })() : null}
+                                      <span className="text-xs text-gray-400">|</span>
+                                      <span className="text-xs text-gray-500">Starts:</span>
+                                      <span className="text-xs text-gray-900">{formatDateTime(b.startTime)}</span>
+                                      <span className="text-xs text-gray-400">|</span>
+                                      <span className="text-xs text-gray-500">Ends:</span>
+                                      <span className="text-xs text-gray-900">{formatDateTime(b.endTime)}</span>
+                                    </div>
+
+                                    {/* Dates row for mobile (hidden on md+) */}
+                                    <div className="flex items-center justify-start gap-2 text-xs text-gray-500 mt-1 md:mt-0 md:hidden">
+                                      <span className="text-xs text-gray-500">Starts:</span>
+                                      <span className="text-xs text-gray-900">{formatDateTime(b.startTime)}</span>
+                                      <span className="text-xs text-gray-400">|</span>
+                                      <span className="text-xs text-gray-500">Ends:</span>
+                                      <span className="text-xs text-gray-900">{formatDateTime(b.endTime)}</span>
+                                    </div>
                                   </div>
-                                  <div className="w-36 text-right ml-4 flex items-center justify-end gap-2">
+
+                                  <div className="w-full md:w-36 text-right mt-2 md:mt-0 md:ml-4 flex items-center justify-end gap-2 md:whitespace-nowrap">
                                     <span className="text-xs text-gray-400">|</span>
                                     <span className={`text-xs font-medium ${statusClass(b.status)} capitalize`}>Status: {String(b.status || '')}</span>
                                   </div>
@@ -2428,7 +2808,7 @@ export default function AdminDashboard() {
                   </div>
                 </TabsContent>
 
-                <TabsContent value="system" className="space-y-4">
+                <TabsContent value="system" className="space-y-4 mt-6 md:mt-0">
                   <div className="bg-gray-50 rounded-lg p-6">
                     <h3 className="text-lg font-semibold text-gray-900">System Activity</h3>
                     <p className="text-sm text-gray-500 mt-1">Combined system alerts and activity logs for security and operational events.</p>
@@ -2690,6 +3070,9 @@ export default function AdminDashboard() {
                             const isCancelled = title.includes('cancel');
                             const isArrival = title.includes('arrival') || title.includes('confirmed');
 
+                            // Determine a timestamp for this activity (fallbacks) and build a readable sub-line
+                            const activityTime = a.createdAt || a.created_at || a.timestamp || a.time || a.date || a.updatedAt || a.updated_at;
+
                             // Build a readable sub-line
                             let subLine = formatted;
                               try {
@@ -2722,8 +3105,8 @@ export default function AdminDashboard() {
                                 const actionLower = String((a.title || a.action || '')).toLowerCase();
                                 const isEquipmentAction = /equipment|needs/i.test(actionLower) || /needs request/i.test(visibleTitle.toLowerCase());
                                 const hasDateLike = /\d{1,2}\/\d{1,2}\/\d{4}|\d{1,2}:\d{2}:\d{2}/.test(subLine);
-                                if (isEquipmentAction && a.createdAt && !hasDateLike) {
-                                  const t = formatDateTime(a.createdAt);
+                                if (isEquipmentAction && activityTime && !hasDateLike) {
+                                  const t = formatDateTime(activityTime);
                                   if (t) subLine = `${subLine} at ${t}`.trim();
                                 }
                               } catch (e) {}
@@ -2738,7 +3121,7 @@ export default function AdminDashboard() {
                                       </div>
 
                                       <div className="w-44 text-right text-xs text-gray-500 flex flex-col items-end gap-1">
-                                        <div className="w-full">{a.createdAt ? formatDateTime(a.createdAt) : ''}</div>
+                                        <div className="w-full">{(activityTime ? formatDateTime(activityTime) : (a.createdAt ? formatDateTime(a.createdAt) : ''))}</div>
                                       </div>
                                     </div>
                               </div>
@@ -2797,13 +3180,13 @@ export default function AdminDashboard() {
 
               <Tabs value={settingsTab} onValueChange={(v: string) => setSettingsTab(v)} className="space-y-6">
                 <TabsList className="grid w-full grid-cols-1">
-                  <TabsTrigger value="facilities" className="flex items-center gap-2">
+                  <TabsTrigger value="facilities" className="w-full whitespace-normal flex items-center justify-start gap-2 text-left md:justify-center md:text-center">
                     <Settings className="h-4 w-4 text-gray-600" />
                     Facility Management
                   </TabsTrigger>
                 </TabsList>
 
-                <TabsContent value="facilities" className="space-y-4">
+                <TabsContent value="facilities" className="space-y-4 mt-6 md:mt-0">
                   <div className="bg-gray-50 rounded-lg p-6">
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-lg font-semibold text-gray-900">Facility Availability Control</h3>
@@ -2814,8 +3197,8 @@ export default function AdminDashboard() {
                       <div className="space-y-3">
                         {facilities.map((facility: Facility) => (
                           <div key={facility.id} className={`bg-white rounded-lg p-4 border border-gray-200 transition-colors duration-200 hover:${facility.isActive ? 'border-green-300' : 'border-red-300'}`}>
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-4">
+                            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+                              <div className="flex items-start md:items-center gap-4">
                                 <div className={`p-2 rounded-lg ${facility.isActive ? 'bg-green-100' : 'bg-red-100'}`}>
                                   <MapPin className={`h-5 w-5 ${facility.isActive ? 'text-green-600' : 'text-red-600'}`} />
                                 </div>
@@ -2828,7 +3211,7 @@ export default function AdminDashboard() {
                                 </div>
                               </div>
                               
-                              <div className="flex items-center gap-4">
+                              <div className="flex flex-col md:flex-row items-start md:items-center gap-3">
                                 <span className={`px-3 py-1 rounded-full text-xs font-medium ${
                                   facility.isActive 
                                     ? 'bg-green-100 text-green-800' 
@@ -2839,7 +3222,7 @@ export default function AdminDashboard() {
                                 <button
                                   onClick={() => toggleFacilityAvailability(facility, !facility.isActive)}
                                   disabled={toggleFacilityAvailabilityMutation.isPending}
-                                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
+                                  className={`w-full md:w-auto px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
                                     facility.isActive
                                       ? 'bg-red-600 hover:bg-red-700 text-white'
                                       : 'bg-green-600 hover:bg-green-700 text-white'
@@ -2875,7 +3258,7 @@ export default function AdminDashboard() {
         return (
           <div className="space-y-8">
             {/* Stats Overview */}
-            <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-3 gap-6">
               <OverviewTile
                 title="Active Bookings"
                 count={activeBookings?.length || 0}
@@ -2885,20 +3268,14 @@ export default function AdminDashboard() {
               />
 
               <OverviewTile
-                title="Pending Bookings"
+                title="Scheduled Bookings"
                 count={upcomingBookings?.length || 0}
-                subtitle="Awaiting approval"
+                subtitle="Auto-scheduled reservations"
                 onClick={() => { setSelectedView("booking-management"); setBookingTab('pendingList'); }}
-                icon={<Clock className="h-6 w-6 text-yellow-600" />}
+                icon={<Clock className="h-6 w-6 text-green-600" />}
               />
 
-              <OverviewTile
-                title="Booking Requests"
-                count={pendingBookings?.length || 0}
-                subtitle="Requests awaiting review"
-                onClick={() => { setSelectedView("booking-management"); setBookingTab('requests'); }}
-                icon={<Calendar className="h-6 w-6 text-purple-600" />}
-              />
+
 
               <OverviewTile
                 title="System Alerts"
@@ -2910,31 +3287,45 @@ export default function AdminDashboard() {
             </div>
 
             {/* Overview Sections */}
+              <div className="mb-4">
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="text-lg font-bold text-gray-900">Availability Preview</h3>
+                      <p className="text-sm text-gray-600 mt-1">Quick view of today's scheduled slots</p>
+                    </div>
+                  </div>
+                  <div>
+                    <AvailabilityGrid />
+                  </div>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 flex flex-col justify-between">
                 <div className="flex items-center justify-between mb-6">
                   <div>
-                    <h3 className="text-lg font-bold text-gray-900">Booking Requests</h3>
-                    <p className="text-gray-600 text-sm mt-1">Facility booking requests requiring approval</p>
+                    <h3 className="text-lg font-bold text-gray-900">Scheduled Bookings</h3>
+                    <p className="text-gray-600 text-sm mt-1">Upcoming approved and auto-scheduled reservations</p>
                   </div>
                   <div className="bg-pink-100 text-pink-800 px-3 py-1 rounded-full text-sm font-medium">
-                    {pendingBookings?.length || 0} requests
+                    {scheduledCount || 0} scheduled
                   </div>
                 </div>
 
-                {pendingBookings && pendingBookings.length > 0 ? (
+                {upcomingBookings && upcomingBookings.length > 0 ? (
                   <div className="space-y-3">
-                    {pendingBookings.slice(0,5).map((booking) => (
+                    {upcomingBookings.slice(0,5).map((booking) => (
                       <div key={booking.id} className="bg-gray-50 rounded-lg p-3 hover:bg-gray-100 transition-colors duration-200">
                         <button
                           type="button"
                           className="w-full text-left"
                           onClick={() => {
                             setSelectedView('booking-management');
-                            setBookingTab('requests');
+                            setBookingTab('pendingList');
                             try { setLocation(`/admin#booking-${booking.id}`); } catch (e) { /* ignore */ }
                           }}
-                          aria-label={`Open booking request ${booking.id}`}
+                          aria-label={`Open booking ${booking.id}`}
                         >
                           <div className="flex items-center justify-between">
                             <div>
@@ -2951,7 +3342,7 @@ export default function AdminDashboard() {
 
                     <div className="pt-4 border-t border-gray-200 flex justify-end">
                       <button
-                        onClick={() => { setSelectedView('booking-management'); setBookingTab('requests'); }}
+                        onClick={() => { setSelectedView('booking-management'); setBookingTab('pendingList'); }}
                         className="inline-flex items-center gap-2 px-4 py-2 bg-pink-600 text-white rounded-lg text-sm hover:bg-pink-700 transition-colors duration-150"
                       >
                         View All
@@ -2959,7 +3350,7 @@ export default function AdminDashboard() {
                     </div>
                   </div>
                 ) : (
-                  <EmptyState Icon={Calendar} message="No pending booking requests" />
+                  <EmptyState Icon={Calendar} message="No scheduled bookings" />
                 )}
               </div>
 
@@ -3333,17 +3724,14 @@ export default function AdminDashboard() {
                         } catch (e) {}
 
                         return (
-                          <div key={a.id || idx} className="bg-white rounded-md p-3 border border-gray-200">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="flex-1 pr-4">
-                                <p className="font-medium text-sm text-gray-900">{(visibleTitle || (a.title || a.action)) ?? 'System Event'}</p>
-                                <p className="text-xs text-gray-600 mt-1">{subLine}</p>
-                                <div className="mt-1 text-xs text-gray-400">{a.source ? `Source: ${a.source}` : ''}</div>
+                          <div key={a.id || idx} className="bg-white rounded-md p-3 border border-gray-200 hover:border-gray-300 transition-colors duration-150">
+                            <div className="flex items-start justify-between">
+                              <div>
+                                <h4 className="font-medium text-sm text-gray-900">{(visibleTitle || (a.title || a.action)) ?? 'System Event'}</h4>
+                                <p className="text-xs text-gray-600 mt-1 break-words">{subLine}</p>
                               </div>
 
-                              <div className="w-44 text-right text-xs text-gray-500 flex flex-col items-end gap-1">
-                                <div className="w-full">{a.createdAt ? formatDateTime(a.createdAt) : ''}</div>
-                              </div>
+                              <div className="text-xs text-gray-500">{a.createdAt ? formatDateTime(a.createdAt) : ''}</div>
                             </div>
                           </div>
                         );
@@ -3369,26 +3757,69 @@ export default function AdminDashboard() {
                 )}
               </div>
             </div>
+
+            {/* Equipment check modal moved to top-level to avoid being clipped by parent transforms/overflow */}
           </div>
         );
     }
   };
 
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  // Safely close the mobile sidebar: blur any active element first so focus isn't hidden
+  const closeMobileSidebar = () => {
+    try {
+      const active = document.activeElement as HTMLElement | null;
+      if (active && typeof active.blur === 'function') {
+        active.blur();
+      }
+    } catch (e) {
+      // ignore
+    }
+    setMobileSidebarOpen(false);
+  };
+
   return (
     <div className="min-h-screen bg-background">
-      <Header />
+  <Header onMobileToggle={() => setMobileSidebarOpen(prev => !prev)} />
       <div className="flex">
-        {/* Fixed sidebar (match pattern used in student dashboard) */}
-        <div className="w-64 h-[calc(100vh-4rem)] border-r bg-card fixed top-16 left-0 z-30 overflow-y-auto">
+        {/* Desktop sidebar (fixed) */}
+        <div className="hidden md:block w-64 h-[calc(100vh-4rem)] border-r bg-card fixed top-16 left-0 z-30 overflow-y-auto">
           <Sidebar
             items={sidebarItems}
             activeItem={selectedView}
-            onItemClick={handleSidebarClick}
+            onItemClick={(id) => { handleSidebarClick(id); setMobileSidebarOpen(false); }}
           />
         </div>
-        {/* Main content area offset by sidebar width; constrain width to avoid horizontal overflow */}
-        <div className="flex-1 ml-64 px-6 py-8 w-[calc(100%-16rem)]">
-          <div className="max-w-7xl mx-auto">{renderContent()}</div>
+
+        {/* Mobile sidebar (off-canvas) positioned under the header */}
+          <div className={`md:hidden fixed inset-x-0 top-16 bottom-0 z-40 transition-transform ${mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`} aria-hidden={!mobileSidebarOpen}>
+          {/* overlay behind drawer */}
+          <div className="absolute inset-0 bg-black/40" onClick={() => closeMobileSidebar()} />
+          <div className="relative w-64 h-full bg-card border-r rounded-none pt-2">
+            {/* Close button inside the sidebar panel (top-right) */}
+            <div className="absolute right-3 top-3 md:hidden z-40">
+              <button aria-label="Close sidebar" onClick={() => closeMobileSidebar()} className="w-9 h-9 flex items-center justify-center rounded-full bg-white/90 border border-gray-200 text-gray-700 hover:bg-white">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <Sidebar
+              items={sidebarItems}
+              activeItem={selectedView}
+              onItemClick={(id) => { handleSidebarClick(id); closeMobileSidebar(); }}
+            />
+          </div>
+        </div>
+
+        {/* Main content area; responsive margins */}
+          <div className={`flex-1 ${mobileSidebarOpen ? '' : ''} md:ml-64 px-4 md:px-6 py-6 md:py-8 w-full`}> 
+          <div className="max-w-7xl mx-auto relative">
+            {/* Mobile header row removed; header now contains the persistent toggle button */}
+
+            {/* dashboard-positioned close removed; control now lives inside the sidebar panel */}
+
+            {renderContent()}
+          </div>
         </div>
       </div>
       <BanUserModal
@@ -3400,6 +3831,71 @@ export default function AdminDashboard() {
           setIsBanUserModalOpen(false);
         }}
       />
+
+      {/* Equipment check modal - admin can mark each item prepared / not available */}
+      {showEquipmentModal && equipmentModalBooking && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="fixed inset-0 bg-black/40" onClick={() => { setShowEquipmentModal(false); setEquipmentModalBooking(null); setEquipmentModalItemStatuses({}); }} />
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6 z-50">
+            <h3 className="text-lg font-semibold mb-2">Check Equipment for {getUserEmail(equipmentModalBooking.userId)}</h3>
+            <p className="text-sm text-gray-600 mb-4">Mark each requested item as Prepared or Not available. Selections are required before confirming.</p>
+
+            <div className="border border-gray-100 rounded-md overflow-hidden">
+              <div className="grid grid-cols-3 gap-2 bg-gray-50 px-4 py-2 text-xs font-semibold text-gray-700">
+                <div>Item</div>
+                <div className="text-center">Prepared</div>
+                <div className="text-center">Not available</div>
+              </div>
+              <div className="max-h-64 overflow-auto px-4 py-3 space-y-2">
+                {Object.keys(equipmentModalItemStatuses).length === 0 && (
+                  <div className="text-sm text-gray-500">No items requested</div>
+                )}
+
+                {Object.entries(equipmentModalItemStatuses).map(([item, status]) => {
+                  const nameClass = status === 'prepared' ? 'text-green-600 font-medium' : status === 'not_available' ? 'text-red-600 font-medium' : 'text-gray-800';
+                  return (
+                    <div key={item} className="grid grid-cols-3 items-center gap-2">
+                      <div className={`text-sm break-words ${nameClass}`}>{item}</div>
+                      <div className="flex items-center justify-center">
+                        <button
+                          onClick={() => setEquipmentModalItemStatuses(prev => ({ ...prev, [item]: 'prepared' }))}
+                          aria-pressed={status === 'prepared'}
+                          className={`px-3 py-1 rounded text-sm ${status === 'prepared' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-800'}`}
+                        >
+                          ✓
+                        </button>
+                      </div>
+                      <div className="flex items-center justify-center">
+                        <button
+                          onClick={() => setEquipmentModalItemStatuses(prev => ({ ...prev, [item]: 'not_available' }))}
+                          aria-pressed={status === 'not_available'}
+                          className={`px-3 py-1 rounded text-sm ${status === 'not_available' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-800'}`}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 mt-4">
+              <Button variant="outline" onClick={() => { setShowEquipmentModal(false); setEquipmentModalBooking(null); setEquipmentModalItemStatuses({}); }}>Cancel</Button>
+              {
+                // disable confirm until every item has a selected status
+              }
+              <Button
+                onClick={() => confirmEquipmentModal()}
+                disabled={!(Object.keys(equipmentModalItemStatuses).length > 0 && Object.values(equipmentModalItemStatuses).every(s => s === 'prepared' || s === 'not_available'))}
+                className={`${!(Object.keys(equipmentModalItemStatuses).length > 0 && Object.values(equipmentModalItemStatuses).every(s => s === 'prepared' || s === 'not_available')) ? 'opacity-60 cursor-not-allowed' : ''}`}
+              >
+                Confirm
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <UnavailableReasonModal
         isOpen={isUnavailableModalOpen}

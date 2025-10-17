@@ -129,53 +129,6 @@ const NumberInputWithControls: React.FC<NumberInputWithControlsProps> = ({
   );
 };
 
-// Library working hours validation functions - for room USAGE, not booking submission
-const isWithinLibraryHours = (date: Date): boolean => {
-  const hours = date.getHours();
-  const minutes = date.getMinutes();
-  const timeInMinutes = hours * 60 + minutes;
-  
-  // 7:30 AM = 7 * 60 + 30 = 450 minutes
-  // 5:00 PM = 17 * 60 = 1020 minutes
-  const libraryOpenTime = 7 * 60 + 30; // 7:30 AM
-  const libraryCloseTime = 17 * 60; // 5:00 PM
-  return timeInMinutes >= libraryOpenTime && timeInMinutes <= libraryCloseTime;
-
-};
-
-const formatLibraryHours = (): string => {
-  return "7:30 AM - 5:00 PM";
-};
-
-// Dynamic booking schema factory
-const createBookingSchema = () => z
-  .object({
-    facilityId: z.string().min(1, "Please select a facility"),
-    startTime: z.date({
-      message: "A start date and time is required.",
-    }),
-    endTime: z.date({
-      message: "An end date and time is required.",
-    }),
-    purpose: z.string().min(1, "Purpose is required"),
-    participants: z.number().min(1, "Number of participants is required"),
-  })
-  .superRefine((val, ctx) => {
-    try {
-      if (val.startTime && val.endTime) {
-        const diff = val.endTime.getTime() - val.startTime.getTime();
-        const minMs = 30 * 60 * 1000; // 30 minutes
-        if (diff <= 0) {
-          ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'End time must be after start time', path: ['endTime'] });
-        } else if (diff < minMs) {
-          ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Bookings must be at least 30 minutes long', path: ['endTime'] });
-        }
-      }
-    } catch (e) {
-      // ignore
-    }
-  });
-
 interface BookingModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -183,6 +136,7 @@ interface BookingModalProps {
   selectedFacilityId?: number | null;
   initialStartTime?: Date | null;
   initialEndTime?: Date | null;
+  showSuggestedSlot?: boolean;
 }
 
 export default function BookingModal({
@@ -192,6 +146,7 @@ export default function BookingModal({
   selectedFacilityId,
   initialStartTime = null,
   initialEndTime = null,
+  showSuggestedSlot = false,
 }: BookingModalProps) {
   const { toast } = useToast();
   const { user } = useAuth();
@@ -200,6 +155,9 @@ export default function BookingModal({
   const [lastSubmissionTime, setLastSubmissionTime] = useState(0);
   const SUBMISSION_COOLDOWN = 2000; // 2 seconds cooldown between submissions
   const [selectedFacility, setSelectedFacility] = useState<Facility | null>(null);
+  // NOTE: Removed client-side blocking for existing bookings. Server-side
+  // validation will surface conflicts after submit; the modal will show
+  // inline errors beneath the form. Keeping only lightweight helpers.
 
   // Get all current bookings to show facility availability
   const { data: allBookings = [] } = useQuery<any[]>({
@@ -210,6 +168,10 @@ export default function BookingModal({
     },
     enabled: isOpen, // Only fetch when modal is open
   });
+
+  // Note: server-side validation is authoritative for overlapping/limit rules.
+  // We intentionally avoid preemptive client-side blocking which can cause UX
+  // surprises and duplicate-check race conditions.
 
   const predefinedFacilities = [
     { id: 1, name: "Collaraborative Learning Room 1", isActive: true, capacity: 8 },
@@ -273,16 +235,50 @@ export default function BookingModal({
     return null;
   };
 
-  const getUserFacilityBookings = (facilityId: number) => {
-    if (!user?.email) return [];
-    
-    return allBookings.filter((booking: any) =>
-      booking.facilityId === facilityId &&
-      booking.userEmail === user.email &&
-      booking.status === "approved" &&
-      new Date(booking.endTime) > new Date() // Only future/current bookings
-    );
+  // getUserFacilityBookings removed - server-side checks are authoritative and
+  // this client helper was unused. Kept logic centralized on server/storage.ts.
+
+  // Library working hours validation functions
+  const isWithinLibraryHours = (date: Date): boolean => {
+    const hours = date.getHours();
+    const minutes = date.getMinutes();
+    const timeInMinutes = hours * 60 + minutes;
+    const libraryOpenTime = 7 * 60 + 30; // 7:30 AM
+    const libraryCloseTime = 19 * 60; // 7:00 PM
+    return timeInMinutes >= libraryOpenTime && timeInMinutes <= libraryCloseTime;
   };
+
+  const formatLibraryHours = (): string => {
+    return "7:30 AM - 7:00 PM";
+  };
+
+  const createBookingSchema = () => z
+    .object({
+      facilityId: z.string().min(1, "Please select a facility"),
+      startTime: z.date({
+        message: "A start date and time is required.",
+      }),
+      endTime: z.date({
+        message: "An end date and time is required.",
+      }),
+      purpose: z.string().min(1, "Purpose is required"),
+      participants: z.number().min(1, "Number of participants is required"),
+    })
+    .superRefine((val, ctx) => {
+      try {
+        if (val.startTime && val.endTime) {
+          const diff = val.endTime.getTime() - val.startTime.getTime();
+          const minMs = 30 * 60 * 1000; // 30 minutes
+          if (diff <= 0) {
+            ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'End time must be after start time', path: ['endTime'] });
+          } else if (diff < minMs) {
+            ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Bookings must be at least 30 minutes long', path: ['endTime'] });
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    });
 
   const bookingSchema = createBookingSchema();
   type BookingFormData = z.infer<typeof bookingSchema>;
@@ -296,8 +292,10 @@ export default function BookingModal({
     { key: 'extra_chairs', label: 'Extra Chairs' },
     { key: 'others', label: 'Others' },
   ];
-  const [equipmentState, setEquipmentState] = useState<Record<string, boolean>>(() => {
-    const init: Record<string, boolean> = {};
+  // equipmentState values: 'prepared' | 'not_available' | false
+  type EquipmentStateValue = 'prepared' | 'not_available' | false;
+  const [equipmentState, setEquipmentState] = useState<Record<string, EquipmentStateValue>>(() => {
+    const init: Record<string, EquipmentStateValue> = {};
     EQUIPMENT_OPTIONS.forEach(o => init[o.key] = false);
     return init;
   });
@@ -325,6 +323,8 @@ export default function BookingModal({
   }, [isOpen, initialStartTime, initialEndTime]);
 
   const [formValidationWarnings, setFormValidationWarnings] = useState<Array<{title: string; description: string}>>([]);
+  // Track whether the user manually edited the date/time so we don't overwrite their choices
+  const [userEditedTime, setUserEditedTime] = useState(false);
 
   // Auto-select facility when modal opens with a specific facility ID
   useEffect(() => {
@@ -339,23 +339,44 @@ export default function BookingModal({
       // Reset selection when modal opens without a specific facility
       setSelectedFacility(null);
       // Only auto-select first facility if no specific facility was requested
-      if (fallbackFacilities.length > 0 && !form.watch("facilityId")) {
+      const currentFacilityId = form.getValues("facilityId");
+      if (fallbackFacilities.length > 0 && !currentFacilityId) {
         const firstId = fallbackFacilities[0].id.toString();
         form.setValue("facilityId", firstId);
         handleFacilityChange(firstId);
       }
     }
-  }, [isOpen, selectedFacilityId, facilities, form, fallbackFacilities]);
+  }, [isOpen, selectedFacilityId, facilities]);
+
+  // Dev-only debug: log current user's bookings when modal opens or facility changes
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'production') return;
+    try {
+      if (!isOpen) return;
+      const currentEmail = String(user?.email || '').toLowerCase();
+      const userBookings = (allBookings || []).filter((b: any) => String(b.userEmail || b.user?.email || '').toLowerCase() === currentEmail);
+      console.debug('[DEV] BookingModal - userBookings:', userBookings.map((b: any) => ({ id: b.id, status: b.status, facilityId: b.facilityId, startTime: b.startTime, endTime: b.endTime })));
+      const facilityIdWatch = form.getValues('facilityId');
+      if (facilityIdWatch) {
+        const facId = parseInt(facilityIdWatch);
+        const currentFacBookings = userBookings.filter((b: any) => b.facilityId === facId);
+        console.debug('[DEV] BookingModal - user bookings for selected facility:', currentFacBookings.map((b: any) => ({ id: b.id, status: b.status })));
+      }
+    } catch (e) {}
+  }, [isOpen, allBookings, user]);
 
   // Clear inline warnings when relevant form fields change
   useEffect(() => {
     const subscription = form.watch((_, { name }) => {
       if (["startTime", "endTime", "facilityId", "participants", "purpose"].includes(name as string)) {
-        if (formValidationWarnings.length > 0) setFormValidationWarnings([]);
+        // Clear warnings whenever relevant fields change, but only if there are
+        // warnings to clear. This avoids unnecessary setState calls which can
+        // trigger cascading re-renders and potential infinite loops.
+        setFormValidationWarnings(prev => (prev && prev.length > 0) ? [] : prev);
       }
     });
     return () => subscription.unsubscribe();
-  }, [form, formValidationWarnings]);
+  }, [form]);
 
   const handleFacilityChange = (facilityId: string) => {
     const facility = facilities.find((f) => f.id === parseInt(facilityId));
@@ -366,25 +387,41 @@ export default function BookingModal({
     if (currentParticipants > maxCap) {
       form.setValue("participants", maxCap);
     }
+    // If the user hasn't manually edited the time, auto-fill the next available slot for this facility
+    if (!userEditedTime) {
+      (async () => {
+        try {
+          const facId = facility ? facility.id : null;
+          if (!facId) return;
+          const next = await findNextAvailableSlot(facId, new Date());
+          if (next) {
+            // programmatic set should not mark as user-edited
+            form.setValue('startTime', next.start);
+            form.setValue('endTime', next.end);
+          }
+        } catch (e) { /* ignore */ }
+      })();
+    }
   };
 
   const createBookingMutation = useMutation({
     mutationFn: async (data: BookingFormData) => {
       setIsSubmitting(true);
-      
+      // Rely on server-side validation for existing booking rules. Do not block here.
       // Check if selected facility is available
       const selectedFacility = facilities.find(f => f.id === parseInt(data.facilityId));
       if (!selectedFacility || !selectedFacility.isActive) {
         throw new Error("Selected facility is currently unavailable for booking. Please choose another facility.");
       }
 
+      const preparedItems = Object.keys(equipmentState).filter(k => equipmentState[k] === 'prepared');
       const bookingData = {
         ...data,
         facilityId: parseInt(data.facilityId),
         startTime: data.startTime.toISOString(),
         endTime: data.endTime.toISOString(),
         equipment: {
-          items: Object.keys(equipmentState).filter(k => equipmentState[k]),
+          items: preparedItems,
           others: equipmentOtherText.trim() || null,
         },
       };
@@ -396,8 +433,8 @@ export default function BookingModal({
       setLastSubmissionTime(Date.now());
       queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
       toast({
-        title: "Booking Submitted",
-        description: "Your booking request has been submitted successfully.",
+        title: "Booking Scheduled",
+        description: "Your booking has been scheduled successfully.",
         variant: "default",
       });
       form.reset();
@@ -406,6 +443,30 @@ export default function BookingModal({
     onError: (error: any) => {
       setIsSubmitting(false);
       console.error("Booking error:", error);
+      // If server returned a structured conflict payload, capture it so the
+      // UI can offer the user a one-click action to cancel existing bookings
+      // and proceed (forceCancelConflicts).
+      if (error && error.payload) {
+        // Surface user-active/overlap errors inline so they appear under the form.
+        const code = String(error.payload.error || '').trim();
+        if (code === 'UserHasOverlappingBooking' || code === 'UserHasActiveBooking') {
+          const msg = error.payload.message || 'A conflicting booking exists. Please cancel it first or choose a different time.';
+          setFormValidationWarnings([{ title: code === 'UserHasActiveBooking' ? 'Existing Booking Detected' : 'Conflicting Booking Detected', description: msg }]);
+          setServerConflictPayload(error.payload);
+          setShowServerConflictDialog(true);
+          return;
+        }
+
+        // Also handle facility-level conflicts returned from the storage layer (ConflictError -> 409 payload)
+        if (error.payload && (error.payload.facility || error.payload.conflictingBookings)) {
+          const msg = error.payload.message || 'This time slot for the selected facility is already booked. Please choose a different time.';
+          setFormValidationWarnings([{ title: 'Time Slot Unavailable', description: msg }]);
+          // Keep the payload so the dialog can show more details if available
+          setServerConflictPayload(error.payload);
+          setShowServerConflictDialog(true);
+          return;
+        }
+      }
       
       // Handle specific overlapping booking error
       if (error.message && error.message.includes("You already have a booking during this time")) {
@@ -463,16 +524,9 @@ export default function BookingModal({
           variant: "destructive",
         });
       }
-      // Handle server-side BookingTooSoon structured error - show inline in modal
-      else if (error && error.error === 'BookingTooSoon') {
-        setFormValidationWarnings([{ title: 'Booking Too Soon', description: error.message || 'Bookings must start at least 1 hour from now. Please choose a later start time.' }]);
-        // Also surface a toast briefly for visibility
-        toast({
-          title: "Booking Too Soon",
-          description: error.message || 'Bookings must start at least 1 hour from now. Please choose a later start time.',
-          variant: "destructive",
-        });
-      } else {
+      // NOTE: BookingTooSoon server-side error is intentionally not handled specially here.
+      // Treat it as a generic error so the client doesn't surface the old 1-hour policy message.
+      else {
         toast({
           title: "Error",
           description: error.message || "An error occurred while creating your booking.",
@@ -481,6 +535,42 @@ export default function BookingModal({
       }
     },
   });
+
+  // Server conflict dialog
+  const [showServerConflictDialog, setShowServerConflictDialog] = useState(false);
+  const [serverConflictPayload, setServerConflictPayload] = useState<any | null>(null);
+
+  const handleForceCancelAndProceed = async () => {
+    if (!confirmPendingData) return;
+    try {
+      setIsSubmitting(true);
+      // Send the same payload with forceCancelConflicts flag so server will cancel user's existing bookings
+      const preparedItems = Object.keys(equipmentState).filter(k => equipmentState[k] === 'prepared');
+      const payload = {
+        ...confirmPendingData,
+        facilityId: parseInt(confirmPendingData.facilityId),
+        startTime: confirmPendingData.startTime.toISOString(),
+        endTime: confirmPendingData.endTime.toISOString(),
+        equipment: {
+          items: preparedItems,
+          others: equipmentOtherText.trim() || null,
+        },
+        forceCancelConflicts: true,
+      };
+      const response = await apiRequest('POST', '/api/bookings', payload);
+      await response.json();
+  toast({ title: 'Booking Scheduled', description: 'Existing conflicting bookings were cancelled and your booking was scheduled.', variant: 'default' });
+      queryClient.invalidateQueries({ queryKey: ['/api/bookings'] });
+      form.reset();
+      setShowServerConflictDialog(false);
+      setServerConflictPayload(null);
+      setIsSubmitting(false);
+      onClose();
+    } catch (err: any) {
+      setIsSubmitting(false);
+      toast({ title: 'Error', description: err?.message || 'Could not force-cancel conflicts.', variant: 'destructive' });
+    }
+  };
 
   const onSubmit = (data: BookingFormData) => {
     // Prevent rapid duplicate submissions
@@ -506,18 +596,9 @@ export default function BookingModal({
       });
     }
 
-    // Validate booking is at least 1 hour in advance
-    try {
-      const minLeadMs = 60 * 60 * 1000; // 1 hour
-      if (data.startTime.getTime() < Date.now() + minLeadMs) {
-        validationErrors.push({
-          title: "Booking Too Soon",
-          description: "Bookings must start at least 1 hour from now. Please choose a later start time.",
-        });
-      }
-    } catch (e) {
-      // ignore malformed dates here; zod should have caught them earlier
-    }
+    // NOTE: Minimum lead-time validation removed from client to avoid duplicate
+    // enforcement and improve UX; server-side validation is authoritative and
+    // will return structured errors if any lead-time policy is required.
 
     // Validate facility exists
     const facility = facilities.find(f => f.id === parseInt(data.facilityId));
@@ -526,7 +607,10 @@ export default function BookingModal({
         title: "Error",
         description: "Selected facility not found.",
       });
-    } else {
+      } else {
+      // NOTE: Client-side 'Facility Booking Limit' validation removed so server-side
+      // can handle canonical conflict resolution. Users will still see server errors
+      // if a conflict exists; we avoid blocking submission here to allow auto-scheduling flows.
       // Use actual facility capacity from database
       const maxCapacity = facility.capacity || 8;
 
@@ -628,6 +712,171 @@ export default function BookingModal({
     return diff >= 30 * 60 * 1000; // at least 30 minutes
   };
 
+  // Helper: round up a date to the next 30-minute boundary
+  const roundUpToNext30 = (d: Date) => {
+    const out = new Date(d);
+    out.setSeconds(0, 0);
+    const mins = out.getMinutes();
+    const rem = mins % 30;
+    if (rem === 0) return out;
+    out.setMinutes(mins + (30 - rem));
+    return out;
+  };
+
+  // Find next available 30-minute slot for a given facility, searching today then next day
+  const findNextAvailableSlot = async (facilityId: number | null, fromDate = new Date()): Promise<{ start: Date; end: Date } | null> => {
+    if (!facilityId) return null;
+    const MAX_DAYS = 2; // today and next day
+    const SLOT_MS = 30 * 60 * 1000;
+
+    for (let dayOffset = 0; dayOffset < MAX_DAYS; dayOffset++) {
+      const candidateDay = new Date(fromDate.getFullYear(), fromDate.getMonth(), fromDate.getDate() + dayOffset, 0, 0, 0, 0);
+      const startWindow = new Date(candidateDay.getFullYear(), candidateDay.getMonth(), candidateDay.getDate(), 7, 30, 0, 0);
+      const endWindow = new Date(candidateDay.getFullYear(), candidateDay.getMonth(), candidateDay.getDate(), 19, 0, 0, 0);
+
+      // Query server availability for this day to get authoritative slots
+      try {
+        const dateStr = candidateDay.toISOString().slice(0,10);
+        const resp = await apiRequest('GET', `/api/availability?date=${dateStr}`);
+        const availJson = await resp.json();
+        const facilityEntry = Array.isArray(availJson?.data) ? availJson.data.find((d: any) => d.facility && d.facility.id === facilityId) : null;
+        if (facilityEntry && Array.isArray(facilityEntry.slots)) {
+          // Look for the first 'available' slot starting at or after 'fromDate' (rounded to 30)
+          const normalizedFrom = dayOffset === 0 ? roundUpToNext30(new Date(Math.max(fromDate.getTime(), Date.now()))) : startWindow;
+          for (const slot of facilityEntry.slots) {
+            try {
+              if (slot.status !== 'available') continue;
+              const slotStart = new Date(slot.start);
+              const slotEnd = new Date(slot.end);
+              if (slotStart.getTime() >= normalizedFrom.getTime() && slotEnd.getTime() <= endWindow.getTime()) {
+                // Return first available 30-min block
+                return { start: slotStart, end: slotEnd };
+              }
+            } catch (e) { /* ignore parse errors */ }
+          }
+        }
+      } catch (e) {
+        // If availability API fails, fall back to the client-side search below
+      }
+
+      // Fallback to client-side search (checks approved bookings only) if availability API not usable
+      let cursor = dayOffset === 0 ? roundUpToNext30(new Date(Math.max(fromDate.getTime(), Date.now()))) : new Date(startWindow);
+      if (cursor < startWindow) cursor = new Date(startWindow);
+      while (cursor.getTime() + SLOT_MS <= endWindow.getTime()) {
+        const slotStart = new Date(cursor);
+        const slotEnd = new Date(cursor.getTime() + SLOT_MS);
+
+        // check conflicts against approved bookings for this facility
+        const facilityApproved = (allBookings || []).filter((b: any) => b.facilityId === facilityId && b.status === 'approved');
+        const conflict = facilityApproved.some((b: any) => {
+          const s = new Date(b.startTime).getTime();
+          const e = new Date(b.endTime).getTime();
+          return slotStart.getTime() < e && slotEnd.getTime() > s;
+        });
+
+        if (!conflict) {
+          return { start: slotStart, end: slotEnd };
+        }
+
+        cursor = new Date(cursor.getTime() + SLOT_MS);
+      }
+    }
+    return null;
+  };
+
+  // Auto-fill an available time slot when the modal opens (today or next day)
+  useEffect(() => {
+    if (!isOpen) return;
+
+    // determine facility to search
+    let facId: number | null = null;
+    if (selectedFacilityId) facId = selectedFacilityId;
+    else {
+      const fv = form.getValues('facilityId');
+      facId = fv ? parseInt(fv) : (fallbackFacilities[0]?.id ?? null);
+    }
+
+    if (!facId) return;
+
+    (async () => {
+      try {
+        const currentStart: Date = form.getValues('startTime');
+        const currentEnd: Date = form.getValues('endTime');
+
+        // If the caller provided an explicit slot (user clicked a slot), prefer it
+        // but only if it's within library hours and doesn't conflict with approved bookings.
+  if (initialStartTime && initialEndTime) {
+          const providedStartValid = isWithinLibraryHours(initialStartTime);
+          const providedEndValid = isWithinLibraryHours(initialEndTime);
+
+          const blockingStatuses = new Set(['approved', 'scheduled', 'pending']);
+          const providedHasConflict = (allBookings || []).filter((b: any) => b.facilityId === facId && blockingStatuses.has(b.status))
+            .some((b: any) => initialStartTime < new Date(b.endTime) && initialEndTime > new Date(b.startTime));
+
+          // Also check availability API for scheduled slots (covers bookings by other accounts)
+          const dateStr = initialStartTime.toISOString().slice(0,10);
+          let availabilityConflict = false;
+          try {
+            const availResp = await apiRequest('GET', `/api/availability?date=${dateStr}`);
+            const availJson = await availResp.json();
+            const facilityEntry = Array.isArray(availJson?.data) ? (availJson.data.find((d: any) => d.facility && d.facility.id === facId)) : null;
+            if (facilityEntry) {
+              const overlappingSlots = (facilityEntry.slots || []).filter((slot: any) => {
+                try {
+                  // any slot that isn't explicitly 'available' should be considered blocking (scheduled/unavailable)
+                  if (slot.status === 'available') return false;
+                  const slotStart = new Date(slot.start);
+                  const slotEnd = new Date(slot.end);
+                  return initialStartTime < slotEnd && initialEndTime > slotStart;
+                } catch (e) { return false; }
+              });
+              if (overlappingSlots.length > 0) availabilityConflict = true;
+            }
+          } catch (e) {
+            // network or parsing error - do not treat as available; fall back to previous checks
+          }
+
+          if (providedStartValid && providedEndValid && !providedHasConflict && !availabilityConflict) {
+            // Use the provided slot and do not override with the auto-fill logic.
+            // programmatic set - do not mark as user edited
+            form.setValue('startTime', initialStartTime);
+            form.setValue('endTime', initialEndTime);
+            setUserEditedTime(false);
+            return;
+          }
+          // If the provided slot is invalid (outside hours or conflicting), fall through
+          // to find the next available slot below.
+        }
+
+        // If current values are outside library hours or conflict with existing bookings,
+        // find the next available slot and auto-fill it.
+        const startValid = isWithinLibraryHours(currentStart);
+        const endValid = isWithinLibraryHours(currentEnd);
+
+        const blockingStatuses = new Set(['approved', 'scheduled', 'pending']);
+        const hasConflict = (() => {
+          if (!currentStart || !currentEnd) return true;
+          const conflicts = (allBookings || []).filter((b: any) => b.facilityId === facId && blockingStatuses.has(b.status))
+            .some((b: any) => currentStart < new Date(b.endTime) && currentEnd > new Date(b.startTime));
+          return conflicts;
+        })();
+
+        // Only auto-fill if user hasn't manually edited times
+        if (!userEditedTime && (!startValid || !endValid || hasConflict)) {
+          const next = await findNextAvailableSlot(facId, new Date());
+          if (next) {
+            // programmatic set - ensure we don't mark as user-edited
+            form.setValue('startTime', next.start);
+            form.setValue('endTime', next.end);
+            setUserEditedTime(false);
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    })();
+  }, [isOpen, allBookings, selectedFacilityId, initialStartTime, initialEndTime]);
+
   // Helper function to format booking conflict error messages
   const formatBookingConflictMessage = (errorMessage: string) => {
     try {
@@ -661,7 +910,7 @@ export default function BookingModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+  <DialogContent className="w-full h-full md:w-auto md:h-auto md:max-w-2xl md:max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-2xl font-semibold">New Facility Booking</DialogTitle>
           <DialogDescription>
@@ -670,6 +919,87 @@ export default function BookingModal({
         </DialogHeader>
 
         <Form {...form}>
+          {/* Quick action: use suggested slot from availability grid */}
+          {(initialStartTime && initialEndTime && showSuggestedSlot) && (
+            <div className="mb-4 p-3 bg-yellow-50 border border-yellow-100 rounded">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-yellow-800">Suggested slot from availability</div>
+                  <div className="text-xs text-yellow-700">{format(initialStartTime, 'EEE, MMM d')} • {format(initialStartTime, 'hh:mm a')} - {format(initialEndTime, 'hh:mm a')}</div>
+                </div>
+                <div>
+                  <Button
+                    onClick={async () => {
+                      try {
+                        if (!initialStartTime || !initialEndTime) return;
+
+                        // determine facility id to validate against
+                        const facId = selectedFacilityId ?? (form.getValues('facilityId') ? parseInt(form.getValues('facilityId')) : (fallbackFacilities[0]?.id ?? null));
+
+                        // check library hours
+                        const startOk = isWithinLibraryHours(initialStartTime);
+                        const endOk = isWithinLibraryHours(initialEndTime);
+
+                        if (!startOk || !endOk) {
+                          toast({ title: 'Time Outside Hours', description: `The suggested slot is outside operating hours (${formatLibraryHours()}). Please choose another slot.`, variant: 'destructive' });
+                          return;
+                        }
+
+                        // check for booking conflicts on that facility (treat scheduled/pending/approved as blocking)
+                        const blockingStatuses = new Set(['approved', 'scheduled', 'pending']);
+                        const hasConflict = (allBookings || []).filter((b: any) => b.facilityId === facId && blockingStatuses.has(b.status))
+                          .some((b: any) => initialStartTime < new Date(b.endTime) && initialEndTime > new Date(b.startTime));
+
+                        if (hasConflict) {
+                          toast({ title: 'Slot Unavailable', description: 'The suggested slot overlaps an existing scheduled booking. Please choose an available slot.', variant: 'destructive' });
+                          return;
+                        }
+
+                        // check availability API for other accounts' scheduled slots
+                        const dateStr = initialStartTime.toISOString().slice(0,10);
+                        try {
+                          const availResp = await apiRequest('GET', `/api/availability?date=${dateStr}`);
+                          const availJson = await availResp.json();
+                          const facilityEntry = Array.isArray(availJson?.data) ? (availJson.data.find((d: any) => d.facility && d.facility.id === facId)) : null;
+                          if (facilityEntry) {
+                            const overlappingSlots = (facilityEntry.slots || []).filter((slot: any) => {
+                              try {
+                                if (slot.status === 'available') return false; // available is ok
+                                const slotStart = new Date(slot.start);
+                                const slotEnd = new Date(slot.end);
+                                return initialStartTime < slotEnd && initialEndTime > slotStart;
+                              } catch (e) { return false; }
+                            });
+                            if (overlappingSlots.length > 0) {
+                              toast({ title: 'Slot Unavailable', description: 'The suggested slot overlaps a scheduled slot on the server. Please choose an available slot.', variant: 'destructive' });
+                              return;
+                            }
+                          }
+                        } catch (e) {
+                          // network or parsing error - fall back to local checks
+                        }
+
+                        // ok to use suggested slot
+                        form.setValue('startTime', initialStartTime);
+                        form.setValue('endTime', initialEndTime);
+                        // set facility if preselected
+                        if (selectedFacilityId) {
+                          form.setValue('facilityId', String(selectedFacilityId));
+                          const fac = facilities.find(f => f.id === selectedFacilityId);
+                          if (fac) setSelectedFacility(fac);
+                        }
+                      } catch (e) {
+                        // ignore
+                      }
+                    }}
+                    className="bg-yellow-600 text-white"
+                  >
+                    Use suggested slot
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
           {fallbackFacilities.length === 0 ? (
             <div className="text-center py-8">
               <div className="bg-gray-100 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
@@ -775,57 +1105,7 @@ export default function BookingModal({
                   );
                 })()}
 
-                {/* Show warning if user already has a booking for this facility */}
-                {selectedFacility && (() => {
-                  const userBookings = getUserFacilityBookings(selectedFacility.id);
-                  if (userBookings.length === 0) return null;
-
-                  return (
-                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full bg-orange-500"></div>
-                        <div className="flex-1">
-                          <p className="text-sm font-medium text-orange-800 mb-1">
-                            ⚠️ Facility Booking Limit
-                          </p>
-                          <p className="text-sm text-orange-700 mb-1">
-                            You already have {userBookings.length} active booking{userBookings.length > 1 ? 's' : ''} for this facility. 
-                            You cannot create additional requests for the same facility.
-                          </p>
-                          <div className="space-y-1">
-                            {userBookings.slice(0, Math.min(PREVIEW_LIMIT, userBookings.length)).map((booking: any, index: number) => (
-                              <div key={index} className="bg-orange-100 rounded p-2">
-                                <p className="text-xs text-orange-800">
-                                  {booking.status === "approved" ? "✅ Approved" : "⏳ Pending"} • {new Date(booking.startTime).toLocaleDateString('en-US', {
-                                    weekday: 'short',
-                                    month: 'short',
-                                    day: 'numeric'
-                                  })} • {new Date(booking.startTime).toLocaleTimeString('en-US', {
-                                    hour: 'numeric',
-                                    minute: '2-digit',
-                                    hour12: true
-                                  })} - {new Date(booking.endTime).toLocaleTimeString('en-US', {
-                                    hour: 'numeric',
-                                    minute: '2-digit',
-                                    hour12: true
-                                  })}
-                                </p>
-                              </div>
-                            ))}
-                            {userBookings.length > PREVIEW_LIMIT && (
-                              <p className="text-xs text-orange-600">
-                                +{userBookings.length - PREVIEW_LIMIT} more booking{userBookings.length - PREVIEW_LIMIT > 1 ? 's' : ''}
-                              </p>
-                            )}
-                          </div>
-                          <p className="text-sm text-orange-700 mt-2">
-                            Please cancel your existing booking first or choose a different facility.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
+                {/* Facility booking limit UI intentionally removed; server-side errors will be shown after submit */}
 
               <FormField
                 control={form.control}
@@ -866,32 +1146,44 @@ export default function BookingModal({
                   {/* Column 1 - Left */}
                   <div className="space-y-3">
                     <label className="flex items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={!!equipmentState['whiteboard']}
-                        onChange={(e) => setEquipmentState(prev => ({ ...prev, ['whiteboard']: e.target.checked }))}
-                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                      />
+                      {equipmentState['whiteboard'] === 'not_available' ? (
+                        <div className="h-4 w-4 flex items-center justify-center text-red-600 font-bold">X</div>
+                      ) : (
+                        <input
+                          type="checkbox"
+                          checked={equipmentState['whiteboard'] === 'prepared'}
+                          onChange={(e) => setEquipmentState(prev => ({ ...prev, ['whiteboard']: e.target.checked ? 'prepared' : false }))}
+                          className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                      )}
                       <span className="text-sm text-gray-700">Whiteboard &amp; Markers</span>
                     </label>
 
                     <label className="flex items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={!!equipmentState['projector']}
-                        onChange={(e) => setEquipmentState(prev => ({ ...prev, ['projector']: e.target.checked }))}
-                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                      />
+                      {equipmentState['projector'] === 'not_available' ? (
+                        <div className="h-4 w-4 flex items-center justify-center text-red-600 font-bold">X</div>
+                      ) : (
+                        <input
+                          type="checkbox"
+                          checked={equipmentState['projector'] === 'prepared'}
+                          onChange={(e) => setEquipmentState(prev => ({ ...prev, ['projector']: e.target.checked ? 'prepared' : false }))}
+                          className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                      )}
                       <span className="text-sm text-gray-700">Projector</span>
                     </label>
 
                     <label className="flex items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={!!equipmentState['extension_cord']}
-                        onChange={(e) => setEquipmentState(prev => ({ ...prev, ['extension_cord']: e.target.checked }))}
-                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                      />
+                      {equipmentState['extension_cord'] === 'not_available' ? (
+                        <div className="h-4 w-4 flex items-center justify-center text-red-600 font-bold">X</div>
+                      ) : (
+                        <input
+                          type="checkbox"
+                          checked={equipmentState['extension_cord'] === 'prepared'}
+                          onChange={(e) => setEquipmentState(prev => ({ ...prev, ['extension_cord']: e.target.checked ? 'prepared' : false }))}
+                          className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                      )}
                       <span className="text-sm text-gray-700">Extension Cord</span>
                     </label>
                   </div>
@@ -899,22 +1191,30 @@ export default function BookingModal({
                   {/* Column 2 - Middle */}
                   <div className="space-y-3">
                     <label className="flex items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={!!equipmentState['hdmi']}
-                        onChange={(e) => setEquipmentState(prev => ({ ...prev, ['hdmi']: e.target.checked }))}
-                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                      />
+                      {equipmentState['hdmi'] === 'not_available' ? (
+                        <div className="h-4 w-4 flex items-center justify-center text-red-600 font-bold">X</div>
+                      ) : (
+                        <input
+                          type="checkbox"
+                          checked={equipmentState['hdmi'] === 'prepared'}
+                          onChange={(e) => setEquipmentState(prev => ({ ...prev, ['hdmi']: e.target.checked ? 'prepared' : false }))}
+                          className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                      )}
                       <span className="text-sm text-gray-700">HDMI Cable</span>
                     </label>
 
                     <label className="flex items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={!!equipmentState['extra_chairs']}
-                        onChange={(e) => setEquipmentState(prev => ({ ...prev, ['extra_chairs']: e.target.checked }))}
-                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                      />
+                      {equipmentState['extra_chairs'] === 'not_available' ? (
+                        <div className="h-4 w-4 flex items-center justify-center text-red-600 font-bold">X</div>
+                      ) : (
+                        <input
+                          type="checkbox"
+                          checked={equipmentState['extra_chairs'] === 'prepared'}
+                          onChange={(e) => setEquipmentState(prev => ({ ...prev, ['extra_chairs']: e.target.checked ? 'prepared' : false }))}
+                          className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                      )}
                       <span className="text-sm text-gray-700">Extra Chairs</span>
                     </label>
                   </div>
@@ -922,24 +1222,63 @@ export default function BookingModal({
                   {/* Column 3 - Right (Others + textarea always present) */}
                   <div className="space-y-2">
                     <div className="flex items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={!!equipmentState['others']}
-                        onChange={(e) => setEquipmentState(prev => ({ ...prev, ['others']: e.target.checked }))}
-                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                      />
+                      {equipmentState['others'] === 'not_available' ? (
+                        <div className="h-4 w-4 flex items-center justify-center text-red-600 font-bold">X</div>
+                      ) : (
+                        <input
+                          type="checkbox"
+                          checked={equipmentState['others'] === 'prepared'}
+                          onChange={(e) => setEquipmentState(prev => ({ ...prev, ['others']: e.target.checked ? 'prepared' : false }))}
+                          className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                      )}
                       <span className="text-sm text-gray-700">Others</span>
                     </div>
 
                     <div className="mt-2 md:mt-1">
                       <Input
                         value={equipmentOtherText}
-                        onChange={(e: any) => {
+                          onChange={(e: any) => {
                           let val = e.target.value;
                           if (val.length > OTHERS_MAX) val = val.slice(0, OTHERS_MAX);
                           setEquipmentOtherText(val);
+
                           // Auto-toggle the 'others' checkbox based on input content
-                          setEquipmentState(prev => ({ ...prev, ['others']: val.trim().length > 0 }));
+                          setEquipmentState(prev => ({ ...prev, ['others']: val.trim().length > 0 ? (prev['others'] === 'not_available' ? 'not_available' : 'prepared') : false }));
+
+                          // Best-effort: if the user pasted JSON-like payload (common in notifications),
+                          // try to parse and map statuses for known equipment keys. This prevents raw JSON
+                          // from showing up and marks items as 'prepared' or 'not_available' accordingly.
+                          try {
+                            const firstBrace = val.indexOf('{');
+                            const lastBrace = val.lastIndexOf('}');
+                            if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+                              const candidate = val.slice(firstBrace, lastBrace + 1);
+                              const parsed = JSON.parse(candidate);
+                              const itemsObj = parsed?.items || parsed?.equipment || parsed || null;
+                              if (itemsObj && typeof itemsObj === 'object') {
+                                const normalized = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+                                const map: Record<string, EquipmentStateValue> = {};
+                                Object.keys(itemsObj).forEach((k) => {
+                                  const norm = normalized(k);
+                                  const matched = EQUIPMENT_OPTIONS.find(o => normalized(o.key) === norm || normalized(o.label) === norm);
+                                  if (matched) {
+                                    const rawVal = String(itemsObj[k] ?? '').toLowerCase();
+                                    if (rawVal.includes('not_av') || rawVal.includes('not available') || rawVal.includes('notavailable')) {
+                                      map[matched.key] = 'not_available';
+                                    } else if (rawVal.includes('prep') || rawVal === 'prepared' || rawVal === 'true' || rawVal === 'yes') {
+                                      map[matched.key] = 'prepared';
+                                    }
+                                  }
+                                });
+                                if (Object.keys(map).length > 0) {
+                                  setEquipmentState(prev => ({ ...prev, ...map }));
+                                }
+                              }
+                            }
+                          } catch (e) {
+                            // ignore parse errors
+                          }
                         }}
                         placeholder="Describe other needs"
                         aria-label="Other equipment details"
@@ -994,6 +1333,8 @@ export default function BookingModal({
                               // preserve time from current selection
                               newDate.setHours(current.getHours(), current.getMinutes(), 0, 0);
                               field.onChange(newDate);
+                              // mark that the user edited the time/date manually
+                              setUserEditedTime(true);
                             }}
                             initialFocus
                             disabled={(date) => date < new Date()}
@@ -1018,6 +1359,7 @@ export default function BookingModal({
                             const newDate = field.value ? new Date(field.value) : new Date();
                             newDate.setHours(hours, minutes, 0, 0);
                             field.onChange(newDate);
+                            setUserEditedTime(true);
                           }}
                         />
                       </FormControl>
@@ -1055,7 +1397,8 @@ export default function BookingModal({
                               const current = field.value || new Date();
                               const newDate = new Date(date);
                               newDate.setHours(current.getHours(), current.getMinutes(), 0, 0);
-                              field.onChange(newDate);
+              field.onChange(newDate);
+              setUserEditedTime(true);
                             }}
                             initialFocus
                             disabled={(date) => date < new Date()}
@@ -1080,6 +1423,7 @@ export default function BookingModal({
                             const newDate = field.value ? new Date(field.value) : new Date();
                             newDate.setHours(hours, minutes, 0, 0);
                             field.onChange(newDate);
+                            setUserEditedTime(true);
                           }}
                         />
                       </FormControl>
@@ -1249,15 +1593,18 @@ export default function BookingModal({
                       >
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                           {Object.keys(equipmentState)
-                            .filter(k => equipmentState[k])
-                            .filter(k => !(k === 'others' && equipmentOtherText))
-                            .map(k => (
-                              <div key={`summary-eq-${k}`} className="text-sm">{EQUIPMENT_OPTIONS.find(o => o.key === k)?.label || k}</div>
-                            ))}
+                              .filter(k => equipmentState[k] === 'prepared')
+                              .map(k => (
+                                <div key={`summary-eq-${k}`} className="text-sm">{EQUIPMENT_OPTIONS.find(o => o.key === k)?.label || k}</div>
+                              ))}
 
-                          {equipmentOtherText ? (
-                            <div className="text-sm sm:col-span-3">Others: {equipmentOtherText}</div>
-                          ) : null}
+                            {Object.keys(equipmentState).some(k => equipmentState[k] === 'not_available') && (
+                              <div className="text-sm text-red-600">Unavailable: {Object.keys(equipmentState).filter(k => equipmentState[k] === 'not_available').map(k => (EQUIPMENT_OPTIONS.find(o => o.key === k)?.label || k)).join(', ')}</div>
+                            )}
+
+                            {equipmentOtherText ? (
+                              <div className="text-sm sm:col-span-3">Others: {equipmentOtherText}</div>
+                            ) : null}
                         </div>
                       </div>
                     </div>
@@ -1275,8 +1622,7 @@ export default function BookingModal({
                       className="w-full h-10 flex items-center justify-center gap-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg"
                       disabled={
                         createBookingMutation.isPending ||
-                        isSubmitting ||
-                        (selectedFacility ? getUserFacilityBookings(selectedFacility.id).length > 0 : false)
+                        isSubmitting
                       }
                     >
                       {createBookingMutation.isPending || isSubmitting ? (
@@ -1328,19 +1674,92 @@ export default function BookingModal({
                   </div>
                 </div>
               </div>
+              </DialogFooter>
+
+              {/* Dev-only booking debug panel (visible only in development) */}
+              {process.env.NODE_ENV !== 'production' && (() => {
+                const currentEmail = String(user?.email || '').toLowerCase();
+                const myBookings = (allBookings || []).filter((b: any) => String(b.userEmail || b.user?.email || '').toLowerCase() === currentEmail);
+                if (!myBookings || myBookings.length === 0) return null;
+
+                return (
+                  <div className="mt-4 p-3 bg-gray-50 border border-gray-200 rounded text-sm">
+                    <div className="font-medium mb-2">Dev: Your bookings</div>
+                    <div className="space-y-2 max-h-40 overflow-y-auto">
+                      {myBookings.map((b: any) => (
+                        <div key={b.id} className="flex items-center justify-between gap-3 p-2 bg-white rounded border">
+                          <div className="flex-1">
+                            <div className="text-xs text-gray-700">ID: {b.id} • Facility: {b.facilityId} • {new Date(b.startTime).toLocaleString()}</div>
+                            <div className="text-xs text-gray-600">Status: <span className="font-medium">{String(b.status)}</span></div>
+                          </div>
+                          <div className="text-xs text-right text-gray-500">Ends: {new Date(b.endTime).toLocaleString()}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
               <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
                 <AlertDialogContent>
                   <AlertDialogHeader>
                     <AlertDialogTitle>Confirm Booking</AlertDialogTitle>
                     <AlertDialogDescription>
-                      Are you sure you want to submit this booking request?
+                      Are you sure you want to submit this booking?
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={() => {
+                    <AlertDialogAction onClick={async () => {
                       if (!confirmPendingData) return;
+                      try {
+                        // Fresh server-side check to avoid stale client cache bypass
+                        // We intentionally do not use the response directly here; server-side rules are authoritative.
+                        await apiRequest('GET', '/api/bookings/all');
+                      } catch (e) {
+                        console.error('Failed to verify latest bookings before submit', e);
+                        toast({ title: 'Network Error', description: 'Could not verify your existing bookings. Please try again.', variant: 'destructive' });
+                        setConfirmPendingData(null);
+                        setShowConfirmDialog(false);
+                        return;
+                      }
+
+                      // New: Fresh availability check for the same date to avoid race where another user just scheduled
+                      try {
+                        const start = new Date(confirmPendingData.startTime);
+                        const end = new Date(confirmPendingData.endTime);
+                        const dateStr = start.toISOString().slice(0,10);
+                        const availResp = await apiRequest('GET', `/api/availability?date=${dateStr}`);
+                        const availJson = await availResp.json();
+                        const facilityId = parseInt(confirmPendingData.facilityId as any);
+                        const facilityEntry = Array.isArray(availJson?.data) ? (availJson.data.find((d: any) => d.facility && d.facility.id === facilityId)) : null;
+                        if (facilityEntry) {
+                          const overlappingSlots = (facilityEntry.slots || []).filter((slot: any) => {
+                            try {
+                              if (slot.status !== 'scheduled') return false;
+                              const slotStart = new Date(slot.start);
+                              const slotEnd = new Date(slot.end);
+                              return start < slotEnd && end > slotStart;
+                            } catch (e) { return false; }
+                          });
+
+                          if (overlappingSlots.length > 0) {
+                            toast({ title: 'Time Slot Unavailable', description: 'The selected time overlaps an existing scheduled booking. Please choose a different time or facility.', variant: 'destructive' });
+                            setConfirmPendingData(null);
+                            setShowConfirmDialog(false);
+                            return;
+                          }
+                        }
+                      } catch (e) {
+                        console.error('Failed to verify availability before submit', e);
+                        toast({ title: 'Network Error', description: 'Could not verify latest availability. Please try again.', variant: 'destructive' });
+                        setConfirmPendingData(null);
+                        setShowConfirmDialog(false);
+                        return;
+                      }
+
+                      // Final safety: rely on server validation; do not preemptively block submission here.
+
                       createBookingMutation.mutate(confirmPendingData);
                       setConfirmPendingData(null);
                       setShowConfirmDialog(false);
@@ -1348,7 +1767,38 @@ export default function BookingModal({
                   </AlertDialogFooter>
                 </AlertDialogContent>
               </AlertDialog>
-            </DialogFooter>
+
+              {/* Server-side conflict dialog: show when server reports overlapping bookings for this user */}
+              <AlertDialog open={showServerConflictDialog} onOpenChange={setShowServerConflictDialog}>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Conflicting Booking Found</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      The server reports you already have a pending or approved booking that overlaps this time.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <div className="p-3">
+                    {serverConflictPayload?.conflictingBookings && serverConflictPayload.conflictingBookings.length > 0 ? (
+                      <div className="space-y-2 text-sm">
+                        <div className="font-medium">Conflicting bookings:</div>
+                        {serverConflictPayload.conflictingBookings.map((c: any) => (
+                          <div key={c.id} className="text-xs">
+                            Facility {c.facilityId} — {new Date(c.startTime).toLocaleString()} to {new Date(c.endTime).toLocaleTimeString()}
+                            {' '}• Status: {c.status}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-sm">A conflicting booking exists. You may cancel it and proceed.</div>
+                    )}
+                  </div>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel onClick={() => { setShowServerConflictDialog(false); setServerConflictPayload(null); }}>Close</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleForceCancelAndProceed}>Cancel existing bookings and proceed</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+
             {/* Inline validation warnings (replaces toasts for form validation) */}
             {(() => {
               const durationWarning = !isDurationValid(form.watch('startTime'), form.watch('endTime'))
@@ -1362,10 +1812,13 @@ export default function BookingModal({
                 <div className="mt-3 text-sm rounded-b-lg px-4 py-3 bg-white border-t border-gray-200">
                   {warnings.map((w, idx) => (
                     <div key={idx} className="mb-2 flex items-start gap-3">
-                      <div className="mt-1 text-yellow-600">⚠️</div>
+                      {/* larger yellow warning icon to match design */}
+                      <div className="mt-0.5 text-yellow-600 text-xl">⚠️</div>
                       <div>
-                        <div className="font-medium text-red-700">{w.title}</div>
-                        <div className="text-red-700">{w.description}</div>
+                        {/* Bold, red heading like the screenshot */}
+                        <div className="font-semibold text-red-700 text-sm">{w.title}</div>
+                        {/* Supporting text in slightly lighter red and smaller size */}
+                        <div className="text-red-600 text-sm mt-1">{w.description}</div>
                       </div>
                     </div>
                   ))}

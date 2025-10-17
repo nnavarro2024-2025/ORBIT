@@ -12,6 +12,7 @@ import BannedUser from "@/pages/BannedUser";
 // ORZ feature removed
 import BookingDashboard from "@/pages/student/BookingDashboard";
 import AdminDashboard from "@/pages/admin/AdminDashboard";
+import SearchPage from "@/pages/Search";
 
 
 function Router() {
@@ -42,30 +43,30 @@ function Router() {
     <>
       {/* If the app was loaded directly at /notifications, replace the URL so the BookingDashboard
           receives the hash it expects. Use replaceState so browser history isn't polluted. */}
-      {typeof window !== 'undefined' && window.location.pathname === '/notifications' && (function() {
+      {typeof window !== 'undefined' && (function() {
         try {
-          // Mark a session flag so BookingDashboard knows to open notifications once
-          try { sessionStorage.setItem('openNotificationsOnce', '1'); } catch (_) { /* ignore */ }
-          const target = '/booking#activity-logs/notifications';
-          if (window.location.pathname + window.location.hash !== target) {
-            window.history.replaceState({}, '', target);
-          }
+          const pathname = window.location.pathname || '/';
+          const ensureBase = (suffix: string, targetSuffix: string, setFlag?: () => void) => {
+            if (!pathname.endsWith(suffix)) return null;
+            // compute base (may be empty or a prefix like '/173')
+            const base = pathname.slice(0, pathname.length - suffix.length) || '/';
+            const target = (base === '/' ? '' : base) + targetSuffix;
+            try { setFlag && setFlag(); } catch (_) {}
+            if (window.location.pathname + window.location.hash !== target) {
+              window.history.replaceState({}, '', target);
+            }
+            return null;
+          };
+
+          // /notifications -> /booking#activity-logs:notifications
+          const maybeNotifications = ensureBase('/notifications', '/booking#activity-logs:notifications', () => { try { sessionStorage.setItem('openNotificationsOnce', '1'); } catch (_) {} });
+          if (maybeNotifications !== null) return maybeNotifications;
+
+          // /admin/alerts -> /admin#activity:notifications
+          const maybeAdminAlerts = ensureBase('/admin/alerts', '/admin#activity:notifications', () => { try { sessionStorage.setItem('openAdminAlertsOnce', '1'); } catch (_) {} });
+          if (maybeAdminAlerts !== null) return maybeAdminAlerts;
         } catch (e) {
-          console.warn('Failed to rewrite /notifications -> /booking#activity-logs/notifications', e);
-        }
-        return null;
-      })()}
-      {typeof window !== 'undefined' && window.location.pathname === '/admin/alerts' && (function() {
-        try {
-          // mark a one-time flag for AdminDashboard to open alerts once
-          try { sessionStorage.setItem('openAdminAlertsOnce', '1'); } catch (_) { /* ignore */ }
-          // rewrite to admin route with a hash indicating the alerts view briefly
-          const target = '/admin#security/booking';
-          if (window.location.pathname + window.location.hash !== target) {
-            window.history.replaceState({}, '', target);
-          }
-        } catch (e) {
-          console.warn('Failed to rewrite /admin/alerts -> /admin#security/booking', e);
+          console.warn('Failed to perform path rewrites for notifications/admin alerts', e);
         }
         return null;
       })()}
@@ -77,6 +78,7 @@ function Router() {
   <Route path="/admin/alerts" component={() => <ProtectedRoute component={AdminDashboard} />} />
   {/* Route for user notifications - opens BookingDashboard and lets it pick Activity Logs -> Notification Logs */}
   <Route path="/notifications" component={() => <ProtectedRoute component={BookingDashboard} />} />
+  <Route path="/search" component={SearchPage} />
     </>
   );
 }

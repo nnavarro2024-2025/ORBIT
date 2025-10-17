@@ -13,7 +13,6 @@ import {
   insertTimeExtensionRequestSchema,
   createFacilityBookingSchema,
   facilityBookings,
-  systemAlerts,
 } from "../shared/schema";
 import { eq, and, or, gt, lt, asc, lte, isNotNull, ne } from "drizzle-orm";
 
@@ -809,7 +808,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const eq = (booking as any).equipment;
           const hasItems = eq && Array.isArray(eq.items) && eq.items.length > 0;
           const hasOthers = eq && eq.others;
-            if (hasItems || hasOthers) {
+          if (hasItems || hasOthers) {
             const items = hasItems ? (eq.items as string[]).map((i: string) => i.replace(/_/g, ' ')) : [];
             const others = hasOthers ? `Others: ${String(eq.others).trim()}` : null;
             const needsList = [...items, ...(others ? [others] : [])].join(', ');
@@ -819,7 +818,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               severity: 'low',
               title: `Equipment Needs Submitted`,
               message: `${user?.email || userId} requested equipment: ${needsList}`,
-              userId: userId, 
+              userId: null, 
               isRead: false,
               createdAt: new Date(),
             });
@@ -1240,14 +1239,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { bookingId } = req.params;
       const userId = req.user.claims.sub;
 
-  const booking = await storage.getFacilityBooking(bookingId);
-  // variables declared here so they are available to downstream dedupe/update blocks
-  let bookingAfter: any = null;
-  let ownerUser: any = null;
-  let facility: any = null;
-  let structuredNote: any = null;
-  let baseWhen: string = '';
-  let notifyMessage: string | null = null;
+      const booking = await storage.getFacilityBooking(bookingId);
       if (!booking) {
         return res.status(404).json({ message: "Booking not found." });
       }
@@ -1376,86 +1368,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const alerts = await storage.getSystemAlerts();
       // Use explicit null/undefined check so falsy userId values (e.g. empty string) are not treated as global
       const adminAlerts = Array.isArray(alerts) ? alerts.filter(a => a.userId == null) : [];
-
-      // Helper: extract JSON blocks and return parsed objects (best-effort)
-      const extractJsonObjects = (text: string) => {
-        try {
-          const matches = Array.from(String(text || '').matchAll(/(\{[\s\S]*?\})/g)).map(m => m[1]);
-          const parsed: any[] = [];
-          for (let block of matches) {
-            try { block = block.replace(/\\"/g, '"').replace(/\\n/g, '\n'); } catch (e) {}
-            try { parsed.push(JSON.parse(block)); } catch (e) {
-              // fallback: extract quoted pairs
-              const obj: any = {};
-              const re = /"([^"}]+)"\s*:\s*"([^"}]+)"/g;
-              let mm;
-              while ((mm = re.exec(block)) !== null) obj[mm[1]] = mm[2];
-              if (Object.keys(obj).length > 0) parsed.push(obj);
-            }
-          }
-          return parsed;
-        } catch (e) { return []; }
-      };
-
-      const humanSummaryFromStructured = (note: any) => {
-        try {
-          if (!note) return null;
-          const parts: string[] = [];
-          if (note.items) {
-            if (Array.isArray(note.items)) parts.push(note.items.join(', '));
-            else if (typeof note.items === 'object') parts.push(Object.entries(note.items).map(([k, v]) => `${k}: ${v}`).join('\n'));
-          }
-          if (note.others) parts.push(`Other details: ${note.others}`);
-          return parts.join('\n\n');
-        } catch (e) { return null; }
-      };
-
-      // Return sanitized copies (don't mutate DB) so admin bell doesn't show raw JSON blocks
-      try {
-        const sanitized = adminAlerts.map((a: any) => {
-          try {
-            const objs = extractJsonObjects(a.message || '');
-            if (!objs || objs.length === 0) return a;
-            const humans = objs.map(o => humanSummaryFromStructured(o)).filter(Boolean);
-            if (humans.length === 0) return a;
-            // remove JSON blocks and append human summaries
-            const msg = String(a.message || '').replace(/(\{[\s\S]*?\})/g, '').trim();
-            const appended = '\n\n' + humans.join('\n\n');
-            // attach the first structured object so the client can render per-item statuses without needing raw JSON
-            const structured = objs[0] || null;
-            return { ...a, message: `${msg}${appended}`, structuredNote: structured };
-          } catch (e) { return a; }
-        });
-        return res.json(sanitized);
-      } catch (e) {
-        try { console.error('[ADMIN] alerts sanitization failed, returning raw admin alerts', e); } catch (ee) {}
-        return res.json(adminAlerts);
-      }
+      res.json(adminAlerts);
     } catch (error) {
-      // Log the full error so diagnostics can show the real cause of the 500
-      try { console.error('[ADMIN] Failed to fetch system alerts', error); } catch (e) { console.error('[ADMIN] Failed to fetch system alerts (logging failed)', e); }
       res.status(500).json({ message: "Failed to fetch system alerts" });
-    }
-  });
-
-  // DEBUG: Return all system alerts (admin-only) for inspection during tests
-  app.get('/api/admin/alerts/all', isAuthenticated, requireAdmin, async (req: any, res) => {
-    try {
-      const alerts = await storage.getSystemAlerts();
-      res.json(alerts);
-    } catch (e) {
-      console.error('[DEBUG] Failed to fetch all alerts', e);
-      res.status(500).json({ message: 'Failed to fetch alerts' });
-    }
-  });
-
-  // DEBUG route: return all system alerts (admin-only) so tests can inspect per-user copies. Remove in production.
-  app.get('/api/admin/alerts/all', isAuthenticated, requireAdmin, async (req: any, res) => {
-    try {
-      const all = await storage.getSystemAlerts();
-      res.json(all);
-    } catch (e) {
-      res.status(500).json({ message: 'Failed to fetch all alerts' });
     }
   });
 
@@ -1484,20 +1399,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Admin-only: update an alert's message (maintenance/debugging endpoint)
-  app.post('/api/admin/alerts/:alertId/updateMessage', isAuthenticated, requireAdmin, async (req: any, res) => {
-    try {
-      const { alertId } = req.params;
-      const { message } = req.body || {};
-      if (!alertId || typeof message !== 'string') return res.status(400).json({ message: 'Missing alertId or message' });
-      await storage.updateSystemAlert(alertId, { message } as any);
-      res.json({ success: true });
-    } catch (e) {
-      console.error('[ADMIN] Failed to update alert message', e);
-      res.status(500).json({ message: 'Failed to update alert message' });
-    }
-  });
-
   // User notifications - personal or global alerts accessible to authenticated users
   app.get("/api/notifications", isAuthenticated, async (req: any, res) => {
     try {
@@ -1506,51 +1407,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Global/admin alerts (userId == null) are intended for admins and should not be included here.
       const alerts = await storage.getSystemAlerts();
       const userAlerts = Array.isArray(alerts) ? alerts.filter(a => a.userId === userId) : [];
-
-      // Deduplicate similar equipment alerts so the user doesn't see multiple identical entries.
-      // Strategy: group by title + first summary line (text before first newline) and keep the newest alert per group.
-      try {
-        const grouped: Record<string, any> = {};
-        for (const a of userAlerts) {
-          try {
-            // Normalize message for deduping: pick the first meaningful line and
-            // ignore short admin timestamp prefixes like "An admin updated the equipment request at ...".
-            const raw = String(a.message || '');
-            const lines = raw.split('\n').map(l => String(l || '').trim()).filter(l => l.length > 0);
-            // Regex attempts to match common admin timestamp prefixes (date/time or 'An admin updated... at')
-            const adminTsRe = /An admin\b.*\bat\b\s*\d{1,2}[:\/]?\d{0,2}/i;
-            let mainLine = '';
-            if (lines.length === 0) {
-              mainLine = '';
-            } else if (lines.length === 1) {
-              // single-line message: strip admin-ts if present
-              mainLine = lines[0].replace(adminTsRe, '').trim();
-            } else {
-              // prefer the first line that does not look like an admin timestamp prefix
-              const found = lines.find(l => !adminTsRe.test(l) && !/^An admin\b/i.test(l));
-              mainLine = (found || lines[0] || '').trim();
-            }
-
-            const key = `${String(a.title || '').trim()}||${mainLine}`;
-            const existing = grouped[key];
-            if (!existing) grouped[key] = a;
-            else {
-              const existingTime = new Date(existing.createdAt).getTime();
-              const thisTime = new Date(a.createdAt).getTime();
-              if (thisTime > existingTime) grouped[key] = a; // prefer newest
-            }
-          } catch (e) {
-            // fallback: include alert as-is
-            const k = `__fallback__${a.id}`;
-            grouped[k] = grouped[k] || a;
-          }
-        }
-        const deduped = Object.values(grouped).sort((x: any, y: any) => new Date(y.createdAt).getTime() - new Date(x.createdAt).getTime());
-        return res.json(deduped);
-      } catch (e) {
-        console.warn('[NOTIFICATIONS] Deduplication failed, returning raw user alerts', e);
-        return res.json(userAlerts);
-      }
+      res.json(userAlerts);
     } catch (error) {
       console.error('[NOTIFICATIONS] Failed to fetch notifications', error);
       res.status(500).json({ message: 'Failed to fetch notifications' });
@@ -1817,44 +1674,124 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Admin: update equipment needs status for a booking
-  app.post('/api/admin/bookings/:bookingId/needs', isAuthenticated, requireAdmin, async (req:any, res:any) => {
+  // Replacement snippet for admin needs handler. This file is intentionally a raw TypeScript
+// snippet and will be injected into server/routes.ts by scripts/fix-needs-handler.mjs.
+// Replacement snippet for admin needs handler. This file is intentionally a raw TypeScript
+// snippet and will be injected into server/routes.ts by scripts/fix-needs-handler.mjs.
+app.post('/api/admin/bookings/:bookingId/needs', isAuthenticated, requireAdmin, async (req:any, res:any) => {
+  try {
+    const { bookingId } = req.params;
+    const { status, note } = req.body; // status: 'prepared' | 'not_available'
+    if (!['prepared', 'not_available'].includes(status)) return res.status(400).json({ message: 'Invalid status' });
+
+    const booking = await storage.getFacilityBooking(bookingId);
+    if (!booking) return res.status(404).json({ message: 'Booking not found' });
+
+    const needsStatusText = status === 'prepared' ? 'Prepared' : 'Not Available';
+    // Persist adminResponse (append)
+    const updatedAdminResponse = (booking.adminResponse || '') + (booking.adminResponse ? ' | ' : '') + `Needs: ${needsStatusText}` + (note ? ` — ${note}` : '');
+    await storage.updateFacilityBooking(bookingId, { adminResponse: updatedAdminResponse, updatedAt: new Date() } as any);
+
+    // Notify booking owner for both prepared and not_available states
     try {
-      const { bookingId } = req.params;
-      const { status, note } = req.body; // status: 'prepared' | 'not_available'
+      const bookingAfter = await storage.getFacilityBooking(bookingId);
+      const user = bookingAfter ? await storage.getUser(bookingAfter.userId) : null;
+      const facility = bookingAfter ? await storage.getFacility(bookingAfter.facilityId) : null;
 
-      // function-scoped vars used across nested blocks; declared with var to ensure hoisting
-      var bookingAfter: any = null;
-      var ownerUser: any = null;
-      var facility: any = null;
-      var structuredNote: any = null;
-      var baseWhen: string = '';
-      var notifyMessage: string | null = null;
+      // attempt to parse note as structured JSON
+      let structuredNote: any = null;
+      try { structuredNote = note ? (typeof note === 'string' ? JSON.parse(note) : note) : null; } catch (e) { structuredNote = null; }
 
-      if (!['prepared', 'not_available'].includes(status)) return res.status(400).json({ message: 'Invalid status' });
+      // if none, try to derive from booking.equipment
+      if (!structuredNote) {
+        try {
+          const eq = bookingAfter ? (bookingAfter as any).equipment : null;
+          if (eq) {
+            const itemsObj: Record<string, any> = {};
+            if (Array.isArray(eq.items)) {
+              for (const it of eq.items) {
+                const name = String(it || '').replace(/_/g, ' ').trim();
+                if (name) itemsObj[name] = status === 'prepared' ? 'prepared' : 'not_available';
+              }
+            } else if (eq.items && typeof eq.items === 'object') {
+              for (const k of Object.keys(eq.items)) itemsObj[String(k)] = status === 'prepared' ? 'prepared' : 'not_available';
+            }
+            structuredNote = { items: itemsObj, others: eq.others || null };
+          }
+        } catch (e) { structuredNote = null; }
+      }
 
-      const booking = await storage.getFacilityBooking(bookingId);
-      if (!booking) return res.status(404).json({ message: 'Booking not found' });
+      const baseWhen = bookingAfter ? new Date(bookingAfter.startTime).toLocaleString() : '';
+      const facilityName = facility?.name || `Facility ${bookingAfter?.facilityId}`;
 
-      const needsStatusText = status === 'prepared' ? 'Prepared' : 'Not Available';
-
-      // persist adminResponse (append)
-      const updatedAdminResponse = (booking.adminResponse || '') + (booking.adminResponse ? ' | ' : '') + `Needs: ${needsStatusText}` + (note ? ` — ${note}` : '');
-      await storage.updateFacilityBooking(bookingId, { adminResponse: updatedAdminResponse, updatedAt: new Date() } as any);
-
-      // Notify booking owner with a multi-line human message and appended structured JSON for parsing
+      // build human summary
+      const humanParts: string[] = [];
       try {
-  bookingAfter = await storage.getFacilityBooking(bookingId);
-  ownerUser = bookingAfter ? await storage.getUser(bookingAfter.userId) : null;
-  facility = bookingAfter ? await storage.getFacility(bookingAfter.facilityId) : null;
+        if (structuredNote && structuredNote.items) {
+          if (Array.isArray(structuredNote.items)) {
+            humanParts.push(...structuredNote.items.map((it: any) => String(it)));
+          } else if (typeof structuredNote.items === 'object') {
+            humanParts.push(...Object.keys(structuredNote.items).map(k => `${k}: ${structuredNote.items[k]}`));
+          }
+        }
+        if (structuredNote && structuredNote.others) humanParts.push(`Others: ${String(structuredNote.others)}`);
+      } catch (e) {}
 
-        // attempt to parse note as structured JSON
-  structuredNote = null;
-  try { structuredNote = note ? (typeof note === 'string' ? JSON.parse(note) : note) : null; } catch (e) { structuredNote = null; }
+      const humanList = humanParts.length > 0 ? humanParts.join('; ') : '';
+      const notifyTitle = status === 'prepared' ? 'Equipment Update - Prepared' : 'Equipment Update - Not Available';
+      let notifyMessage = '';
+      if (structuredNote && (structuredNote.items || typeof structuredNote.items === 'object')) {
+        notifyMessage = `An admin has updated equipment availability for your booking for ${facilityName} on ${baseWhen}. ${humanList ? humanList + '.' : ''} ${JSON.stringify(structuredNote)}`;
+      } else {
+        notifyMessage = status === 'prepared'
+          ? `An admin has marked the requested equipment as prepared for your booking for ${facilityName} on ${baseWhen}.`
+          : `An admin has marked requested equipment as not available for your booking for ${facilityName} on ${baseWhen}. We have notified you so you can make alternate arrangements.`;
+      }
 
-        // if none, derive from booking.equipment
-        if (!structuredNote) {
-          try {
-            const eq = bookingAfter ? (bookingAfter as any).equipment : null;
+      await storage.createSystemAlert({
+        id: randomUUID(),
+        type: 'booking',
+        severity: 'low',
+        title: notifyTitle,
+        message: notifyMessage,
+        userId: bookingAfter?.userId ?? null,
+        isRead: false,
+        createdAt: new Date(),
+      });
+    } catch (e) {
+      console.warn('[Needs] Error handling equipment status notification', e);
+    }
+
+    // Best-effort: update original equipment needs alert if present (append structured JSON or status)
+    try {
+      const alerts = await storage.getSystemAlerts();
+      // resolve owner email for matching
+      let ownerEmail: string | null = null;
+      try {
+        if (booking && (booking as any).userId) {
+          const _owner = await storage.getUser((booking as any).userId);
+          ownerEmail = _owner?.email ?? null;
+        }
+      } catch (e) { ownerEmail = null; }
+      const userIdStr = String((booking as any)?.userId || '');
+
+      const found = alerts.find(a => {
+        try {
+          if (!a.title || !a.message) return false;
+          if (!a.title.startsWith('Equipment Needs Submitted')) return false;
+          if (ownerEmail && ownerEmail.length > 0 && a.message.includes(ownerEmail)) return true;
+          if (userIdStr && userIdStr.length > 0 && a.message.includes(userIdStr)) return true;
+          return false;
+        } catch (e) { return false; }
+      });
+
+      if (found) {
+        try {
+          let structuredNote: any = null;
+          try { structuredNote = note ? (typeof note === 'string' ? JSON.parse(note) : note) : null; } catch (e) { structuredNote = null; }
+          if (!structuredNote) {
+            const b = await storage.getFacilityBooking(bookingId);
+            const eq = b ? (b as any).equipment : null;
             if (eq) {
               const itemsObj: Record<string, any> = {};
               if (Array.isArray(eq.items)) {
@@ -1867,360 +1804,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
               }
               structuredNote = { items: itemsObj, others: eq.others || null };
             }
-          } catch (e) { structuredNote = null; }
-        }
-
-  baseWhen = bookingAfter ? new Date(bookingAfter.startTime).toLocaleString() : '';
-  const facilityName = facility?.name || `Facility ${bookingAfter?.facilityId}`;
-
-        // Build readable summary and per-item lines
-        const requester = ownerUser?.email || String(bookingAfter?.userId || 'requester');
-        const summaryItems = (() => {
-          try {
-            if (structuredNote && structuredNote.items) {
-              if (Array.isArray(structuredNote.items)) return structuredNote.items.map((s: any) => String(s));
-              if (typeof structuredNote.items === 'object') return Object.keys(structuredNote.items).map(k => String(k));
-            }
-            return [] as string[];
-          } catch (e) { return [] as string[]; }
-        })();
-
-        const summaryLine = `${requester} requested equipment: ${summaryItems.join(', ')} at ${baseWhen}`;
-
-        const itemLines: string[] = [];
-        if (structuredNote && structuredNote.items) {
-          if (Array.isArray(structuredNote.items)) {
-            for (const it of structuredNote.items) itemLines.push(`- ${String(it)}`);
-          } else if (typeof structuredNote.items === 'object') {
-            for (const k of Object.keys(structuredNote.items)) itemLines.push(`- ${k}`);
           }
-        }
-
-        const othersLine = structuredNote && structuredNote.others ? `• Other details: ${String(structuredNote.others)}` : '';
-
-  const notifyTitle = 'Equipment or Needs Request';
-  const payloadJson = JSON.stringify(structuredNote || { items: {}, others: null });
-
-  notifyMessage = `${summaryLine}\n\n${itemLines.join('\n')}${othersLine ? '\n\n' + othersLine : ''}\n\n${payloadJson}`;
-
-        // NOTE: per-user alert creation is handled later by the dedupe/ensure block to avoid duplicates
-
-        // Prefer updating the original "Equipment Needs Submitted" alert if it exists
-        try {
-          const alertsForUpdate = await storage.getSystemAlerts();
-          const ownerEmailForMatch = ownerUser?.email || String(bookingAfter?.userId || '');
-          const foundOriginal = Array.isArray(alertsForUpdate) ? alertsForUpdate.find(a => {
-            try {
-              if (!a.title || !a.message) return false;
-              if (!a.title.startsWith('Equipment Needs Submitted')) return false;
-              if (ownerEmailForMatch && a.message.includes(ownerEmailForMatch)) return true;
-              if (String(bookingAfter?.userId || '').length > 0 && a.message.includes(String(bookingAfter?.userId))) return true;
-              return false;
-            } catch (e) { return false; }
-          }) : null;
-
-          // Build a human-friendly summary (no raw JSON) for admin/global alerts
-          const humanSummaryParts: string[] = [];
-          if (itemLines && itemLines.length > 0) humanSummaryParts.push(itemLines.join('\n'));
-          if (othersLine) humanSummaryParts.push(othersLine);
-          const payloadHumanSummary = humanSummaryParts.length > 0 ? `\n\n${humanSummaryParts.join('\n\n')}` : `\nStatus: ${needsStatusText}${note ? ` — ${note}` : ''}`;
-
-          // payloadJson stays available for per-user (owner) alerts if desired
-          const payloadJsonForOwner = payloadJson;
-
-          if (foundOriginal) {
-            // append human-friendly summary and include structured JSON so admins
-            // can parse the payload and render the prepared/not-available states
-            const extra = payloadHumanSummary;
-            const updatedMessage = `${foundOriginal.message}${extra}\n\n${payloadJsonForOwner}`;
-            await storage.updateSystemAlert(foundOriginal.id, { message: updatedMessage, isRead: false } as any);
-
-            // NOTE: per-user alert creation is handled later by the dedupe/ensure block
-          } else {
-            // create a booking-scoped alert (owner-facing). This message should include the human text and structured payload
-            await storage.createSystemAlert({
-              id: randomUUID(),
-              type: 'booking',
-              severity: 'low',
-              title: 'Equipment Needs Submitted',
-              message: `${notifyMessage}\n\n${payloadJsonForOwner}`,
-              userId: bookingAfter?.userId ?? null,
-              isRead: false,
-              createdAt: new Date(),
-            });
-
-            // Also create an admin/global alert so admins see the request in their dashboard
-            try {
-              const adminMsg = `${summaryLine}\n\n${payloadHumanSummary}${payloadHumanSummary ? '\n\n' : ''}${payloadJsonForOwner}`;
-              await storage.createSystemAlert({
-                id: randomUUID(),
-                type: 'booking',
-                severity: 'low',
-                title: 'Equipment or Needs Request',
-                message: adminMsg,
-                userId: null,
-                isRead: false,
-                createdAt: new Date(),
-              });
-            } catch (e) {
-              // non-fatal: we still created the owner alert above
-              console.warn('[Needs] Failed to create admin/global alert', e);
-            }
-          }
-
-        // Ensure a consistent admin/global alert exists for admins to act on.
-        try {
-          const alertsForUpdate2 = await storage.getSystemAlerts();
-          const ownerEmailForMatch2 = ownerUser?.email || String(bookingAfter?.userId || '');
-          const foundAdmin = Array.isArray(alertsForUpdate2) ? alertsForUpdate2.find(a => {
-            try {
-              if (!a.title || !a.message) return false;
-              if (!a.title.startsWith('Equipment or Needs Request')) return false;
-              if (ownerEmailForMatch2 && a.message.includes(ownerEmailForMatch2)) return true;
-              if (baseWhen && a.message.includes(baseWhen)) return true;
-              return false;
-            } catch (e) { return false; }
-          }) : null;
-
-          const adminMsg = `${summaryLine}\n\n${payloadHumanSummary}${payloadHumanSummary ? '\n\n' : ''}${payloadJsonForOwner}`;
-          if (foundAdmin) {
-            await storage.updateSystemAlert(foundAdmin.id, { message: adminMsg, isRead: false } as any);
-          } else {
-            await storage.createSystemAlert({
-              id: randomUUID(),
-              type: 'booking',
-              severity: 'low',
-              title: 'Equipment or Needs Request',
-              message: adminMsg,
-              userId: null,
-              isRead: false,
-              createdAt: new Date(),
-            });
-          }
-        } catch (e) {
-          console.warn('[Needs] Failed to ensure admin/global alert', e);
-        }
-        } catch (e) {
-          // Fallback: create a new alert if update failed
-          try {
-            await storage.createSystemAlert({
-              id: randomUUID(),
-              type: 'booking',
-              severity: 'low',
-              title: notifyTitle,
-              message: notifyMessage,
-              userId: bookingAfter?.userId ?? null,
-              isRead: false,
-              createdAt: new Date(),
-            });
-          } catch (ee) {
-            console.warn('[Needs] Failed to create/update notification alert', ee);
-          }
-        }
-      } catch (e) {
-        console.warn('[Needs] Error handling equipment status notification', e);
+          const extra = structuredNote ? `\n${JSON.stringify(structuredNote)}` : `\nStatus: ${needsStatusText}${note ? ` — ${note}` : ''}`;
+          await storage.updateSystemAlert(found.id, { message: `${found.message}${extra}`, isRead: false } as any);
+        } catch (e) { console.warn('[Needs] Failed to update related alert', e); }
       }
+    } catch (e) { console.warn('[Needs] Failed to update related alert', e); }
 
-      // Best-effort: update original equipment needs alert if present (append structured JSON or status)
-      try {
-        const alerts = await storage.getSystemAlerts();
-        // resolve owner email for matching
-        let ownerEmail: string | null = null;
-        try {
-          if (booking && (booking as any).userId) {
-            const _owner = await storage.getUser((booking as any).userId);
-            ownerEmail = _owner?.email ?? null;
-          }
-        } catch (e) { ownerEmail = null; }
-        const userIdStr = String((booking as any)?.userId || '');
+    // Activity log
+    try {
+      const adminUserId = req.user.claims.sub;
+      const adminUser = adminUserId ? await storage.getUser(adminUserId) : null;
+      const bookingOwner = booking ? await storage.getUser(booking.userId) : null;
+      const adminEmail = adminUser?.email || String(adminUserId || 'admin');
+      const ownerEmail = bookingOwner?.email || String(booking?.userId || 'unknown');
 
-        const found = alerts.find(a => {
-          try {
-            if (!a.title || !a.message) return false;
-            if (!a.title.startsWith('Equipment Needs Submitted')) return false;
-            if (ownerEmail && ownerEmail.length > 0 && a.message.includes(ownerEmail)) return true;
-            if (userIdStr && userIdStr.length > 0 && a.message.includes(userIdStr)) return true;
-            return false;
-          } catch (e) { return false; }
-        });
+      const eqText = formatEquipmentForDisplay((booking as any).equipment);
+      const when = new Date();
+      const whenText = when.toLocaleString();
+      const verb = status === 'prepared' ? 'marked the requested equipment as prepared for' : 'marked the requested equipment as not available for';
+      const itemsPart = eqText ? ` Items: ${eqText}.` : '';
+      const details = `${adminEmail} ${verb} ${ownerEmail} at ${whenText}.${itemsPart}`;
 
-        if (found) {
-          try {
-            let structuredNote: any = null;
-            try { structuredNote = note ? (typeof note === 'string' ? JSON.parse(note) : note) : null; } catch (e) { structuredNote = null; }
-            if (!structuredNote) {
-              const b = await storage.getFacilityBooking(bookingId);
-              const eq = b ? (b as any).equipment : null;
-              if (eq) {
-                const itemsObj: Record<string, any> = {};
-                if (Array.isArray(eq.items)) {
-                  for (const it of eq.items) {
-                    const name = String(it || '').replace(/_/g, ' ').trim();
-                    if (name) itemsObj[name] = status === 'prepared' ? 'prepared' : 'not_available';
-                  }
-                } else if (eq.items && typeof eq.items === 'object') {
-                  for (const k of Object.keys(eq.items)) itemsObj[String(k)] = status === 'prepared' ? 'prepared' : 'not_available';
-                }
-                structuredNote = { items: itemsObj, others: eq.others || null };
-              }
-            }
-            // Build a human-friendly summary to append to the original alert so admins see readable text (no raw JSON)
-            let extra = '';
-            try {
-              if (structuredNote) {
-                const itemsLines: string[] = [];
-                if (structuredNote.items) {
-                  if (typeof structuredNote.items === 'object') {
-                    for (const [k, v] of Object.entries(structuredNote.items)) {
-                      itemsLines.push(`• ${String(k)}: ${String(v)}`);
-                    }
-                  } else if (Array.isArray(structuredNote.items)) {
-                    for (const it of structuredNote.items) itemsLines.push(`• ${String(it)}`);
-                  }
-                }
-                if (itemsLines.length > 0) extra += '\n\n' + itemsLines.join('\n');
-                if (structuredNote.others) extra += `\n\nOther details: ${String(structuredNote.others)}`;
-              } else {
-                extra = `\nStatus: ${needsStatusText}${note ? ` — ${note}` : ''}`;
-              }
-            } catch (e) {
-              // fallback to brief status on unexpected structuredNote shape
-              extra = `\nStatus: ${needsStatusText}${note ? ` — ${note}` : ''}`;
-            }
+      await storage.createActivityLog({
+        id: randomUUID(),
+        userId: adminUserId,
+        action: status === 'prepared' ? 'Equipment Prepared' : 'Equipment Not Available',
+        details,
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent'),
+        createdAt: when
+      } as any);
+    } catch (e) { console.warn('[Needs] Failed to create activity log', e); }
 
-            await storage.updateSystemAlert(found.id, { message: `${found.message}${extra}`, isRead: false } as any);
-            // NOTE: per-user alert creation is handled later by the dedupe/ensure block
-          } catch (e) { console.warn('[Needs] Failed to update related alert', e); }
-        }
-      } catch (e) { console.warn('[Needs] Failed to update related alert', e); }
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[ADMIN NEEDS] Error updating needs status', error);
+    res.status(500).json({ message: 'Failed to update needs status' });
+  }
+});
 
-      // Activity log
-      try {
-        const adminUserId = req.user.claims.sub;
-        const adminUser = adminUserId ? await storage.getUser(adminUserId) : null;
-        const bookingOwner = booking ? await storage.getUser(booking.userId) : null;
-        const adminEmail = adminUser?.email || String(adminUserId || 'admin');
-        const ownerEmail = bookingOwner?.email || String(booking?.userId || 'unknown');
-
-        const eqText = formatEquipmentForDisplay((booking as any).equipment);
-        const when = new Date();
-        const whenText = when.toLocaleString();
-        const verb = status === 'prepared' ? 'marked the requested equipment as prepared for' : 'marked the requested equipment as not available for';
-        const itemsPart = eqText ? ` Items: ${eqText}.` : '';
-        const details = `${adminEmail} ${verb} ${ownerEmail} at ${whenText}.${itemsPart}`;
-
-        await storage.createActivityLog({
-          id: randomUUID(),
-          userId: adminUserId,
-          action: status === 'prepared' ? 'Equipment Prepared' : 'Equipment Not Available',
-          details,
-          ipAddress: req.ip,
-          userAgent: req.get('User-Agent'),
-          createdAt: when
-        } as any);
-      } catch (e) { console.warn('[Needs] Failed to create activity log', e); }
-
-      // DEBUG: report how many alerts exist for the booking owner now
-      try {
-        if (bookingAfter && bookingAfter.userId) {
-          const allAlertsNow = await storage.getSystemAlerts();
-          const ownerAlerts = Array.isArray(allAlertsNow) ? allAlertsNow.filter(a => String(a.userId || '') === String(bookingAfter.userId)) : [];
-          console.log(`[Needs][DEBUG] After processing, found ${ownerAlerts.length} system alerts for user ${bookingAfter.userId}`);
-          if (ownerAlerts.length > 0) {
-            // print recent ones (message/title truncated for log safety)
-            for (const a of ownerAlerts.slice(0,5)) {
-              try { console.log(`[Needs][DEBUG] ownerAlert id=${a.id} title=${a.title} userId=${a.userId} createdAt=${a.createdAt}`); } catch (e) {}
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('[Needs][DEBUG] Failed to list owner alerts', e);
-      }
-
-      // DEDUPE: consolidate per-user equipment alerts so the owner sees only one notification
-      try {
-        if (bookingAfter && bookingAfter.userId) {
-          const ensureMessage = notifyMessage || (`${ownerUser?.email || String(bookingAfter.userId)} equipment update at ${baseWhen}`);
-          // Find existing per-user alerts with same title and mentioning this booking time (baseWhen)
-          const allAlertsNow = await storage.getSystemAlerts();
-          const matching = Array.isArray(allAlertsNow) ? allAlertsNow.filter(a => {
-            try {
-              if (!a) return false;
-              if (String(a.userId || '') !== String(bookingAfter.userId)) return false;
-              if (!a.title || !a.title.startsWith('Equipment Needs Submitted')) return false;
-              if (baseWhen && String(a.message || '').includes(baseWhen)) return true;
-              // fallback: if message includes any of the item keys
-              if (structuredNote && structuredNote.items) {
-                const keys = typeof structuredNote.items === 'object' ? Object.keys(structuredNote.items) : structuredNote.items;
-                for (const k of keys) { if (String(a.message || '').includes(String(k))) return true; }
-              }
-              return false;
-            } catch (e) { return false; }
-          }) : [];
-
-          if (matching.length > 0) {
-            // sort by createdAt desc and keep the newest; update its message to the latest notifyMessage
-            matching.sort((x: any, y: any) => new Date(y.createdAt).getTime() - new Date(x.createdAt).getTime());
-            const newest = matching[0];
-            try {
-              await storage.updateSystemAlert(newest.id, { message: ensureMessage, isRead: false } as any);
-              console.log(`[Needs][DEDUPE] updated existing per-user alert id=${newest.id} for user ${bookingAfter.userId}`);
-            } catch (e) { console.warn('[Needs][DEDUPE] failed to update newest per-user alert', e); }
-
-            // mark older duplicates as read so they don't show in the user's notifications
-            const older = matching.slice(1);
-            for (const o of older) {
-              try { await storage.updateSystemAlert(o.id, { isRead: true } as any); console.log(`[Needs][DEDUPE] marked duplicate alert ${o.id} read`); } catch (e) { /* ignore */ }
-            }
-          } else {
-            // create a single per-user alert
-            try {
-              const created = await storage.createSystemAlert({
-                id: randomUUID(),
-                type: 'booking',
-                severity: 'low',
-                title: 'Equipment Needs Submitted',
-                message: ensureMessage,
-                userId: bookingAfter.userId,
-                isRead: false,
-                createdAt: new Date(),
-              });
-              console.log(`[Needs][DEDUPE] created per-user alert id=${created?.id} for user ${bookingAfter.userId}`);
-            } catch (e) {
-              console.warn('[Needs][DEDUPE] Failed to create per-user alert', e);
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('[Needs][DEDUPE] failed to dedupe/create per-user alert', e);
-      }
-
-      // DEBUG: attempt a direct DB insert using drizzle to verify DB permissions/visibility
-      try {
-        const insertTest = {
-          id: randomUUID(),
-          type: 'booking',
-          severity: 'low',
-          title: 'DEBUG_PER_USER_ATTEMPT',
-          message: `Debug per-user insert test for ${bookingAfter?.userId}`,
-          userId: bookingAfter?.userId || null,
-          isRead: false,
-          createdAt: new Date(),
-        };
-        try {
-          await db.insert(systemAlerts).values(insertTest as any);
-          console.log('[Needs][DEBUG] Inserted direct DB debug alert for user', bookingAfter?.userId);
-        } catch (e) {
-          console.warn('[Needs][DEBUG] Direct DB insert failed', e);
-        }
-      } catch (e) { console.warn('[Needs][DEBUG] Failed preparing direct DB insert test', e); }
-
-      res.json({ success: true });
-    } catch (error) {
-      console.error('[ADMIN NEEDS] Error updating needs status', error);
-      res.status(500).json({ message: 'Failed to update needs status' });
-    }
-  });
 
 
   app.post("/api/bookings/:bookingId/deny", isAuthenticated, requireAdmin, async (req: any, res) => {

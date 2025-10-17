@@ -20,8 +20,9 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
 
-    /* Path Mapping */
-    "baseUrl": ".",
+  /* Path Mapping */
+  "baseUrl": ".",
+  "ignoreDeprecations": "6.0",
     "paths": {
       "@/*": ["./src/*"],
       "@shared/*": ["../shared/*"],

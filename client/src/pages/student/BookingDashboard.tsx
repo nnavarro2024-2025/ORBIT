@@ -7,7 +7,7 @@ import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
 import BookingModal from "@/components/modals/BookingModal";
 import EditBookingModal from "@/components/modals/EditBookingModal";
-import { Plus, Calendar, Home, Eye, Users, MapPin, AlertTriangle, BarChart3, Settings, Clock, CheckCircle } from "lucide-react";
+import { Plus, Calendar, Home, Eye, AlertTriangle, BarChart3, Settings, Clock, CheckCircle } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { useLocation } from 'wouter';
@@ -20,22 +20,76 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { format } from 'date-fns';
+import AvailabilityGrid from '@/components/AvailabilityGrid';
 
 export default function BookingDashboard() {
   const [showEditBookingModal, setShowEditBookingModal] = useState(false);
   const [editingBooking, setEditingBooking] = useState<any>(null);
+  const [scrollToBookingId, setScrollToBookingId] = useState<string | null>(null);
   const [openOthers, setOpenOthers] = useState<Record<string, boolean>>({});
   const [selectedView, setSelectedView] = useState("dashboard");
+  const [devForceOpen, setDevForceOpen] = useState(false);
   // Common hooks used throughout the dashboard
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+
+  // Fetch availability once for the dashboard so cards can show next available ranges
+  const todayDateStr = format(new Date(), 'yyyy-MM-dd');
+  const { data: availabilityDataRaw } = useQuery({
+    queryKey: ['/api/availability', todayDateStr],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/availability?date=${todayDateStr}`);
+      return res.json();
+    },
+    staleTime: 30_000,
+  });
+
+  // If availability API didn't return data, synthesize a mock availability map so cards can show time frames.
+  const generateMockForFacilities = (facList: any[]) => {
+    const mockArr: any[] = [];
+    for (const f of facList) {
+      const slots: any[] = [];
+      const dayStart = new Date(); dayStart.setHours(7, 30, 0, 0);
+      const slotCount = (19 - 7.5) * 2; // number of 30-min slots
+      for (let i = 0; i < slotCount; i++) {
+        const s = new Date(dayStart.getTime() + i * 30 * 60 * 1000);
+        const e = new Date(s.getTime() + 30 * 60 * 1000);
+        const hour = s.getHours();
+        const status = (hour >= 11 && hour < 13 && f.id % 2 === 0) ? 'scheduled' : 'available';
+        slots.push({ start: s.toISOString(), end: e.toISOString(), status, bookings: status === 'scheduled' ? [{ startTime: s.toISOString(), endTime: e.toISOString(), status: 'approved', id: `mock-${f.id}-${i}` }] : [] });
+      }
+      // Guarantee at least one future 'available' slot for demo visibility
+      try {
+        const now = new Date();
+        const hasFutureAvailable = slots.some(s => new Date(s.start) > now && s.status === 'available');
+        if (!hasFutureAvailable) {
+          for (let i = 0; i < slots.length; i++) {
+            if (new Date(slots[i].start) > now) {
+              slots[i].status = 'available';
+              slots[i].bookings = [];
+              break;
+            }
+          }
+        }
+      } catch (e) {
+        // noop
+      }
+      mockArr.push({ facility: { id: f.id, name: f.name, capacity: f.capacity, isActive: f.isActive }, maxUsageHours: null, slots });
+    }
+    return new Map<number, any>(mockArr.map((d: any) => [d.facility.id, d]));
+  };
+
+  // availabilityMap will be computed after facilities are loaded so we can synthesize
+  // mock data for any missing facilities. See below where it's defined.
 
   // Booking modal state and defaults
   const [showBookingModal, setShowBookingModal] = useState(false);
   const [selectedFacilityForBooking, setSelectedFacilityForBooking] = useState<number | null>(null);
   const [initialStartForBooking, setInitialStartForBooking] = useState<Date | null>(null);
   const [initialEndForBooking, setInitialEndForBooking] = useState<Date | null>(null);
+  // whether the initial times were suggested (from availability/grid) or auto-default
+  const [initialTimesAreSuggested, setInitialTimesAreSuggested] = useState<boolean>(false);
 
   // Small Countdown component (lightweight replacement to satisfy usage)
   function Countdown({ expiry, onExpire }: { expiry: string | Date | undefined; onExpire?: () => void }) {
@@ -95,7 +149,14 @@ export default function BookingDashboard() {
   // set initial selected view from URL hash (e.g. /booking#dashboard)
   useEffect(() => {
     const hash = window.location.hash?.replace('#', '');
-    if (hash) setSelectedView(hash);
+    if (hash) {
+      // Support a direct '#available-rooms' target
+      if (hash === 'available-rooms') {
+        setSelectedView('available-rooms');
+      } else {
+        setSelectedView(hash);
+      }
+    }
 
     // If the URL requests a new booking, open the booking modal and prefill sensible times
     if (hash === 'new') {
@@ -104,6 +165,7 @@ export default function BookingDashboard() {
   const end = new Date(start.getTime() + 30 * 60 * 1000); // default 30 minute booking
       setInitialStartForBooking(start);
       setInitialEndForBooking(end);
+      setInitialTimesAreSuggested(false);
       openBookingModal(undefined, start, end);
     }
   }, []);
@@ -158,6 +220,98 @@ export default function BookingDashboard() {
           setActivityTab('booking');
           setActivityBookingPage(0);
         }
+      } else if (parts[0] === 'available-rooms') {
+        // Simple top-level view target
+        setSelectedView('available-rooms');
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, []);
+
+  // Consume one-time openNotificationsOnce flag (set by header/App rewrites) and open
+  // Activity Logs -> Notifications when present. This ensures header's 'View all'
+  // navigation reliably opens the correct inner tab without forcing a redirect on normal navigation.
+  useEffect(() => {
+    try {
+      const v = sessionStorage.getItem('openNotificationsOnce');
+      if (!v) return;
+      sessionStorage.removeItem('openNotificationsOnce');
+      // open the Activity Logs view and select the notifications tab
+      setSelectedView('activity-logs');
+      setActivityTab('notifications');
+      setActivityNotificationsPage(0);
+      // replace history to ensure canonical URL (no repeated flag)
+      try { window.history.replaceState({}, '', '/booking#activity-logs:notifications'); } catch (_) {}
+    } catch (e) {
+      // ignore errors interacting with sessionStorage
+    }
+  }, []);
+
+  // Consume one-time openAvailableRoomsOnce flag (set by header search navigation)
+  useEffect(() => {
+    try {
+      const v = sessionStorage.getItem('openAvailableRoomsOnce');
+      if (!v) return;
+      sessionStorage.removeItem('openAvailableRoomsOnce');
+      setSelectedView('available-rooms');
+      // canonicalize URL to the available-rooms hash
+      try { window.history.replaceState({}, '', '/booking#available-rooms'); } catch (_) {}
+    } catch (e) {
+      // ignore sessionStorage errors
+    }
+  }, []);
+
+  // If the user reloads the page while at /booking#activity-logs:notifications (and
+  // there was no one-time flag set), normalize to /booking#dashboard so reloads
+  // land on the dashboard view instead of the notifications tab. This mirrors
+  // the admin behavior where a reload normalizes to overview.
+  useEffect(() => {
+    const isReloadNavigation = () => {
+      try {
+        const navEntries = (performance && performance.getEntriesByType) ? performance.getEntriesByType('navigation') as PerformanceNavigationTiming[] : [];
+        if (Array.isArray(navEntries) && navEntries[0] && (navEntries[0] as any).type) {
+          return (navEntries[0] as any).type === 'reload' || (navEntries[0] as any).type === 'back_forward';
+        }
+        if ((performance as any).navigation && typeof (performance as any).navigation.type === 'number') {
+          return (performance as any).navigation.type === 1;
+        }
+      } catch (e) {
+        // ignore
+      }
+      return false;
+    };
+
+    try {
+      const rawHash = window.location.hash?.replace('#', '') || '';
+      if (!rawHash) return;
+      const normalized = rawHash.replace('/', ':');
+      const parts = normalized.split(':');
+      if (parts[0] === 'activity-logs' && parts[1] === 'notifications') {
+        // Only redirect on reload (not when user clicked the header)
+        const v = sessionStorage.getItem('openNotificationsOnce');
+        if (!v && isReloadNavigation()) {
+          try {
+            const target = '/booking#dashboard';
+            if (window.location.pathname + window.location.hash !== target) {
+              window.history.replaceState({}, '', target);
+            }
+          } catch (e) { /* ignore */ }
+          setSelectedView('dashboard');
+        }
+      } else if (parts[0] === 'available-rooms') {
+        // If the user reloads while on available-rooms and there was no one-time flag,
+        // normalize back to the dashboard view (avoid landing on the rooms view after reload).
+        const v = sessionStorage.getItem('openAvailableRoomsOnce');
+        if (!v && isReloadNavigation()) {
+          try {
+            const target = '/booking#dashboard';
+            if (window.location.pathname + window.location.hash !== target) {
+              window.history.replaceState({}, '', target);
+            }
+          } catch (e) { /* ignore */ }
+          setSelectedView('dashboard');
+        }
       }
     } catch (e) {
       // ignore
@@ -181,6 +335,8 @@ export default function BookingDashboard() {
             setActivityTab('booking');
             setActivityBookingPage(0);
           }
+        } else if (parts[0] === 'available-rooms') {
+          setSelectedView('available-rooms');
         }
       } catch (e) {
         // ignore
@@ -188,7 +344,12 @@ export default function BookingDashboard() {
     };
 
     window.addEventListener('hashchange', onHashChange);
-    return () => window.removeEventListener('hashchange', onHashChange);
+    const onOpenAvailable = () => { try { setSelectedView('available-rooms'); } catch (e) {} };
+    window.addEventListener('openAvailableRooms', onOpenAvailable as EventListener);
+    return () => {
+      window.removeEventListener('hashchange', onHashChange);
+      window.removeEventListener('openAvailableRooms', onOpenAvailable as EventListener);
+    };
   }, []);
   
   // State for cancellation modal
@@ -345,6 +506,8 @@ export default function BookingDashboard() {
     }
   };
 
+  // ...existing code...
+
   const cancelCancelBooking = () => {
     setShowCancelModal(false);
     setBookingToCancel(null);
@@ -381,6 +544,11 @@ export default function BookingDashboard() {
       return response.json();
     },
   });
+
+  // Build availabilityMap using server data when available; otherwise generate mock slots
+  const availabilityMap = (availabilityDataRaw && availabilityDataRaw.data && availabilityDataRaw.data.length > 0)
+    ? new Map<number, any>((availabilityDataRaw.data || []).map((d: any) => [d.facility.id, d]))
+    : generateMockForFacilities(facilities || []);
 
   const { data: userBookingsData = [] } = useQuery<any[]>({
     queryKey: ["/api/bookings"],
@@ -440,23 +608,75 @@ export default function BookingDashboard() {
     }
   }, [location]);
 
+  // Consume one-time openBookingOnce flag and listen for openBooking events
+  useEffect(() => {
+    const openBookingHandler = (idStr?: string) => {
+      try {
+        const id = idStr ? String(idStr) : sessionStorage.getItem('openBookingOnce');
+        if (!id) return;
+        try { sessionStorage.removeItem('openBookingOnce'); } catch (e) {}
+        // Instead of opening edit modal, navigate to My Bookings and scroll/highlight the booking
+        setSelectedView('my-bookings');
+        setScrollToBookingId(String(id));
+        // If the booking is already loaded, ensure editingBooking isn't accidentally set
+        setEditingBooking(null);
+      } catch (e) {}
+    };
+
+    const onOpenBookingEvent = () => openBookingHandler();
+    window.addEventListener('openBooking', onOpenBookingEvent as EventListener);
+
+    try {
+      const id = sessionStorage.getItem('openBookingOnce');
+      if (id) openBookingHandler(id);
+    } catch (e) {}
+
+    return () => {
+      window.removeEventListener('openBooking', onOpenBookingEvent as EventListener);
+    };
+  }, [userBookings, allBookings]);
+
+  // When scrollToBookingId is set and My Bookings is active, scroll into view and briefly highlight
+  useEffect(() => {
+    if (!scrollToBookingId) return;
+    if (selectedView !== 'my-bookings') return;
+    try {
+      const el = document.getElementById(`booking-${scrollToBookingId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // add a temporary highlight class
+        el.classList.add('ring-2', 'ring-pink-300');
+        setTimeout(() => {
+          try { el.classList.remove('ring-2', 'ring-pink-300'); } catch (e) {}
+        }, 2200);
+      }
+    } catch (e) {}
+    // clear the scroll target after a short delay so repeated clicks still work
+    const t = setTimeout(() => setScrollToBookingId(null), 2500);
+    return () => clearTimeout(t);
+  }, [scrollToBookingId, selectedView]);
+
   // Function to get current booking status for a facility with library hours validation
   const getFacilityBookingStatus = (facilityId: number) => {
     const now = new Date();
     
-    // Check if current time is within library working hours (7:30 AM - 5:00 PM)
+  // Check if current time is within library working hours (7:30 AM - 7:00 PM)
+    // Respect devForceOpen override for temporary debugging (when true, treat as open)
     const currentHour = now.getHours();
     const currentMinute = now.getMinutes();
     const currentTimeInMinutes = currentHour * 60 + currentMinute;
     const libraryOpenTime = 7 * 60 + 30; // 7:30 AM in minutes
-    const libraryCloseTime = 17 * 60; // 5:00 PM in minutes
+  const libraryCloseTime = 19 * 60; // 7:00 PM in minutes
     
-    const isWithinLibraryHours = currentTimeInMinutes >= libraryOpenTime && currentTimeInMinutes <= libraryCloseTime;
+    let isWithinLibraryHours = currentTimeInMinutes >= libraryOpenTime && currentTimeInMinutes <= libraryCloseTime;
+    if (process.env.NODE_ENV !== 'production' && devForceOpen) {
+      isWithinLibraryHours = true;
+    }
     
     // Get all active bookings for this facility
     // NOTE: For privacy, pending bookings should only be visible to admins and the booking owner.
     // allBookings contains the global view (approved bookings). userBookings contains the current user's bookings
-    // Merge them so that the owner can see their own pending requests while other users do not see them.
+  // Merge them so that availability shows both approved and pending bookings to everyone
     const mergedBookings = [...allBookings, ...userBookings];
     // Deduplicate by booking id (prefer the first occurrence)
     const seen = new Set<string | number>();
@@ -468,14 +688,10 @@ export default function BookingDashboard() {
       }
     }
 
+    // For availability we want other users to see scheduled/pending slots too, so include both statuses
     const facilityBookings = deduped.filter(booking => 
       booking.facilityId === facilityId &&
-      // include approved bookings for everyone
-      (
-        booking.status === "approved" ||
-        // include pending only if the current user is admin or the owner of the pending request
-        (booking.status === "pending" && (user?.role === 'admin' || booking.userId === user?.id))
-      ) &&
+      (booking.status === "approved" || booking.status === "pending") &&
       new Date(booking.endTime) > now
     );
 
@@ -516,10 +732,10 @@ export default function BookingDashboard() {
       };
     }
 
-    // Check if facility has upcoming approved bookings
+    // Check if facility has upcoming approved or pending bookings
     const upcomingBooking = facilityBookings.find(booking => {
       const start = new Date(booking.startTime);
-      return start > now && booking.status === "approved";
+      return start > now && (booking.status === "approved" || booking.status === "pending");
     });
 
     if (upcomingBooking) {
@@ -528,18 +744,6 @@ export default function BookingDashboard() {
         label: "Scheduled",
         booking: upcomingBooking,
         badgeClass: "bg-yellow-100 text-yellow-800"
-      };
-    }
-
-    // Check if facility has pending bookings
-    const pendingBooking = facilityBookings.find(booking => booking.status === "pending");
-    
-    if (pendingBooking) {
-      return {
-        status: "pending",
-        label: "Pending Request",
-        booking: pendingBooking,
-  badgeClass: "bg-pink-100 text-pink-800"
       };
     }
 
@@ -558,7 +762,8 @@ export default function BookingDashboard() {
     const currentMinute = now.getMinutes();
     const currentTimeInMinutes = currentHour * 60 + currentMinute;
   const libraryOpenTime = 7 * 60 + 30; // 7:30 AM
-  const libraryCloseTime = 17 * 60; // 5:00 PM
+  const libraryCloseTime = 19 * 60; // 7:00 PM
+    if (process.env.NODE_ENV !== 'production' && devForceOpen) return false;
     return currentTimeInMinutes < libraryOpenTime || currentTimeInMinutes > libraryCloseTime;
   };
 
@@ -591,14 +796,103 @@ export default function BookingDashboard() {
   const stats = getStats();
 
   // Helper function to open booking modal with a specific facility
-  const openBookingModal = (facilityId?: number, start?: Date, end?: Date) => {
+  const openBookingModal = async (facilityId?: number, start?: Date, end?: Date) => {
     setSelectedFacilityForBooking(facilityId || null);
-    // If no start/end provided, compute sensible defaults that satisfy the 1-hour lead-time requirement
+    // If no start/end provided, try to pick the first 'available' slot from availabilityMap
     if (!start) {
-      // default to current time + 1 hour (add 1 minute buffer to avoid race on submit)
-      start = new Date(Date.now() + 60 * 60 * 1000 + 60 * 1000);
-      end = new Date(start.getTime() + 30 * 60 * 1000);
+      const now = new Date();
+      const pickFromEntry = (entry: any) => {
+        if (!entry || !Array.isArray(entry.slots)) return null;
+        return entry.slots.find((s: any) => {
+          try {
+            return s.status === 'available' && new Date(s.end).getTime() > now.getTime() && new Date(s.start).getTime() >= now.getTime();
+          } catch (e) { return false; }
+        }) || null;
+      };
+
+      try {
+        if (facilityId) {
+          const entry = availabilityMap.get(facilityId);
+          const slot = pickFromEntry(entry);
+          if (slot) {
+            start = new Date(slot.start);
+            end = new Date(slot.end);
+          }
+        }
+
+        // If still no start, try to find earliest available across the cached availabilityMap
+        if (!start) {
+          let earliestSlot: any = null;
+          for (const [, entry] of availabilityMap) {
+            if (!entry || !Array.isArray(entry.slots)) continue;
+            for (const s of entry.slots) {
+              try {
+                if (s.status !== 'available') continue;
+                const sStart = new Date(s.start);
+                const sEnd = new Date(s.end);
+                if (sEnd.getTime() <= now.getTime()) continue;
+                if (sStart.getTime() < now.getTime()) continue;
+                if (!earliestSlot || new Date(s.start) < new Date(earliestSlot.start)) earliestSlot = s;
+              } catch (e) { /* ignore parse errors */ }
+            }
+          }
+          if (earliestSlot) {
+            start = new Date(earliestSlot.start);
+            end = new Date(earliestSlot.end);
+          }
+        }
+
+        // If still no start, attempt a fresh fetch for today's availability and re-run the same logic
+        if (!start) {
+          try {
+            const dateStr = todayDateStr;
+            const resp = await apiRequest('GET', `/api/availability?date=${dateStr}`);
+            const json = await resp.json();
+            const dataArr = Array.isArray(json?.data) ? json.data : [];
+            if (facilityId) {
+              const entry = dataArr.find((d: any) => d.facility && d.facility.id === facilityId);
+              const slot = pickFromEntry(entry);
+              if (slot) {
+                start = new Date(slot.start);
+                end = new Date(slot.end);
+              }
+            }
+            if (!start) {
+              let earliestSlot: any = null;
+              for (const entry of dataArr) {
+                if (!entry || !Array.isArray(entry.slots)) continue;
+                for (const s of entry.slots) {
+                  try {
+                    if (s.status !== 'available') continue;
+                    const sStart = new Date(s.start);
+                    const sEnd = new Date(s.end);
+                    if (sEnd.getTime() <= now.getTime()) continue;
+                    if (sStart.getTime() < now.getTime()) continue;
+                    if (!earliestSlot || new Date(s.start) < new Date(earliestSlot.start)) earliestSlot = s;
+                  } catch (e) {}
+                }
+              }
+              if (earliestSlot) {
+                start = new Date(earliestSlot.start);
+                end = new Date(earliestSlot.end);
+              }
+            }
+          } catch (e) {
+            // ignore fetch errors; fall back to standard default
+          }
+        }
+      } catch (e) {
+        // fallback to default
+      }
+
+      // Fallback: respect 1-hour lead time and round defaults as before
+      if (!start) {
+        // default to current time + 1 hour (add 1 minute buffer to avoid race on submit)
+        start = new Date(Date.now() + 60 * 60 * 1000 + 60 * 1000);
+        end = new Date(start.getTime() + 30 * 60 * 1000);
+      }
     }
+
     setInitialStartForBooking(start ?? null);
     setInitialEndForBooking(end ?? null);
     setShowBookingModal(true);
@@ -643,7 +937,7 @@ export default function BookingDashboard() {
     if (lower.includes('collaborative learning room 1')) {
       return 'Quiet study space with 4 tables';
     }
-    if (lower.includes('collaborative learning room 2')) {
+    if                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  (lower.includes('collaborative learning room 2')) {
       return 'Computer lab with workstations';
     }
     if (lower.includes('board room') || lower.includes('boardroom')) {
@@ -672,12 +966,13 @@ export default function BookingDashboard() {
     const now = new Date();
     const start = new Date(booking.startTime);
     const end = new Date(booking.endTime);
-    
-    if (booking.status === "pending") return { label: "Pending Request", badgeClass: "pending" };
+  // Treat 'pending' bookings as scheduled/approved for frontend presentation
+  // since the system now auto-schedules bookings. Preserve denied/cancelled states.
+  const isPending = booking.status === 'pending';
     if (booking.status === "denied") return { label: "Denied", badgeClass: "denied" };
     if (booking.status === "cancelled") return { label: "Cancelled", badgeClass: "cancelled" };
-    if (booking.status === "approved") {
-      if (now < start) return { label: "Pending", badgeClass: "pending" };
+  if (booking.status === "approved" || isPending) {
+  if (now < start) return { label: "Scheduled", badgeClass: "bg-yellow-100 text-yellow-800" };
       if (now >= start && now <= end) return { label: "Active", badgeClass: "active" };
       if (now > end) return { label: "Done", badgeClass: "inactive" };
     }
@@ -685,8 +980,9 @@ export default function BookingDashboard() {
   };
 
   const canEditBooking = (booking: any): boolean => {
-    const status = getBookingStatus(booking).label;
-    return status === 'Pending Request';
+    // Keep editing allowed for pending bookings to match server-side rules where
+    // users can still modify a booking while the system is finalizing scheduling.
+    return booking && booking.status === 'pending';
   };
 
   // Client-side rule matching server: allow cancelling when
@@ -710,6 +1006,9 @@ export default function BookingDashboard() {
       return false;
     }
   };
+
+  // Small component: render per-facility columns of merged time ranges from /api/availability
+  // Availability list columns removed; availability rendering is handled inline above.
 
   const renderContent = () => {
     switch (selectedView) {
@@ -753,15 +1052,14 @@ export default function BookingDashboard() {
                     const status = getBookingStatus(booking);
                     const statusColors = {
                       'Active': 'bg-pink-100 text-pink-800 border-pink-200',
-                      'Pending': 'bg-pink-50 text-pink-700 border-pink-100',
-                      'Pending Request': 'bg-pink-50 text-pink-700 border-pink-100',
+                      'Scheduled': 'bg-yellow-50 text-yellow-800 border-yellow-100',
                       'Done': 'bg-gray-100 text-gray-800 border-gray-200',
                       'Denied': 'bg-red-100 text-red-800 border-red-200',
                       'Cancelled': 'bg-gray-50 text-gray-700 border-gray-100'
                     };
 
                     return (
-                      <div key={booking.id} className="bg-white border border-gray-200 rounded-xl p-6 hover:shadow-md transition-all duration-200">
+                      <div id={`booking-${booking.id}`} key={booking.id} className="bg-white border border-gray-200 rounded-xl p-6 hover:shadow-md transition-all duration-200">
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-4">
                             <div className="bg-pink-100 p-3 rounded-lg">
@@ -775,7 +1073,7 @@ export default function BookingDashboard() {
                           <span className={`px-3 py-0.5 rounded-full text-sm font-medium border ${statusColors[status.label as keyof typeof statusColors] || 'bg-gray-100 text-gray-800 border-gray-200'}`}>
                             <span className={`w-2 h-2 rounded-full mr-2 inline-block ${
                               status.label === 'Active' ? 'bg-green-500' :
-                              status.label === 'Pending' || status.label === 'Pending Request' ? 'bg-yellow-500' :
+                              status.label === 'Scheduled' ? 'bg-yellow-500' :
                               status.label === 'Done' ? 'bg-gray-500' :
                               status.label === 'Denied' ? 'bg-red-500' :
                               status.label === 'Cancelled' ? 'bg-orange-500' : 'bg-gray-500'
@@ -1171,8 +1469,7 @@ export default function BookingDashboard() {
                             const status = getBookingStatus(booking);
                             const statusColors = {
                               'Active': 'bg-pink-100 text-pink-800',
-                              'Pending': 'bg-pink-50 text-pink-700',
-                              'Pending Request': 'bg-pink-50 text-pink-700',
+                              'Scheduled': 'bg-yellow-50 text-yellow-800',
                               'Done': 'bg-gray-100 text-gray-800',
                               'Denied': 'bg-red-100 text-red-800'
                             };
@@ -1257,7 +1554,7 @@ export default function BookingDashboard() {
 
                   {(isLibraryClosedNow() || facilities.some(f => getFacilityBookingStatus(f.id).status === 'closed')) && (
                     <div className="mt-3 text-sm text-gray-500 bg-gray-50 rounded p-2 border border-gray-100">
-                      If you request a booking outside school hours, staff will review and confirm or reschedule it.
+                      If you request a booking outside school hours, the system will schedule it automatically and notify you of any changes.
                     </div>
                   )}
                 </div>
@@ -1268,6 +1565,15 @@ export default function BookingDashboard() {
                   <Plus className="h-5 w-5" />
                   Book Room
                 </button>
+                {/* Dev-only: temporary toggle to force library open for debugging availability UI */}
+                {process.env.NODE_ENV !== 'production' && (
+                  <div className="ml-4 flex items-center gap-2">
+                    <label className="text-xs text-gray-600">Dev: Force Open</label>
+                    <button onClick={() => setDevForceOpen(v => !v)} className={`px-2 py-1 rounded text-sm ${devForceOpen ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
+                      {devForceOpen ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -1275,6 +1581,7 @@ export default function BookingDashboard() {
                   const bookingStatus = getFacilityBookingStatus(facility.id);
                   // Immediate availability for same-day booking
                   const isAvailableForBooking = facility.isActive && bookingStatus.status === "available";
+                  const isOwnerOrAdmin = (user?.role === 'admin') || (bookingStatus.booking && bookingStatus.booking.userId === user?.id);
                   // Allow users to submit booking requests even when school is closed; these will be reviewed
                   // by staff and are subject to approval and scheduling validation.
                   const canRequestBooking = facility.isActive && (bookingStatus.status === "available" || bookingStatus.status === "closed");
@@ -1284,7 +1591,7 @@ export default function BookingDashboard() {
                       key={facility.id}
                       className={`group bg-white border rounded-xl overflow-hidden transition-all duration-300 flex flex-col h-full ${
                         isAvailableForBooking
-                          ? 'border-gray-200 hover:shadow-lg cursor-pointer hover:border-pink-200' 
+                          ? 'border-gray-200 hover:shadow-lg cursor-pointer hover:border-pink-200'
                           : 'border-gray-100 bg-gray-50 opacity-80'
                       }`}
                       onClick={() => isAvailableForBooking && openBookingModal(facility.id)}
@@ -1294,23 +1601,8 @@ export default function BookingDashboard() {
                             <div className="absolute inset-0 bg-black bg-opacity-40 flex items-center justify-center">
                               <FacilityStatusBadge facility={facility} bookingStatus={bookingStatus} />
 
-                              {/* End/Cancel button for bookings the user may cancel (matches server rules) */}
-                              {bookingStatus.booking && bookingStatus.booking.userId === user?.id && canCancelBooking(bookingStatus.booking) && (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleCancelBooking({
-                                      id: bookingStatus.booking.id,
-                                      facilityName: facility.name,
-                                      startTime: bookingStatus.booking.startTime,
-                                      endTime: bookingStatus.booking.endTime,
-                                    });
-                                  }}
-                                  className="ml-3 inline-flex items-center gap-1 px-2 py-1 bg-red-600 text-white text-xs font-medium rounded"
-                                >
-                                  End
-                                </button>
-                              )}
+                              {/* Owner cancel button intentionally removed from image overlay to avoid duplicated visuals.
+                                  End/cancel actions remain available in the booking details area and confirm dialogs. */}
                             </div>
                           ) : null}
                         {(facility.imageUrl || getFacilityImageByName(facility.name)) ? (
@@ -1353,19 +1645,60 @@ export default function BookingDashboard() {
                           </span>
                         </div>
                         
+                        {/* Show next available merged range from availability API at the top for other users */}
+                        {(!isOwnerOrAdmin && facility.isActive) && (() => {
+                          try {
+                            const entry = availabilityMap.get(facility.id);
+                            if (!entry || !Array.isArray(entry.slots)) return null;
+                            // merge contiguous slots with same status
+                            const slots = entry.slots;
+                            const ranges: any[] = [];
+                            if (slots.length > 0) {
+                              let cur = { start: slots[0].start, end: slots[0].end, status: slots[0].status };
+                              for (let i = 1; i < slots.length; i++) {
+                                const s = slots[i];
+                                if (s.status === cur.status && new Date(s.start).getTime() === new Date(cur.end).getTime()) {
+                                  cur.end = s.end;
+                                } else {
+                                  ranges.push(cur);
+                                  cur = { start: s.start, end: s.end, status: s.status };
+                                }
+                              }
+                              ranges.push(cur);
+                            }
+
+                            // find next available range that starts after now
+                            const now = new Date();
+                            const nextAvailable = ranges.find(r => r.status === 'available' && new Date(r.end) > now && new Date(r.start) >= now);
+                            if (!nextAvailable) return null;
+                            return (
+                              <div className="mb-3 p-3 bg-green-50 rounded-lg border border-green-100 flex items-center justify-between">
+                                <div>
+                                  <div className="text-xs text-green-800 font-medium">Next available booking</div>
+                                  <div className="text-sm font-semibold text-gray-900">{format(new Date(nextAvailable.start), 'EEE, MMM d')} • {format(new Date(nextAvailable.start), 'hh:mm a')} - {format(new Date(nextAvailable.end), 'hh:mm a')}</div>
+                                </div>
+                                <div>
+                                  <button onClick={(e) => { e.stopPropagation(); const start = new Date(nextAvailable.start); const end = new Date(nextAvailable.end); setSelectedFacilityForBooking(facility.id); setInitialStartForBooking(start); setInitialEndForBooking(end); setInitialTimesAreSuggested(true); openBookingModal(facility.id, start, end); }} className="bg-pink-600 text-white px-3 py-1 rounded-lg text-sm">Book Now</button>
+                                </div>
+                              </div>
+                            );
+                          } catch (e) { return null; }
+                        })()}
+
                         <p className={`text-sm leading-relaxed mb-1 flex-grow ${
                           isAvailableForBooking ? 'text-gray-600' : 'text-gray-500'
                         }`}>
                           {getFacilityDescriptionByName(facility.name)}
                         </p>
 
-                        {/* Show booking details if facility is booked or scheduled */}
-                        {bookingStatus.booking && (
+                        {/* Show detailed booking info for all users (times, next-available hint). */}
+                        {bookingStatus.booking && bookingStatus.status !== 'available' && (
                           <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
                             <p className="text-xs font-medium text-gray-600 mb-1">
-                     {bookingStatus.status === 'booked' ? 'Currently in use until:' :
-                       bookingStatus.status === 'scheduled' ? 'Next booking:' :
-                       'Scheduled:'}
+                              {bookingStatus.booking?.status === 'pending' ? 'Pending booking:' :
+                               bookingStatus.status === 'booked' ? 'Currently in use until:' :
+                               bookingStatus.status === 'scheduled' ? 'Next booking:' :
+                              'Scheduled:'}
                             </p>
                             <p className="text-sm text-gray-900 font-medium">
                               {bookingStatus.status === 'booked' ? (
@@ -1385,18 +1718,35 @@ export default function BookingDashboard() {
                                 Room is currently occupied
                               </p>
                             )}
-                            {bookingStatus.status === 'scheduled' && (
-                              <p className="text-xs text-gray-500 mt-1">
-                                Next available: {new Date(bookingStatus.booking.endTime).toLocaleTimeString('en-US', {
-                                  hour: 'numeric',
-                                  minute: '2-digit',
-                                  hour12: true
-                                })}
-                              </p>
+                            {bookingStatus.status === 'scheduled' && bookingStatus.booking?.endTime && (
+                              (() => {
+                                try {
+                                  const end = new Date(bookingStatus.booking.endTime);
+                                  const entry = availabilityMap.get(facility.id);
+                                  if (entry && Array.isArray(entry.slots)) {
+                                    // find the next available slot that begins at or after the booking end
+                                    const next = entry.slots.find((s: any) => s.status === 'available' && new Date(s.start) >= end);
+                                    const display = next ? new Date(next.start) : end;
+                                    return (
+                                      <p className="text-xs text-gray-500 mt-1">
+                                        Next available: {display.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                                      </p>
+                                    );
+                                  }
+                                  // fallback to end time
+                                  return (
+                                    <p className="text-xs text-gray-500 mt-1">
+                                      Next available: {end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                                    </p>
+                                  );
+                                } catch (e) {
+                                  return null;
+                                }
+                              })()
                             )}
-                            {bookingStatus.status === 'pending' && (
+                            {bookingStatus.booking?.status === 'pending' && (
                               <p className="text-xs text-gray-500 mt-1">
-                                Waiting for admin approval
+                                Scheduled automatically; you'll be notified of any changes.
                               </p>
                             )}
                           </div>
@@ -1426,7 +1776,7 @@ export default function BookingDashboard() {
 
                               {bookingStatus.status === 'closed' && (
                                 <p className="text-xs text-gray-500 mt-2 text-right max-w-xs">
-                                  If requested outside school hours, staff will review and confirm or reschedule your booking.
+                                  If requested outside school hours, the system will schedule it automatically and notify you of any changes.
                                 </p>
                               )}
                             </div>
@@ -1460,7 +1810,7 @@ export default function BookingDashboard() {
                       {isLibraryClosedNow() ? (
                             <>
                               <h4 className="text-lg font-medium text-gray-900 mb-2">School Closed</h4>
-                              <p className="text-gray-600">The school is currently closed. Please return during normal operating hours (7:30 AM – 5:00 PM).</p>
+                              <p className="text-gray-600">The school is currently closed. Please return during normal operating hours (7:30 AM – 7:00 PM).</p>
                             </>
                           ) : (
                             <>
@@ -1473,6 +1823,16 @@ export default function BookingDashboard() {
                 }
                 return null;
               })()}
+
+              {/* Availability grid (per-date slot view) */}
+              <AvailabilityGrid onSelectRange={(fid: number, s: string, e: string) => {
+                const start = new Date(s);
+                const end = new Date(e);
+                setSelectedFacilityForBooking(fid);
+                setInitialStartForBooking(start);
+                setInitialEndForBooking(end);
+                openBookingModal(fid, start, end);
+              }} />
             </div>
         );
 
@@ -1499,7 +1859,7 @@ export default function BookingDashboard() {
                     <h5 className="font-semibold text-pink-900 mb-1">Booking Windows & Lead Time</h5>
                     <ul className="space-y-1 ml-4 list-disc">
                       <li>Request bookings at least 30 minutes before the desired start time.</li>
-                      <li>Bookings are generally available during school hours: 7:30 AM – 5:00 PM. Requests outside these hours will be reviewed by staff.</li>
+                      <li>Bookings are generally available during school hours: 7:30 AM – 7:00 PM. Requests outside these hours will be reviewed by staff.</li>
                       <li>Some facilities may require additional lead time—check the facility details before requesting.</li>
                     </ul>
                   </div>
@@ -1545,7 +1905,7 @@ export default function BookingDashboard() {
         return (
           <>
             {/* Stats Cards */}
-            <div className="grid md:grid-cols-3 gap-6 mb-8">
+            <div className="grid md:grid-cols-2 gap-6 mb-8">
               <button
                 onClick={() => setSelectedView("my-bookings")}
                 className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-all duration-200 hover:border-pink-300 text-left group"
@@ -1568,92 +1928,260 @@ export default function BookingDashboard() {
               >
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-600 group-hover:text-pink-700">Pending Bookings</p>
-                    <p className="text-3xl font-bold text-pink-600 mt-1">{stats.upcoming}</p>
-                    <p className="text-xs text-gray-500 mt-1">Approved and scheduled</p>
-                  </div>
+                      <p className="text-sm font-medium text-gray-600 group-hover:text-pink-700">Scheduled Bookings</p>
+                      <p className="text-3xl font-bold text-pink-600 mt-1">{stats.upcoming}</p>
+                      <p className="text-xs text-gray-500 mt-1">Approved and scheduled</p>
+                    </div>
                   <div className="bg-pink-100 p-3 rounded-full group-hover:bg-pink-200 transition-colors duration-200">
                     <Clock className="h-6 w-6 text-pink-600" />
                   </div>
                 </div>
               </button>
 
-              <button
-                onClick={() => setSelectedView("my-bookings")}
-                className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-all duration-200 hover:border-pink-300 text-left group"
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-600 group-hover:text-pink-700">Booking Requests</p>
-                    <p className="text-3xl font-bold text-pink-600 mt-1">{stats.pending}</p>
-                    <p className="text-xs text-gray-500 mt-1">Awaiting approval</p>
-                  </div>
-                  <div className="bg-pink-100 p-3 rounded-full group-hover:bg-pink-200 transition-colors duration-200">
-                    <Calendar className="h-6 w-6 text-pink-600" />
-                  </div>
-                </div>
-              </button>
+              
             </div>
 
             {/* Quick actions removed (use sidebar / available rooms) */}
 
-            {/* Available Rooms */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-8">
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-3">
-                  <h3 className="text-lg font-bold text-gray-900">Available Rooms</h3>
-                  {!isLibraryClosedNow() && (
-                    <button
-                      onClick={() => openBookingModal()}
-                      className="inline-flex items-center gap-2 px-2 py-1 bg-pink-600 hover:bg-pink-700 text-white rounded text-sm"
-                    >
-                      <Plus className="h-4 w-4" />
-                      New Booking
-                    </button>
+            {/* Available Rooms (full view content copied from the available-rooms case) */}
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8">
+              <div className="flex items-center justify-between mb-8">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900">Available Study Rooms</h2>
+                  <p className="text-gray-600 mt-1">Browse and book available facilities</p>
+
+                  {(isLibraryClosedNow() || facilities.some(f => getFacilityBookingStatus(f.id).status === 'closed')) && (
+                    <div className="mt-3 text-sm text-gray-500 bg-gray-50 rounded p-2 border border-gray-100">
+                      If you request a booking outside school hours, the system will schedule it automatically and notify you of any changes.
+                    </div>
                   )}
-                  <div className="text-gray-600 text-sm mt-1">
-                    {facilities.length === 0 ? (
-                      "No facilities found"
-                    ) : (() => {
-                      const availableCount = facilities.filter(f => f.isActive && getFacilityBookingStatus(f.id).status === "available").length;
-
-                      if (availableCount === facilities.length) {
-                        return "All rooms are available for booking";
-                      }
-
-                      if (availableCount === 0) {
-                        if (isLibraryClosedNow()) {
-                          return (
-                            <div>
-                              <div>School is currently closed. You can still request a booking; school staff will review and confirm or reschedule it.</div>
-                              <div className="mt-2">
-                                <button onClick={() => openBookingModal()} className="inline-flex items-center px-3 py-1.5 bg-pink-600 hover:bg-pink-700 text-white rounded text-sm">Request Booking</button>
-                              </div>
-                            </div>
-                          );
-                        }
-                        return "All rooms are currently booked or unavailable";
-                      }
-
-                      return `${availableCount} of ${facilities.length} rooms available for booking`;
-                    })()}
-                  </div>
                 </div>
                 <button
-                  onClick={() => setSelectedView("available-rooms")}
-                  className="text-pink-600 hover:text-pink-800 font-medium text-sm transition-colors duration-200"
+                  onClick={() => openBookingModal()}
+                  className="bg-pink-600 hover:bg-pink-700 text-white px-6 py-3 rounded-lg font-medium transition-colors duration-200 flex items-center gap-2 shadow-sm"
                 >
-                  View All →
+                  <Plus className="h-5 w-5" />
+                  Book Room
                 </button>
+                {process.env.NODE_ENV !== 'production' && (
+                  <div className="ml-4 flex items-center gap-2">
+                    <label className="text-xs text-gray-600">Dev: Force Open</label>
+                    <button onClick={() => setDevForceOpen(v => !v)} className={`px-2 py-1 rounded text-sm ${devForceOpen ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
+                      {devForceOpen ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {facilities.map((facility) => {
+                  const bookingStatus = getFacilityBookingStatus(facility.id);
+                  const isAvailableForBooking = facility.isActive && bookingStatus.status === "available";
+                  const isOwnerOrAdmin = (user?.role === 'admin') || (bookingStatus.booking && bookingStatus.booking.userId === user?.id);
+                  const canRequestBooking = facility.isActive && (bookingStatus.status === "available" || bookingStatus.status === "closed");
+                  
+                  return (
+                    <div
+                      key={facility.id}
+                      className={`group bg-white border rounded-xl overflow-hidden transition-all duration-300 flex flex-col h-full ${
+                        isAvailableForBooking
+                          ? 'border-gray-200 hover:shadow-lg cursor-pointer hover:border-pink-200'
+                          : 'border-gray-100 bg-gray-50 opacity-80'
+                      }`}
+                      onClick={() => isAvailableForBooking && openBookingModal(facility.id)}
+                    >
+                      <div className="aspect-video bg-gradient-to-br from-pink-100 to-rose-100 flex items-center justify-center relative">
+                          {isAvailableForBooking ? (
+                            <div className="absolute inset-0 bg-black bg-opacity-40 flex items-center justify-center">
+                              <FacilityStatusBadge facility={facility} bookingStatus={bookingStatus} />
+                              {/* Owner cancel button intentionally removed from image overlay to avoid duplicated visuals.
+                                  End/cancel actions remain available in the booking details area and confirm dialogs. */}
+                            </div>
+                          ) : null}
+                        {(facility.imageUrl || getFacilityImageByName(facility.name)) ? (
+                          <img
+                            src={facility.imageUrl || getFacilityImageByName(facility.name)}
+                            alt={facility.name}
+                            className={`w-full h-full object-cover transition-transform duration-300 ${
+                              isAvailableForBooking ? 'group-hover:scale-105' : 'grayscale'
+                            }`}
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                              e.currentTarget.nextElementSibling?.classList?.remove('hidden');
+                            }}
+                          />
+                        ) : null}
+                        {!(facility.imageUrl || getFacilityImageByName(facility.name)) && (
+                          <div className="text-center">
+                            <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mx-auto mb-2 shadow-sm">
+                              <Calendar className={`h-8 w-8 ${isAvailableForBooking ? 'text-gray-400' : 'text-gray-300'}`} />
+                            </div>
+                            <p className={`text-sm ${isAvailableForBooking ? 'text-gray-500' : 'text-gray-400'}`}>
+                              No image available
+                            </p>
+                          </div>
+                        )}
+                      </div>
+
+                        <div className="p-6 flex flex-col h-full">
+                        <div className="flex items-center justify-between mb-1">
+                          <h3 className={`font-bold text-lg mb-1 transition-colors ${
+                            isAvailableForBooking
+                              ? 'text-gray-900 group-hover:text-pink-700' 
+                              : 'text-gray-500'
+                          }`}>
+                            {facility.name}
+                          </h3>
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${bookingStatus.badgeClass}`}>
+                            {bookingStatus.label}
+                          </span>
+                        </div>
+                        {(!isOwnerOrAdmin && facility.isActive) && (() => {
+                          try {
+                            const entry = availabilityMap.get(facility.id);
+                            if (!entry || !Array.isArray(entry.slots)) return null;
+                            const slots = entry.slots;
+                            const ranges: any[] = [];
+                            if (slots.length > 0) {
+                              let cur = { start: slots[0].start, end: slots[0].end, status: slots[0].status };
+                              for (let i = 1; i < slots.length; i++) {
+                                const s = slots[i];
+                                if (s.status === cur.status && new Date(s.start).getTime() === new Date(cur.end).getTime()) {
+                                  cur.end = s.end;
+                                } else {
+                                  ranges.push(cur);
+                                  cur = { start: s.start, end: s.end, status: s.status };
+                                }
+                              }
+                              ranges.push(cur);
+                            }
+
+                            const now = new Date();
+                            const nextAvailable = ranges.find(r => r.status === 'available' && new Date(r.end) > now && new Date(r.start) >= now);
+                            if (!nextAvailable) return null;
+                            return (
+                              <div className="mb-3 p-3 bg-green-50 rounded-lg border border-green-100 flex items-center justify-between">
+                                <div>
+                                  <div className="text-xs text-green-800 font-medium">Next available booking</div>
+                                  <div className="text-sm font-semibold text-gray-900">{format(new Date(nextAvailable.start), 'EEE, MMM d')} • {format(new Date(nextAvailable.start), 'hh:mm a')} - {format(new Date(nextAvailable.end), 'hh:mm a')}</div>
+                                </div>
+                                <div>
+                                  <button onClick={(e) => { e.stopPropagation(); const start = new Date(nextAvailable.start); const end = new Date(nextAvailable.end); setSelectedFacilityForBooking(facility.id); setInitialStartForBooking(start); setInitialEndForBooking(end); setInitialTimesAreSuggested(true); openBookingModal(facility.id, start, end); }} className="bg-pink-600 text-white px-3 py-1 rounded-lg text-sm">Book Now</button>
+                                </div>
+                              </div>
+                            );
+                          } catch (e) { return null; }
+                        })()}
+
+                        <p className={`text-sm leading-relaxed mb-1 flex-grow ${
+                          isAvailableForBooking ? 'text-gray-600' : 'text-gray-500'
+                        }`}>
+                          {getFacilityDescriptionByName(facility.name)}
+                        </p>
+
+                        {bookingStatus.booking && bookingStatus.status !== 'available' && (user?.role === 'admin' || bookingStatus.booking.userId === user?.id) && (
+                          <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                            <p className="text-xs font-medium text-gray-600 mb-1">
+                     {bookingStatus.booking?.status === 'pending' ? 'Pending booking:' :
+                       bookingStatus.status === 'booked' ? 'Currently in use until:' :
+                       bookingStatus.status === 'scheduled' ? 'Next booking:' :
+                      'Scheduled:'}
+                            </p>
+                            <p className="text-sm text-gray-900 font-medium">
+                              {bookingStatus.status === 'booked' ? (
+                                new Date(bookingStatus.booking.endTime).toLocaleTimeString('en-US', {
+                                  hour: 'numeric',
+                                  minute: '2-digit',
+                                  hour12: true
+                                })
+                              ) : (
+                                <>
+                                  {format(new Date(bookingStatus.booking.startTime), 'EEE, MMM d')} • {format(new Date(bookingStatus.booking.startTime), 'hh:mm a')} - {format(new Date(bookingStatus.booking.endTime), 'hh:mm a')}
+                                </>
+                              )}
+                            </p>
+                            {bookingStatus.status === 'booked' && (
+                              <p className="text-xs text-gray-500 mt-1">
+                                Room is currently occupied
+                              </p>
+                            )}
+                            {bookingStatus.status === 'scheduled' && bookingStatus.booking?.endTime && (
+                              (() => {
+                                try {
+                                  const end = new Date(bookingStatus.booking.endTime);
+                                  const entry = availabilityMap.get(facility.id);
+                                  if (entry && Array.isArray(entry.slots)) {
+                                    // find the next available slot that begins at or after the booking end
+                                    const next = entry.slots.find((s: any) => s.status === 'available' && new Date(s.start) >= end);
+                                    const display = next ? new Date(next.start) : end;
+                                    return (
+                                      <p className="text-xs text-gray-500 mt-1">
+                                        Next available: {display.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                                      </p>
+                                    );
+                                  }
+                                  // fallback to end time
+                                  return (
+                                    <p className="text-xs text-gray-500 mt-1">
+                                      Next available: {end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                                    </p>
+                                  );
+                                } catch (e) {
+                                  return null;
+                                }
+                              })()
+                            )}
+                            {bookingStatus.booking?.status === 'pending' && (
+                              <p className="text-xs text-gray-500 mt-1">
+                                Scheduled automatically; you'll be notified of any changes.
+                              </p>
+                            )}
+                          </div>
+                        )}
+
+                        <div className="mt-auto">
+                          <div className="flex items-center justify-between gap-4">
+                            <div className="flex items-center gap-2">
+                              <div className={`w-2 h-2 rounded-full ${isAvailableForBooking ? 'bg-green-500' : 'bg-gray-400'}`}></div>
+                              <span className={`text-sm font-medium ${isAvailableForBooking ? 'text-green-700' : 'text-gray-500'}`}>
+                                {(() => `Up to ${facility.capacity || 8} people`)()}
+                              </span>
+                            </div>
+
+                            <div className="flex flex-col items-end">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); if (isAvailableForBooking) openBookingModal(facility.id); if (bookingStatus.status === 'closed') openBookingModal(facility.id); }}
+                                disabled={!canRequestBooking}
+                                className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors duration-200 shadow-sm flex-shrink-0 ${
+                                  isAvailableForBooking
+                                    ? 'bg-pink-600 hover:bg-pink-700 text-white'
+                                    : (bookingStatus.status === 'closed' ? 'bg-pink-50 text-pink-700 border border-pink-200' : 'bg-gray-300 text-gray-500 cursor-not-allowed')
+                                }`}
+                              >
+                                {isAvailableForBooking ? 'Book Now' : bookingStatus.status === 'closed' ? 'Request Booking' : 'Unavailable'}
+                              </button>
+
+                              {bookingStatus.status === 'closed' && (
+                                <p className="text-xs text-gray-500 mt-2 text-right max-w-xs">
+                                  If requested outside school hours, the system will schedule it automatically and notify you of any changes.
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
 
               {facilities.length === 0 ? (
-                <div className="text-center py-8">
-                  <div className="bg-gray-100 rounded-full w-12 h-12 flex items-center justify-center mx-auto mb-3">
-                    <MapPin className="h-6 w-6 text-gray-400" />
+                <div className="text-center py-12">
+                  <div className="bg-gray-100 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
+                    <Calendar className="h-8 w-8 text-gray-400" />
                   </div>
-                  <p className="text-gray-600 text-sm">No rooms are available at this time.</p>
-                  <p className="text-gray-500 text-xs mt-1">Check back later or try a different time</p>
+                  <h4 className="text-lg font-medium text-gray-900 mb-2">No facilities available</h4>
+                  <p className="text-gray-600">There are currently no facilities available for booking.</p>
                 </div>
               ) : (() => {
                 const availableRooms = facilities.filter(f => 
@@ -1662,130 +2190,36 @@ export default function BookingDashboard() {
                 
                 if (availableRooms.length === 0) {
                   return (
-                    <div className="text-center py-8">
-                      <div className="bg-red-100 rounded-full w-12 h-12 flex items-center justify-center mx-auto mb-3">
-                        <Calendar className="h-6 w-6 text-red-500" />
+                    <div className="text-center py-12">
+                      <div className="bg-red-100 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
+                        <Calendar className="h-8 w-8 text-red-500" />
                       </div>
-                      <p className="text-gray-600 text-sm">All rooms are currently booked</p>
-                      <p className="text-gray-500 text-xs mt-1">Check back later when sessions end</p>
+                      {isLibraryClosedNow() ? (
+                            <>
+                              <h4 className="text-lg font-medium text-gray-900 mb-2">School Closed</h4>
+                              <p className="text-gray-600">The school is currently closed. Please return during normal operating hours (7:30 AM – 7:00 PM).</p>
+                            </>
+                          ) : (
+                            <>
+                              <h4 className="text-lg font-medium text-gray-900 mb-2">All rooms are currently booked</h4>
+                              <p className="text-gray-600">All facilities are currently in use, scheduled, or otherwise unavailable. Please check back later or contact school staff for assistance.</p>
+                            </>
+                          )}
                     </div>
                   );
                 }
                 return null;
-              })() ? null : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {facilities
-                    .slice(0, itemsPerPage)
-                    .map((facility) => {
-                    const bookingStatus = getFacilityBookingStatus(facility.id);
-                    const isAvailableForBooking = facility.isActive && bookingStatus.status === "available";
-                    
-                    return (
-                      <div key={facility.id} className={`bg-gray-50 rounded-lg p-4 transition-colors duration-200 group ${
-                        isAvailableForBooking
-                          ? 'hover:bg-gray-100 cursor-pointer' 
-                          : 'opacity-60 cursor-not-allowed'
-                      }`} onClick={() => isAvailableForBooking && openBookingModal(facility.id)}>
-                        <div className="flex items-center justify-between mb-3">
-                          <div className={`p-2 rounded-lg shadow-sm transition-shadow duration-200 ${
-                            isAvailableForBooking
-                              ? 'bg-white group-hover:shadow-md' 
-                              : 'bg-gray-200'
-                          }`}>
-                            <MapPin className={`h-5 w-5 ${isAvailableForBooking ? 'text-gray-600' : 'text-gray-400'}`} />
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <div className={`w-2 h-2 rounded-full ${
-                              bookingStatus.status === 'available' ? 'bg-green-500' :
-                              bookingStatus.status === 'booked' ? 'bg-red-500' :
-                              bookingStatus.status === 'scheduled' ? 'bg-yellow-500' :
-                              'bg-pink-500'
-                            }`}></div>
-                            <span className={`text-xs font-medium ${
-                              bookingStatus.status === 'available' ? 'text-green-600' :
-                              bookingStatus.status === 'booked' ? 'text-red-600' :
-                              bookingStatus.status === 'scheduled' ? 'text-yellow-600' :
-                              'text-pink-600'
-                            }`}>
-                              {bookingStatus.label}
-                            </span>
-                          </div>
-                        </div>
+              })()}
 
-                        <h4 className={`font-medium mb-1 ${isAvailableForBooking ? 'text-gray-900' : 'text-gray-500'}`}>
-                          {facility.name}
-                        </h4>
-                        <p className={`text-sm mb-2 line-clamp-2 ${isAvailableForBooking ? 'text-gray-600' : 'text-gray-400'}`}>
-                          {facility.isActive ? getFacilityDescriptionByName(facility.name) : (facility.unavailableReason || 'This room has been marked unavailable by staff.')}
-                        </p>
-
-                        {/* Show booking details for non-available rooms */}
-                        {bookingStatus.booking && (
-                          <div className="mb-3 p-2 bg-white rounded border border-gray-200">
-                            <p className="text-xs text-gray-600 mb-1">
-                              {bookingStatus.status === 'booked' ? 'Currently in use until:' :
-                               bookingStatus.status === 'scheduled' ? 'Next booking:' : 
-                               'Scheduled:'}
-                            </p>
-                            <p className="text-xs font-medium text-gray-900">
-                              {bookingStatus.status === 'booked' ? (
-                                new Date(bookingStatus.booking.endTime).toLocaleTimeString('en-US', {
-                                  hour: 'numeric',
-                                  minute: '2-digit',
-                                  hour12: true
-                                })
-                              ) : bookingStatus.status === 'scheduled' ? (
-                                `${new Date(bookingStatus.booking.startTime).toLocaleTimeString('en-US', {
-                                  hour: 'numeric',
-                                  minute: '2-digit',
-                                  hour12: true
-                                })} - ${new Date(bookingStatus.booking.endTime).toLocaleTimeString('en-US', {
-                                  hour: 'numeric',
-                                  minute: '2-digit',
-                                  hour12: true
-                                })}`
-                              ) : (
-                                new Date(bookingStatus.booking.startTime).toLocaleDateString('en-US', {
-                                  month: 'short',
-                                  day: 'numeric'
-                                })
-                              )}
-                            </p>
-                          </div>
-                        )}
-
-                        <div className="flex items-center justify-between">
-                          <div className={`flex items-center gap-1 text-xs flex-1 ${isAvailableForBooking ? 'text-gray-500' : 'text-gray-400'}`}>
-                            <Users className="h-3 w-3" />
-                            <span>Capacity: {facility.capacity}</span>
-                          </div>
-                          {isAvailableForBooking ? (
-                            <button 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openBookingModal(facility.id);
-                              }}
-                              className="text-pink-600 hover:text-pink-800 font-medium text-sm transition-colors duration-200 flex-shrink-0"
-                            >
-                              Book Now →
-                            </button>
-                          ) : (
-                            <span className={`font-medium text-sm flex-shrink-0 ${
-                              bookingStatus.status === 'booked' ? 'text-red-500' :
-                              bookingStatus.status === 'scheduled' ? 'text-yellow-500' :
-                              'text-pink-600'
-                            }`}>
-                              {bookingStatus.status === 'booked' ? 'In Use' :
-                               bookingStatus.status === 'scheduled' ? 'Scheduled' :
-                               bookingStatus.status === 'pending' ? 'Pending' : 'Unavailable'}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+              {/* Availability grid (per-date slot view) */}
+              <AvailabilityGrid onSelectRange={(fid: number, s: string, e: string) => {
+                const start = new Date(s);
+                const end = new Date(e);
+                setSelectedFacilityForBooking(fid);
+                setInitialStartForBooking(start);
+                setInitialEndForBooking(end);
+                openBookingModal(fid, start, end);
+              }} />
             </div>
 
             {/* Recent Booking */}
@@ -1942,8 +2376,7 @@ export default function BookingDashboard() {
                                   const status = getBookingStatus(booking);
                                   const statusColors = {
                                     'Active': 'bg-pink-100 text-pink-800',
-                                    'Pending': 'bg-pink-50 text-pink-700',
-                                    'Pending Request': 'bg-pink-50 text-pink-700',
+                                    'Scheduled': 'bg-yellow-50 text-yellow-800',
                                     'Done': 'bg-gray-100 text-gray-800',
                                     'Denied': 'bg-red-100 text-red-800'
                                   };
@@ -2031,6 +2464,7 @@ export default function BookingDashboard() {
         selectedFacilityId={selectedFacilityForBooking}
         initialStartTime={initialStartForBooking}
         initialEndTime={initialEndForBooking}
+        showSuggestedSlot={initialTimesAreSuggested}
       />
       <EditBookingModal
         isOpen={showEditBookingModal}
@@ -2064,7 +2498,7 @@ export default function BookingDashboard() {
               <div className="bg-gray-50 rounded-lg p-4 mb-4">
                 <h4 className="font-medium text-gray-900 mb-2">Booking Details:</h4>
                 <div className="text-sm text-gray-600 space-y-1">
-                  <p><span className="font-medium">Facility:</span> {bookingToCancel.facilityName}</p>
+                  <p><span className="font-medium">Facility:</span> {bookingToCancel.facilityName || (bookingToCancel.facilityId ? getFacilityDisplay(bookingToCancel.facilityId) : '')}</p>
                   <p><span className="font-medium">Date:</span> {new Date(bookingToCancel.startTime).toLocaleDateString('en-US', {
                     weekday: 'long',
                     year: 'numeric',
@@ -2082,6 +2516,28 @@ export default function BookingDashboard() {
                   })}</p>
                 </div>
               </div>
+              {/* Purpose */}
+              {bookingToCancel.purpose ? (
+                <div className="bg-white rounded-lg p-4 mb-4 border border-gray-100">
+                  <h4 className="font-medium text-gray-900 mb-2">Purpose</h4>
+                  <div className="text-sm text-gray-700 whitespace-pre-wrap">{bookingToCancel.purpose}</div>
+                </div>
+              ) : null}
+
+              {/* Equipment / Needs */}
+              {(bookingToCancel.equipment && ((Array.isArray(bookingToCancel.equipment.items) && bookingToCancel.equipment.items.length > 0) || (bookingToCancel.equipment.others && String(bookingToCancel.equipment.others).trim().length > 0))) ? (
+                <div className="bg-white rounded-lg p-4 mb-4 border border-gray-100">
+                  <h4 className="font-medium text-gray-900 mb-2">Equipment / Needs</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {Array.isArray(bookingToCancel.equipment.items) && bookingToCancel.equipment.items.map((it: string, idx: number) => (
+                      <span key={`cancel-eq-${idx}`} className="text-xs bg-gray-100 text-gray-800 px-2 py-1 rounded-full border border-gray-200">{it}</span>
+                    ))}
+                    {bookingToCancel.equipment.others && String(bookingToCancel.equipment.others).trim().length > 0 ? (
+                      <div className="w-full text-sm text-gray-700 mt-2">Others: {bookingToCancel.equipment.others}</div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
               
               <p className="text-sm text-gray-700 mb-6">
                 {bookingToCancel && (new Date(bookingToCancel.startTime) <= new Date() && new Date() <= new Date(bookingToCancel.endTime)) ?
