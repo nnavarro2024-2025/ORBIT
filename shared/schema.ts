@@ -73,6 +73,7 @@ export const facilities = pgTable("facilities", {
   imageUrl: varchar("image_url"),
   isActive: boolean("is_active").default(true).notNull(),
   unavailableReason: text("unavailable_reason"),
+  unavailableDates: jsonb("unavailable_dates").$type<Array<{ startDate: string; endDate: string; reason?: string }>>(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -158,7 +159,7 @@ export const insertUserSchema = z.object({
   firstName: z.string().optional(),
   lastName: z.string().optional(),
   profileImageUrl: z.string().optional(),
-  role: z.enum(["student", "admin"]).default("student"),
+  role: z.enum(["student", "faculty", "admin"]).default("student"),
   status: z.enum(["active", "banned", "suspended"]).default("active"),
   banReason: z.string().optional(),
   banEndDate: z.date().optional(),

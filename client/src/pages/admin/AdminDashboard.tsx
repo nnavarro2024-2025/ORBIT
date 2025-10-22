@@ -7,6 +7,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useLocation } from 'wouter';
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import * as XLSX from 'xlsx';
 import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -55,9 +56,10 @@ function Countdown({ expiry, onExpire }: { expiry: string | Date | undefined; on
   useEffect(() => {
     if (diff <= 0 && onExpire) onExpire();
   }, [diff]);
-  const minutes = Math.floor(diff / 60).toString().padStart(2, '0');
+  const hours = Math.floor(diff / 3600).toString().padStart(2, '0');
+  const minutes = Math.floor((diff % 3600) / 60).toString().padStart(2, '0');
   const seconds = (diff % 60).toString().padStart(2, '0');
-  return <span className="font-mono text-xs text-gray-700">{minutes}:{seconds}</span>;
+  return <span className="font-mono text-lg font-semibold text-green-700">{hours}:{minutes}:{seconds}</span>;
 }
 
 export default function AdminDashboard() {
@@ -103,6 +105,24 @@ export default function AdminDashboard() {
     if (!value) return '';
     try {
       return new Date(value).toLocaleString();
+    } catch (_e) {
+      return String(value);
+    }
+  }
+
+  function formatTime(value: any) {
+    if (!value) return '';
+    try {
+      return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch (_e) {
+      return String(value);
+    }
+  }
+
+  function formatDate(value: any) {
+    if (!value) return '';
+    try {
+      return new Date(value).toLocaleDateString();
     } catch (_e) {
       return String(value);
     }
@@ -164,6 +184,8 @@ export default function AdminDashboard() {
   // Preview tab for system alerts in the dashboard (booking | users)
   const [alertsPreviewTab, setAlertsPreviewTab] = useState<string>('booking');
   
+  // Loading state for navigation to booking dashboard
+  const [isNavigatingToBooking, setIsNavigatingToBooking] = useState(false);
   
   // silence unused setters where appropriate
   void setActiveBookingsPage; void setUpcomingBookingsPage; void setApprovedAndDeniedBookingsPage; void setPendingBookingsDashboardPage; void setPendingBookingsPage; void setBookingUsersPage; void setBannedUsersPage; void setActivitiesPage;
@@ -284,25 +306,25 @@ export default function AdminDashboard() {
     // lazy require to avoid import ordering issues while editing
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { makeSidebar } = require('@/lib/sidebarItems');
-    const lastItem = (authUser && authUser.role === 'admin') ? { id: 'booking-dashboard', label: 'Booking Dashboard', icon: BarChart3 } : undefined;
+    const lastItem = (authUser && authUser.role === 'admin') ? { id: 'booking-dashboard', label: 'Booking Dashboard', icon: BarChart3, isLoading: isNavigatingToBooking } : undefined;
     sidebarItems = makeSidebar(!!authUser && authUser.role === 'admin', lastItem, 'admin');
   } catch (e) {
     // fallback to previous static list - only include admin-only divider+link when the user is admin
     sidebarItems = [
       { id: 'overview', label: 'Dashboard', icon: BarChart3 },
-      { id: 'booking-management', label: 'Facility Booking Management', icon: Calendar },
+      { id: 'booking-management', label: 'Facility Bookings', icon: Calendar },
       { id: 'user-management', label: 'User Management', icon: Users },
-      { id: 'security', label: 'Admin System Alerts', icon: Shield },
-      { id: 'admin-activity-logs', label: 'Admin Activity Logs', icon: BarChart3 },
+      { id: 'security', label: 'System Alerts', icon: Shield },
+      { id: 'admin-activity-logs', label: 'Activity Logs', icon: BarChart3 },
       { id: 'settings', label: 'System Settings', icon: Settings },
     ];
     if (authUser && authUser.role === 'admin') {
       sidebarItems.push({ id: 'divider-1', type: 'divider' });
-      sidebarItems.push({ id: 'booking-dashboard', label: 'Booking Dashboard', icon: BarChart3 });
+      sidebarItems.push({ id: 'booking-dashboard', label: 'Booking Dashboard', icon: BarChart3, isLoading: isNavigatingToBooking });
     }
   }
 
-  const handleSidebarClick = (id: string) => {
+  const handleSidebarClick = async (id: string) => {
     // When navigating to complex sections, ensure their inner tabs default to the requested sub-tab
     if (id === 'user-management') {
       setUserTab('booking-users');
@@ -320,8 +342,25 @@ export default function AdminDashboard() {
       return;
     }
     if (id === 'booking-dashboard') {
-      // navigate to the student booking dashboard route and request the dashboard view
-      setLocation('/booking#dashboard');
+      // Show loading state and invalidate all related queries to force fresh data load
+      setIsNavigatingToBooking(true);
+      try {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["/api/facilities"] }),
+          queryClient.invalidateQueries({ queryKey: ["/api/bookings"] }),
+          queryClient.invalidateQueries({ queryKey: ["/api/bookings/all"] }),
+          queryClient.invalidateQueries({ queryKey: ["/api/availability"] }),
+        ]);
+        
+        // navigate to the student booking dashboard route and request the dashboard view
+        setLocation('/booking#dashboard');
+      } catch (error) {
+        console.error('Error invalidating queries:', error);
+        // Still navigate even if invalidation fails
+        setLocation('/booking#dashboard');
+      } finally {
+        setIsNavigatingToBooking(false);
+      }
       return;
     }
     // Special-case: when navigating to Admin Activity Logs, default to the Booking History tab
@@ -565,8 +604,12 @@ export default function AdminDashboard() {
     }
   };
 
+  const [isConfirmingEquipment, setIsConfirmingEquipment] = useState(false);
+
   const confirmEquipmentModal = async () => {
-    if (!equipmentModalBooking) return;
+    if (!equipmentModalBooking || isConfirmingEquipment) return;
+    
+    setIsConfirmingEquipment(true);
     const bookingId = String(equipmentModalBooking.id);
     // Persist overall status: if all marked prepared -> prepared, else not_available
     const statuses = { ...equipmentModalItemStatuses };
@@ -576,16 +619,29 @@ export default function AdminDashboard() {
     setBookingItemStatus(prev => ({ ...prev, [bookingId]: Object.entries(statuses).reduce((acc, [k, v]) => { if (v) acc[k] = v; return acc; }, {} as Record<string, 'prepared'|'not_available'>) }));
     // Also set booking-level needs status for compatibility with existing UI
     setNeedsStatusById(prev => ({ ...prev, [bookingId]: overall }));
+    
+    // Get user email for better toast message
+    const userEmail = equipmentModalBooking?.user?.email || 'user';
+    
     // Use updateNeedsMutation to persist overall status and include per-item details in `note`
     try {
       await updateNeedsMutation.mutateAsync({ bookingId, status: overall, note: JSON.stringify({ items: statuses }) });
-      try { toast({ title: 'Saved', description: `Marked needs as ${overall}`, variant: 'default' }); } catch (e) {}
+      try { 
+        toast({ 
+          title: 'Equipment Updated', 
+          description: `You updated ${userEmail}'s equipment request`, 
+          variant: 'default' 
+        }); 
+      } catch (e) {}
+      // Only close modal on success
+      setShowEquipmentModal(false);
+      setEquipmentModalBooking(null);
+      setEquipmentModalItemStatuses({});
     } catch (e: any) {
       try { toast({ title: 'Save failed', description: e?.message || String(e), variant: 'destructive' }); } catch (e) {}
+    } finally {
+      setIsConfirmingEquipment(false);
     }
-    setShowEquipmentModal(false);
-    setEquipmentModalBooking(null);
-    setEquipmentModalItemStatuses({});
   };
 
   // Mutation to update needs status
@@ -594,13 +650,13 @@ export default function AdminDashboard() {
       const res = await apiRequest('POST', `/api/admin/bookings/${bookingId}/needs`, { status, note });
       return res.json();
     },
-    onSuccess: (_data, variables: any) => {
+    onSuccess: async (_data, variables: any) => {
       // Optimistic UI: immediately reflect the updated equipment statuses in the
       // admin bell by prepending a temporary alert constructed from the mutation
       // variables (bookingId, status, note). The Header parsing will pick up the
       // JSON payload in `note` to render per-item prepared/not-available icons.
       try {
-        const { bookingId, status, note } = variables || {};
+  const { status, note } = variables || {};
         const payloadJson = note && typeof note === 'string' ? note : (note ? JSON.stringify(note) : JSON.stringify({ items: {} }));
         // Create a human summary from the payload if possible
         let humanSummary = '';
@@ -637,9 +693,11 @@ export default function AdminDashboard() {
       }
 
       // Ensure authoritative data is fetched after optimistic update
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/bookings'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/alerts'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/activity'] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/bookings'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/alerts'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/activity'] }),
+      ]);
     },
     onError: (err: any) => {
       try {
@@ -658,8 +716,9 @@ export default function AdminDashboard() {
   // Treat `others` as description only; do not include it in the items list used for display.
   const allItems = rawItems.filter((s: string) => !/^others[:\s]*$/i.test(String(s).trim()));
   if (allItems.length === 0 && !othersText) return null;
-  const displayItems = allItems.slice(0, 3);
-  const hasMore = allItems.length > 3;
+  // Show up to 6 items directly, only hide if more than 6
+  const displayItems = allItems.slice(0, 6);
+  const hasMore = allItems.length > 6;
       const bookingStatuses = bookingItemStatus[String(booking.id)] || {};
       const coloredSpan = (it: string) => {
         const s = bookingStatuses[it];
@@ -669,7 +728,7 @@ export default function AdminDashboard() {
       };
       return (
         <div className="mt-2">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 mb-1">
             <div className="text-xs font-medium text-gray-700">Equipment:</div>
             {othersText && (() => {
               const id = String(booking.id || Math.random());
@@ -680,7 +739,7 @@ export default function AdminDashboard() {
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <PopoverTrigger asChild>
-                          <button onClick={() => setOpenOthers(prev => ({ ...prev, [id]: !prev[id] }))} className="ml-2 text-xs text-blue-600 hover:underline cursor-pointer" aria-expanded={isOpen}>view other</button>
+                          <button onClick={() => setOpenOthers(prev => ({ ...prev, [id]: !prev[id] }))} className="text-xs text-blue-600 hover:underline cursor-pointer" aria-expanded={isOpen}>view other</button>
                         </PopoverTrigger>
                       </TooltipTrigger>
                       <TooltipContent side="top" align="start" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
@@ -698,26 +757,30 @@ export default function AdminDashboard() {
             })()}
           </div>
           {displayItems.length > 0 && (
-            <div className="mt-1 grid grid-cols-1 md:grid-cols-2 gap-x-3 gap-y-1 text-xs text-gray-600">
-              {displayItems.map((it: string, idx: number) => (
-                <div key={idx} className="truncate">{coloredSpan(it)}</div>
-              ))}
+            <div className="space-y-1">
+              <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-gray-600">
+                {displayItems.map((it: string, idx: number) => (
+                  <div key={idx} className="truncate">{coloredSpan(it)}</div>
+                ))}
+              </div>
               {hasMore && (() => {
                 const extra = allItems.slice(displayItems.length);
                 const count = extra.length;
                 return (
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <button className="ml-2 text-xs text-blue-600">+{count} more</button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-56 p-2 z-50">
-                      <div className="text-sm">
-                        {extra.map((it: string, idx: number) => (
-                          <div key={idx} className="py-1">{coloredSpan(it)}</div>
-                        ))}
-                      </div>
-                    </PopoverContent>
-                  </Popover>
+                  <div className="mt-1">
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <button className="text-xs text-blue-600 hover:underline">+{count} more</button>
+                      </PopoverTrigger>
+                      <PopoverContent side="top" align="start" className="w-56 p-2 z-50">
+                        <div className="text-sm">
+                          {extra.map((it: string, idx: number) => (
+                            <div key={idx} className="py-1">{coloredSpan(it)}</div>
+                          ))}
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
                 );
               })()}
             </div>
@@ -770,6 +833,8 @@ export default function AdminDashboard() {
     },
     // Auto-refresh dashboard stats frequently so the admin overview stays up-to-date
     refetchInterval: 5000,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
     enabled: isAdmin,
   });
 
@@ -782,6 +847,8 @@ export default function AdminDashboard() {
     },
     // Poll alerts so system alerts appear in near-real time for admins
     refetchInterval: 5000,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
     enabled: isAdmin,
   });
 
@@ -793,6 +860,8 @@ export default function AdminDashboard() {
       return res.json();
     },
     refetchInterval: 5000,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
     enabled: isAdmin,
   });
 
@@ -804,6 +873,8 @@ export default function AdminDashboard() {
       return res.json();
     },
     refetchInterval: 5000,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
     enabled: isAdmin,
   });
 
@@ -815,6 +886,8 @@ export default function AdminDashboard() {
       return res.json();
     },
     refetchInterval: 5000,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
     enabled: isAdmin,
   });
 
@@ -825,6 +898,8 @@ export default function AdminDashboard() {
       const res = await apiRequest('GET', '/api/facilities');
       return res.json();
     },
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
   });
 
   // Admin users
@@ -834,6 +909,8 @@ export default function AdminDashboard() {
       const res = await apiRequest('GET', '/api/admin/users');
       return res.json();
     },
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
   });
 
   // Current authenticated user (for admin email fallbacks)
@@ -845,6 +922,17 @@ export default function AdminDashboard() {
     },
     retry: false,
   });
+
+  // Invalidate all admin queries on mount to ensure fresh data when returning to dashboard
+  useEffect(() => {
+    queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] });
+    queryClient.invalidateQueries({ queryKey: ['/api/admin/bookings'] });
+    queryClient.invalidateQueries({ queryKey: ['/api/bookings/pending'] });
+    queryClient.invalidateQueries({ queryKey: ['/api/facilities'] });
+    queryClient.invalidateQueries({ queryKey: ['/api/admin/users'] });
+    queryClient.invalidateQueries({ queryKey: ['/api/admin/alerts'] });
+    queryClient.invalidateQueries({ queryKey: ['/api/admin/activity'] });
+  }, []); // Only run once on mount
 
   // Map query results into the local state used by helper functions
   useEffect(() => {
@@ -1036,24 +1124,30 @@ export default function AdminDashboard() {
     mutationFn: async (_: any) => {
       return Promise.resolve({});
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/bookings'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/bookings/pending'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/alerts'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/activity'] });
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/bookings'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/bookings/pending'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/notifications'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/alerts'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/activity'] }),
+      ]);
     },
   });
 
   const denyBookingMutation = useMutation({
     // Deny is removed; keep a safe no-op to avoid runtime errors if UI calls it.
     mutationFn: async (_: any) => Promise.resolve({}),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/bookings'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/bookings/pending'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/alerts'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/activity'] });
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/bookings'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/bookings/pending'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/notifications'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/alerts'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/activity'] }),
+      ]);
     },
   });
 
@@ -1092,10 +1186,12 @@ export default function AdminDashboard() {
       const res = await apiRequest('POST', `/api/bookings/${bookingId}/confirm-arrival`);
       return res.json?.();
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/bookings'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/alerts'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] });
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/bookings'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/alerts'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] }),
+      ]);
     },
   });
 
@@ -1111,10 +1207,12 @@ export default function AdminDashboard() {
       const res = await apiRequest('POST', `/api/admin/users/${userId}/ban`, payload);
       return res.json?.();
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/users'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/activity'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] });
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/users'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/activity'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] }),
+      ]);
     },
   });
 
@@ -1123,32 +1221,88 @@ export default function AdminDashboard() {
       const res = await apiRequest('POST', `/api/admin/users/${userId}/unban`);
       return res.json?.();
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/users'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/activity'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] });
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/users'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/activity'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] }),
+      ]);
     },
   });
 
   const toggleFacilityAvailabilityMutation = useMutation({
-    mutationFn: async ({ facilityId, available, reason }: any) => {
-      // The server expects `isActive` boolean in the payload. Include optional reason when disabling.
+    mutationFn: async ({ facilityId, available, reason, startDate, endDate }: any) => {
+      // The server expects `isActive` boolean in the payload. Include optional reason and dates when disabling.
       const payload: any = { isActive: available };
       if (!available && reason) payload.reason = reason;
+      if (!available && startDate) payload.startDate = startDate;
+      if (!available && endDate) payload.endDate = endDate;
       const res = await apiRequest('PUT', `/api/admin/facilities/${facilityId}/availability`, payload);
       return res.json?.();
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/facilities'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] });
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['/api/facilities'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] }),
+      ]);
     },
   });
 
   const markAlertReadMutation = useMutation({
     mutationFn: async (alertId: string) => apiRequest('POST', `/api/admin/alerts/${alertId}/read`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/alerts'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] });
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/alerts'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] }),
+      ]);
+    },
+  });
+
+  const forceActiveBookingMutation = useMutation<any, Error, FacilityBooking>({
+    mutationFn: async (booking: FacilityBooking) => {
+      const now = new Date();
+      const endTime = new Date(now.getTime() + 2 * 60 * 60 * 1000); // 2 hours from now
+      const arrivalDeadline = new Date(now.getTime() + 15 * 60 * 1000); // 15 minutes from now
+      const res = await apiRequest('PUT', `/api/bookings/${booking.id}`, {
+        purpose: booking.purpose,
+        startTime: now.toISOString(),
+        endTime: endTime.toISOString(),
+        facilityId: booking.facilityId,
+        participants: booking.participants,
+        status: 'approved', // CRITICAL: Set to approved so arrival confirmation logic applies
+        arrivalConfirmationDeadline: arrivalDeadline.toISOString(), // Set new deadline: now + 15 minutes
+        arrivalConfirmed: false, // Ensure it requires confirmation
+      });
+      return res.json?.();
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/bookings'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/bookings/pending'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/bookings/all'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] }),
+      ]);
+      
+      // Force immediate refetch of admin bookings after invalidation completes
+      setTimeout(async () => {
+        await Promise.all([
+          queryClient.refetchQueries({ queryKey: ['/api/admin/bookings'] }),
+          queryClient.refetchQueries({ queryKey: ['/api/bookings/pending'] }),
+        ]);
+      }, 500);
+      
+      toast({ 
+        title: 'Booking Activated', 
+        description: 'Booking has been forced to active status for testing.',
+        variant: 'default' 
+      });
+    },
+    onError: (error: any) => {
+      toast({ 
+        title: 'Error', 
+        description: error?.message || 'Failed to force booking active',
+        variant: 'destructive' 
+      });
     },
   });
 
@@ -1178,16 +1332,6 @@ export default function AdminDashboard() {
     // If making unavailable, prompt for a reason so it can be shown to users. Prefill with a sensible default.
     let reason: string | undefined = undefined;
     if (!available) {
-      // Do not allow making unavailable during open library hours — avoid booking conflicts
-      if (!isLibraryClosedNow()) {
-        toast({
-          title: 'Cannot set unavailable now',
-          description: 'Facilities can only be marked unavailable when the library is closed, to avoid booking conflicts overall. This action will only work if the library is closed.',
-          variant: 'destructive',
-        });
-        return;
-      }
-
       // open unavailable reason modal instead of prompt
       setFacilityForUnavailable(facilityObj ?? { id: facility });
       setIsUnavailableModalOpen(true);
@@ -1319,9 +1463,23 @@ export default function AdminDashboard() {
   // avoid unused-variable TS warnings
   void getActorEmail;
 
-  const handleUnavailableConfirm = (reason?: string) => {
+  const handleUnavailableConfirm = (reason?: string, startDate?: string, endDate?: string) => {
     if (!facilityForUnavailable) return;
-    toggleFacilityAvailabilityMutation.mutate({ facilityId: facilityForUnavailable.id, available: false, reason });
+    // Add date range information to the reason if dates were selected
+    let fullReason = reason || '';
+    if (startDate && endDate) {
+      const dateInfo = startDate === endDate 
+        ? `Unavailable on ${startDate}` 
+        : `Unavailable from ${startDate} to ${endDate}`;
+      fullReason = fullReason ? `${dateInfo}. ${fullReason}` : dateInfo;
+    }
+    toggleFacilityAvailabilityMutation.mutate({ 
+      facilityId: facilityForUnavailable.id, 
+      available: false, 
+      reason: fullReason,
+      startDate,
+      endDate
+    });
     setFacilityForUnavailable(null);
     setIsUnavailableModalOpen(false);
   };
@@ -1354,15 +1512,160 @@ export default function AdminDashboard() {
     </div>
   );
 
+  // Generate a weekly booking report (group by ISO week starting Monday) from admin bookings
+  const generateBookingWeeklyReport = () => {
+    try {
+      const bk = Array.isArray(adminBookingsData) ? adminBookingsData.slice() : [];
+
+      // Helper to format facility name
+      const formatFacilityNameForReport = (name: string) => {
+        if (!name) return name;
+        const lower = name.toLowerCase();
+        if (lower === 'lounge' && !lower.includes('facility')) {
+          return 'Facility Lounge';
+        }
+        return name;
+      };
+
+      // Create workbook and worksheet
+      const wb = XLSX.utils.book_new();
+      const wsData: any[][] = [];
+
+      // Add header rows
+      wsData.push(['Booking Weekly Report']);
+      wsData.push([`Generated: ${new Date().toLocaleString()}`]);
+      wsData.push([`Total Bookings: ${bk.length}`]);
+      wsData.push([]); // Empty row
+
+      // Add column headers
+      wsData.push(['Week', 'Date', 'Day', 'Time', 'Facility', 'User Email', 'Status', 'Participants', 'Purpose', 'Booking ID']);
+
+      // Helper to get week key
+      const getWeekKey = (isoDateStr: string) => {
+        const d = new Date(isoDateStr);
+        const tmp = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+        const dayNum = tmp.getUTCDay() || 7;
+        tmp.setUTCDate(tmp.getUTCDate() + 4 - dayNum);
+        const yearStart = new Date(Date.UTC(tmp.getUTCFullYear(), 0, 1));
+        const weekNo = Math.ceil((((tmp.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+        return `${tmp.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+      };
+
+      // Group bookings by week
+      const weekMap: Record<string, any[]> = {};
+      for (const b of bk) {
+        const dateIso = (() => { try { return new Date(b.startTime).toISOString(); } catch (e) { return new Date().toISOString(); } })();
+        const weekKey = getWeekKey(dateIso);
+        if (!weekMap[weekKey]) weekMap[weekKey] = [];
+        weekMap[weekKey].push(b);
+      }
+
+      const weekKeys = Object.keys(weekMap).sort().reverse();
+
+      // Add data rows grouped by week
+      for (const wk of weekKeys) {
+        const items = weekMap[wk].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+
+        // Week separator row
+        wsData.push([wk, '', '', '', '', '', '', '', '', '']);
+
+        for (const booking of items) {
+          const dateObj = new Date(booking.startTime);
+          const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'short' });
+          const dateStr = `${(dateObj.getMonth() + 1).toString().padStart(2, '0')}/${dateObj.getDate().toString().padStart(2, '0')}/${dateObj.getFullYear()}`;
+          const startTime = dateObj.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+          const endTime = new Date(booking.endTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+          const timeStr = `${startTime} - ${endTime}`;
+          const facilityName = formatFacilityNameForReport(getFacilityName(booking.facilityId));
+          const userEmail = getUserEmail(booking.userId);
+
+          // Determine actual status
+          const now = new Date();
+          const bookingStart = new Date(booking.startTime);
+          const bookingEnd = new Date(booking.endTime);
+          let status = booking.status || 'N/A';
+
+          if (booking.status === 'approved') {
+            if (now >= bookingStart && now <= bookingEnd) {
+              status = 'Active';
+            } else if (now > bookingEnd) {
+              status = 'Completed';
+            } else if (now < bookingStart) {
+              status = 'Scheduled';
+            }
+          } else if (booking.status === 'pending') {
+            status = 'Pending';
+          } else if (booking.status === 'denied') {
+            status = 'Denied';
+          } else if (booking.status === 'cancelled') {
+            status = 'Cancelled';
+          }
+
+          const participants = booking.participants || 0;
+          const purpose = (booking.purpose || 'N/A').substring(0, 200);
+          const bookingId = booking.id || 'N/A';
+
+          wsData.push(['', dateStr, dayName, timeStr, facilityName, userEmail, status, participants, purpose, bookingId]);
+        }
+      }
+
+      // Create worksheet from data
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+      // Set column widths
+      ws['!cols'] = [
+        { wch: 12 },  // Week
+        { wch: 12 },  // Date
+        { wch: 6 },   // Day
+        { wch: 18 },  // Time
+        { wch: 28 },  // Facility
+        { wch: 25 },  // User Email
+        { wch: 12 },  // Status
+        { wch: 12 },  // Participants
+        { wch: 40 },  // Purpose
+        { wch: 38 }   // Booking ID
+      ];
+
+      // Add worksheet to workbook
+      XLSX.utils.book_append_sheet(wb, ws, 'Booking Report');
+
+      // Generate and download file
+      XLSX.writeFile(wb, `booking-weekly-report-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    } catch (e) {
+      try { toast({ title: 'Report Failed', description: String(e), variant: 'destructive' }); } catch (_) { }
+    }
+  };
+
+  // XML escape for Excel XML format
+  const escapeXML = (s: any) => {
+    if (s == null) return '';
+    const str = String(s);
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;')
+      .replace(/[\r\n]+/g, ' ');
+  };
+
+  // CSV escape for Excel compatibility (kept for other potential uses)
+  const escapeCSV = (s: any) => {
+    if (s == null) return '';
+    const str = String(s);
+    // Escape double quotes by doubling them, and remove line breaks
+    return str.replace(/"/g, '""').replace(/[\r\n]+/g, ' ');
+  };
+
   const OverviewTile = ({ title, count, subtitle, onClick, icon }: { title: string; count: number | string; subtitle?: string; onClick?: () => void; icon?: React.ReactNode }) => (
-    <button onClick={onClick} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-all duration-200 text-left group">
+    <button onClick={onClick} className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 hover:shadow-md transition-all duration-200 text-left group w-full">
       <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-medium text-gray-600 group-hover:text-gray-800">{title}</p>
-          <p className="text-3xl font-bold text-gray-900 mt-1">{count}</p>
-          {subtitle && <p className="text-xs text-gray-500 mt-1">{subtitle}</p>}
+        <div className="flex-1 min-w-0">
+          <p className="text-xs sm:text-sm font-medium text-gray-600 group-hover:text-gray-800 break-words">{title}</p>
+          <p className="text-2xl sm:text-3xl font-bold text-gray-900 mt-1">{count}</p>
+          {subtitle && <p className="text-[10px] sm:text-xs text-gray-500 mt-1 break-words">{subtitle}</p>}
         </div>
-        <div className="bg-gray-100 p-3 rounded-full group-hover:bg-gray-200 transition-colors duration-200">
+        <div className="bg-gray-100 p-2 sm:p-3 rounded-full group-hover:bg-gray-200 transition-colors duration-200 flex-shrink-0 ml-2 sm:ml-0">
           {icon}
         </div>
       </div>
@@ -1433,36 +1736,36 @@ export default function AdminDashboard() {
 
       case "booking-management":
         return (
-          <div className="space-y-6">
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h2 className="text-2xl font-bold text-gray-900">Facility Booking Management</h2>
-                  <p className="text-gray-600 mt-1">Monitor active bookings, scheduled reservations, and booking history</p>
+          <div className="space-y-4 sm:space-y-6">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4 sm:mb-6">
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Facility Booking Management</h2>
+                  <p className="text-sm sm:text-base text-gray-600 mt-1">Monitor active bookings, scheduled reservations, and booking history</p>
                 </div>
-                <div className="flex flex-col md:flex-row gap-2 items-start md:items-center">
-                  <div className="w-full md:w-auto bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium">{activeBookings?.length || 0} Active</div>
-                  <div className="w-full md:w-auto bg-pink-100 text-pink-800 px-3 py-1 rounded-full text-sm font-medium">{(upcomingBookings?.length || pendingBookings?.length) || 0} Scheduled</div>
+                <div className="flex flex-row flex-wrap gap-2 items-center">
+                  <div className="bg-green-100 text-green-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center">{activeBookings?.length || 0} Active</div>
+                  <div className="bg-pink-100 text-pink-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center">{(upcomingBookings?.length || pendingBookings?.length) || 0} Scheduled</div>
                 </div>
               </div>
 
-              <Tabs value={bookingTab} onValueChange={(v) => setBookingTab(v)} className="space-y-6">
+              <Tabs value={bookingTab} onValueChange={(v) => setBookingTab(v)} className="space-y-4 sm:space-y-6">
                 <TabsList className="grid w-full grid-cols-1 md:grid-cols-2 gap-2">
-                  <TabsTrigger value="active" className="w-full whitespace-normal flex items-center justify-start gap-2 text-left md:justify-center md:text-center">
-                    <CheckCircle className="h-4 w-4 text-green-600" />
-                    Active Bookings
+                  <TabsTrigger value="active" className="w-full whitespace-normal flex items-center justify-start md:justify-center gap-2 text-left md:text-center">
+                    <CheckCircle className="h-4 w-4 text-green-600 flex-shrink-0" />
+                    <span className="truncate">Active Bookings</span>
                   </TabsTrigger>
-                  <TabsTrigger value="pendingList" className="w-full whitespace-normal flex items-center justify-start gap-2 text-left md:justify-center md:text-center">
-                    <Clock className="h-4 w-4 text-green-600" />
-                    Scheduled
+                  <TabsTrigger value="pendingList" className="w-full whitespace-normal flex items-center justify-start md:justify-center gap-2 text-left md:text-center">
+                    <Clock className="h-4 w-4 text-green-600 flex-shrink-0" />
+                    <span className="truncate">Scheduled</span>
                   </TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="active" className="space-y-4 mt-6 md:mt-0">
-                  <div className="bg-gray-50 rounded-lg p-6 mt-4 md:mt-0">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-lg font-semibold text-gray-900">Currently Active Facility Bookings</h3>
-                      <span className="text-sm text-gray-600">{activeBookings?.length || 0} bookings</span>
+                  <div className="bg-gray-50 rounded-lg p-4 sm:p-6 mt-4 md:mt-0">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-0 mb-4">
+                      <h3 className="text-base sm:text-lg font-semibold text-gray-900">Currently Active Facility Bookings</h3>
+                      <span className="text-xs sm:text-sm text-gray-600 whitespace-nowrap">{activeBookings?.length || 0} bookings</span>
                     </div>
                     
                     {activeBookings && activeBookings.length > 0 ? (
@@ -1470,18 +1773,131 @@ export default function AdminDashboard() {
                         {activeBookings
                           ?.slice(activeBookingsPage * itemsPerPage, (activeBookingsPage + 1) * itemsPerPage)
                           .map((booking: FacilityBooking) => (
-                          <div key={booking.id} className="bg-white rounded-lg p-4 border border-gray-200 hover:border-green-300 transition-colors duration-200">
-                            <div className="flex flex-col md:flex-row items-start md:items-center gap-4 md:gap-6">
+                          <div key={booking.id} className="bg-white rounded-lg p-3 sm:p-4 border border-gray-200 hover:border-green-300 transition-colors duration-200">
+                            {/* Mobile Layout */}
+                            <div className="flex flex-col gap-3 md:hidden">
+                              {/* Header: Icon + User */}
+                              <div className="flex items-start gap-3">
+                                <div className="bg-green-100 p-2 rounded-lg flex-shrink-0">
+                                  <CheckCircle className="h-5 w-5 text-green-600" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <h4 className="font-medium text-sm text-gray-900 break-words">{getUserEmail(booking.userId)}</h4>
+                                  <p className="text-xs text-gray-600 mt-0.5 break-words">{getFacilityName(booking.facilityId)}</p>
+                                </div>
+                                <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 whitespace-nowrap flex-shrink-0">Active</span>
+                              </div>
+
+                              {/* Participants */}
+                              <div className="flex items-center gap-2 pl-11">
+                                <span className="text-xs font-medium text-gray-500">Participants:</span>
+                                <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">{booking.participants || 0}</span>
+                              </div>
+
+                              {/* Times */}
+                              <div className="grid grid-cols-2 gap-2 pl-11">
+                                <div>
+                                  <p className="text-xs font-medium text-gray-900">Started</p>
+                                  <p className="text-xs text-gray-600 mt-0.5">{formatTime(booking.startTime)}</p>
+                                  <p className="text-xs text-gray-500">{formatDate(booking.startTime)}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs font-medium text-gray-900">Ends</p>
+                                  <p className="text-xs text-gray-600 mt-0.5">{formatTime(booking.endTime)}</p>
+                                  <p className="text-xs text-gray-500">{formatDate(booking.endTime)}</p>
+                                </div>
+                              </div>
+
+                              {/* Purpose */}
+                              {booking.purpose && (() => {
+                                const id = String(booking.id || Math.random());
+                                const isOpen = !!openPurpose[id];
+                                return (
+                                  <div className="pl-11">
+                                    <button
+                                      onClick={() => setOpenPurpose(prev => ({ ...prev, [id]: !prev[id] }))}
+                                      className="flex items-center gap-1 text-xs text-pink-600 hover:text-pink-700 transition-colors"
+                                    >
+                                      <Eye className="h-3 w-3 text-pink-600" />
+                                      <span>View purpose</span>
+                                    </button>
+                                    {isOpen && (
+                                      <div className="fixed inset-0 z-50 flex items-start justify-center pt-20" onClick={() => setOpenPurpose(prev => ({ ...prev, [id]: false }))}>
+                                        <div className="w-[calc(100vw-2rem)] max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                                          <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                            <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
+                                          </div>
+                                          <div className="p-3">
+                                            <p className="text-sm text-gray-900 leading-5 break-words text-left">
+                                              {booking.purpose || 'No purpose specified'}
+                                            </p>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })()}
+
+                              {/* Equipment */}
+                              {(booking.status === 'approved' || String(booking.status).toLowerCase() === 'pending') && (
+                                <div className="pl-11">
+                                  {renderEquipmentLine(booking)}
+                                  {isAdmin && !!booking.equipment && new Date(booking.startTime) > new Date() && !getNeedsStatusForBooking(booking) && (
+                                    <Button size="sm" onClick={() => openEquipmentModal(booking)} aria-label={`Check equipment for ${booking.id}`} className="w-full mt-2 text-xs">
+                                      🔎 Check Equipment
+                                    </Button>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Countdown / Arrival Confirmation */}
+                              {(booking.status === 'approved' || String(booking.status).toLowerCase() === 'pending') && (
+                                <div className="pl-11">
+                                  {booking.arrivalConfirmationDeadline && !booking.arrivalConfirmed ? (
+                                    <div className="flex flex-col gap-2">
+                                      <div className="text-xs text-gray-500">Confirmation required in:</div>
+                                      <Countdown expiry={booking.arrivalConfirmationDeadline} onExpire={() => { queryClient.invalidateQueries({ queryKey: ['/api/admin/bookings'] }); try { const label = `${getFacilityName(booking.facilityId)} (${formatDateTime(booking.startTime)})`; toast({ title: 'Arrival Confirmation Expired', description: `Arrival confirmation window expired for ${label}.` }); } catch (e) { toast({ title: 'Arrival Confirmation Expired', description: 'Arrival confirmation window expired for a booking.' }); } }} />
+                                      <Button
+                                        onClick={() => confirmArrivalMutation.mutate({ bookingId: booking.id })}
+                                        variant="outline"
+                                        size="sm"
+                                        disabled={confirmArrivalMutation.isPending}
+                                        aria-label={`Confirm arrival for booking ${booking.id}`}
+                                        className="w-full text-xs"
+                                      >
+                                        {confirmArrivalMutation.isPending ? (
+                                          <span className="flex items-center gap-2">
+                                            <Loader2 className="h-3 w-3 animate-spin" />
+                                            Confirming...
+                                          </span>
+                                        ) : (
+                                          'Confirm Arrival'
+                                        )}
+                                      </Button>
+                                    </div>
+                                  ) : (
+                                    <div className="flex flex-col gap-1">
+                                      <div className="text-xs font-medium text-gray-500">Time remaining</div>
+                                      <div className="px-3 py-1.5 bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-lg">
+                                        <Countdown expiry={booking.endTime} onExpire={() => { queryClient.invalidateQueries({ queryKey: ['/api/admin/bookings'] }); toast({ title: 'Booking Ended', description: `Booking for ${getUserEmail(booking.userId)} has ended.` }); }} />
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Desktop Layout */}
+                            <div className="hidden md:flex items-start justify-between gap-4">
+                              {/* Left side: User info */}
                               <div className="flex items-center gap-4">
                                 <div className="bg-green-100 p-2 rounded-lg">
                                   <CheckCircle className="h-5 w-5 text-green-600" />
                                 </div>
-                                  <div>
+                                <div>
                                   <h4 className="font-medium text-gray-900">{getUserEmail(booking.userId)}</h4>
-                                  <div className="flex items-center gap-3">
-                                    <p className="text-sm text-gray-600">{getFacilityName(booking.facilityId)}</p>
-                                    {renderEquipmentBadge(booking)}
-                                  </div>
+                                  <p className="text-sm text-gray-600">{getFacilityName(booking.facilityId)}</p>
                                   <div className="flex items-center gap-2 mt-1">
                                     <span className="text-xs font-medium text-gray-500">Participants:</span>
                                     <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">{booking.participants || 0}</span>
@@ -1489,12 +1905,14 @@ export default function AdminDashboard() {
                                 </div>
                               </div>
                               
-                              <div className="flex flex-col md:flex-row items-start md:items-center gap-4 md:gap-6">
-                                <div className="md:text-right text-left">
-                                  {booking.purpose && (() => {
-                                    const id = String(booking.id || Math.random());
-                                    const isOpen = !!openPurpose[id];
-                                    return (
+                              {/* Right side: All other info */}
+                              <div className="flex flex-col md:flex-row items-start md:items-center gap-4 md:gap-6 w-full md:w-auto md:flex-1 md:justify-end">
+                                {/* View purpose */}
+                                {booking.purpose && (() => {
+                                  const id = String(booking.id || Math.random());
+                                  const isOpen = !!openPurpose[id];
+                                  return (
+                                    <div className="text-right">
                                       <Popover open={isOpen} onOpenChange={(v) => setOpenPurpose(prev => ({ ...prev, [id]: v }))}>
                                         <TooltipProvider>
                                           <Tooltip>
@@ -1502,7 +1920,7 @@ export default function AdminDashboard() {
                                               <PopoverTrigger asChild>
                                                 <button
                                                   onClick={() => setOpenPurpose(prev => ({ ...prev, [id]: !prev[id] }))}
-                                                  className="flex items-center gap-1 cursor-help justify-end text-xs text-pink-600"
+                                                  className="flex items-center gap-1 cursor-help text-xs text-pink-600 hover:text-pink-700 transition-colors"
                                                   aria-expanded={isOpen}
                                                 >
                                                   <Eye className="h-3 w-3 text-pink-600" />
@@ -1510,19 +1928,19 @@ export default function AdminDashboard() {
                                                 </button>
                                               </PopoverTrigger>
                                             </TooltipTrigger>
-                                                <TooltipContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
-                                                  <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                                                    <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
-                                                  </div>
-                                                  <div className="p-3">
-                                                    <p className="text-sm text-gray-900 leading-5 break-words text-left">
-                                                      {booking.purpose || 'No purpose specified'}
-                                                    </p>
-                                                  </div>
-                                                </TooltipContent>
+                                            <TooltipContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
+                                              <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                                <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
+                                              </div>
+                                              <div className="p-3">
+                                                <p className="text-sm text-gray-900 leading-5 break-words text-left">
+                                                  {booking.purpose || 'No purpose specified'}
+                                                </p>
+                                              </div>
+                                            </TooltipContent>
                                           </Tooltip>
                                         </TooltipProvider>
-                                        <PopoverContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50 origin-top-left">
+                                        <PopoverContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50">
                                           <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
                                             <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
                                           </div>
@@ -1533,67 +1951,74 @@ export default function AdminDashboard() {
                                           </div>
                                         </PopoverContent>
                                       </Popover>
-                                    );
-                                  })()}
-                                </div>
+                                    </div>
+                                  );
+                                })()}
+                                
+                                {/* Started time */}
                                 <div className="text-right">
                                   <p className="text-sm font-medium text-gray-900">Started</p>
-                                  <p className="text-sm text-gray-600">{formatDateTime(booking.startTime)}</p>
+                                  <p className="text-xs text-gray-600">{formatTime(booking.startTime)}</p>
+                                  <p className="text-xs text-gray-500">{formatDate(booking.startTime)}</p>
                                 </div>
+                                
+                                {/* Ends time */}
                                 <div className="text-right">
                                   <p className="text-sm font-medium text-gray-900">Ends</p>
-                                  <p className="text-sm text-gray-600">{formatDateTime(booking.endTime)}</p>
+                                  <p className="text-xs text-gray-600">{formatTime(booking.endTime)}</p>
+                                  <p className="text-xs text-gray-500">{formatDate(booking.endTime)}</p>
                                 </div>
-                                <div className="flex flex-col md:flex-row gap-2 items-start md:items-center">
-                                  <span className="w-full md:w-auto px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">Active</span>
-                                  { ((booking.status === 'approved' || String(booking.status).toLowerCase() === 'pending') && !!booking.equipment) && (
-                                    (() => {
-                                      const ns = getNeedsStatusForBooking(booking);
-                                      if (ns === 'prepared') {
-                                        return <div className="w-full md:w-auto inline-flex items-center justify-center h-6 min-w-[72px] px-3 rounded-full bg-emerald-100 text-emerald-800 text-xs font-medium truncate">Prepared</div>;
-                                      }
-                                      // Do not render a persistent "Not Available" badge in the booking list per UX request.
-                                      if (ns === 'not_available') {
-                                        return null;
-                                      }
-                                      return <div className="w-full md:w-auto inline-flex items-center justify-center h-6 min-w-[72px] px-3 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 truncate">NEEDS</div>;
-                                    })()
-                                  )}
+                                
+                                {/* Active status */}
+                                <div className="flex items-center">
+                                  <span className="px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">Active</span>
                                 </div>
-                                {/* removed: admin-facing pending-notice per request */}
-
-                                {/* Arrival confirmation countdown and admin action: if arrivalConfirmationDeadline exists and not yet confirmed, show confirmation countdown and a Confirm button */}
-                                {(booking.status === 'approved' || String(booking.status).toLowerCase() === 'pending') && (
-                                  <div className="text-right text-xs text-gray-500 mt-1">
-                                    {booking.arrivalConfirmationDeadline && !booking.arrivalConfirmed ? (
-                                      <div className="flex items-center justify-end gap-3">
-                                        <div>Confirmation required in: <Countdown expiry={booking.arrivalConfirmationDeadline} onExpire={() => { queryClient.invalidateQueries({ queryKey: ['/api/admin/bookings'] }); try { const label = `${getFacilityName(booking.facilityId)} (${formatDateTime(booking.startTime)})`; toast({ title: 'Arrival Confirmation Expired', description: `Arrival confirmation window expired for ${label}.` }); } catch (e) { toast({ title: 'Arrival Confirmation Expired', description: 'Arrival confirmation window expired for a booking.' }); } }} /></div>
-                                        <div>
-                                          <Button
-                                            onClick={() => confirmArrivalMutation.mutate({ bookingId: booking.id })}
-                                            variant="outline"
-                                            size="sm"
-                                            aria-label={`Confirm arrival for booking ${booking.id}`}
-                                            className="inline-flex items-center gap-2"
-                                          >
-                                            Confirm Arrival
-                                          </Button>
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <div>Time remaining: <Countdown expiry={booking.endTime} onExpire={() => { queryClient.invalidateQueries({ queryKey: ['/api/admin/bookings'] }); toast({ title: 'Booking Ended', description: `Booking for ${getUserEmail(booking.userId)} has ended.` }); }} /></div>
-                                    )}
-                                  </div>
-                                )}
-                                {/* Equipment line and admin actions */}
-                                <div className="ml-4">
-                                  {((booking.status === 'approved' || String(booking.status).toLowerCase() === 'pending') && new Date(booking.startTime) > new Date()) && renderEquipmentLine(booking)}
-                                  {isAdmin && !!booking.equipment && ((booking.status === 'approved' || String(booking.status).toLowerCase() === 'pending') && new Date(booking.startTime) > new Date()) && !getNeedsStatusForBooking(booking) && (
+                                
+                                {/* Equipment */}
+                                <div className="text-right">
+                                  {(booking.status === 'approved' || String(booking.status).toLowerCase() === 'pending') && renderEquipmentLine(booking)}
+                                  {isAdmin && !!booking.equipment && (booking.status === 'approved' || String(booking.status).toLowerCase() === 'pending') && new Date(booking.startTime) > new Date() && !getNeedsStatusForBooking(booking) && (
                                     <div className="flex items-center gap-2 mt-2">
                                       <Button size="sm" onClick={() => openEquipmentModal(booking)} aria-label={`Check equipment for ${booking.id}`}>🔎 Check Equipment</Button>
                                     </div>
                                   )}
                                 </div>
+
+                                {/* Time remaining or Arrival confirmation */}
+                                {(booking.status === 'approved' || String(booking.status).toLowerCase() === 'pending') && (
+                                  <div className="text-right">
+                                    {booking.arrivalConfirmationDeadline && !booking.arrivalConfirmed ? (
+                                      <div className="flex flex-col items-end gap-2">
+                                        <div className="text-xs text-gray-500">Confirmation required in:</div>
+                                        <Countdown expiry={booking.arrivalConfirmationDeadline} onExpire={() => { queryClient.invalidateQueries({ queryKey: ['/api/admin/bookings'] }); try { const label = `${getFacilityName(booking.facilityId)} (${formatDateTime(booking.startTime)})`; toast({ title: 'Arrival Confirmation Expired', description: `Arrival confirmation window expired for ${label}.` }); } catch (e) { toast({ title: 'Arrival Confirmation Expired', description: 'Arrival confirmation window expired for a booking.' }); } }} />
+                                        <Button
+                                          onClick={() => confirmArrivalMutation.mutate({ bookingId: booking.id })}
+                                          variant="outline"
+                                          size="sm"
+                                          disabled={confirmArrivalMutation.isPending}
+                                          aria-label={`Confirm arrival for booking ${booking.id}`}
+                                          className="inline-flex items-center gap-2"
+                                        >
+                                          {confirmArrivalMutation.isPending ? (
+                                            <span className="flex items-center gap-2">
+                                              <Loader2 className="h-3 w-3 animate-spin" />
+                                              Confirming...
+                                            </span>
+                                          ) : (
+                                            'Confirm Arrival'
+                                          )}
+                                        </Button>
+                                      </div>
+                                    ) : (
+                                      <div className="flex flex-col gap-1 items-end">
+                                        <div className="text-xs font-medium text-gray-500">Time remaining</div>
+                                        <div className="px-3 py-1.5 bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-lg">
+                                          <Countdown expiry={booking.endTime} onExpire={() => { queryClient.invalidateQueries({ queryKey: ['/api/admin/bookings'] }); toast({ title: 'Booking Ended', description: `Booking for ${getUserEmail(booking.userId)} has ended.` }); }} />
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -1601,8 +2026,8 @@ export default function AdminDashboard() {
                         
                         {/* Pagination for active bookings */}
                         {activeBookings.length > itemsPerPage && (
-                          <div className="flex items-center justify-between pt-4 border-t border-gray-200">
-                            <p className="text-sm text-gray-600">
+                          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-gray-200">
+                            <p className="text-xs sm:text-sm text-gray-600 text-center sm:text-left">
                               Showing {activeBookingsPage * itemsPerPage + 1} to {Math.min((activeBookingsPage + 1) * itemsPerPage, activeBookings.length)} of {activeBookings.length} results
                             </p>
                             <div className="flex items-center gap-2">
@@ -1613,7 +2038,7 @@ export default function AdminDashboard() {
                               >
                                 <ChevronLeft className="h-4 w-4" />
                               </button>
-                              <span className="px-3 py-1 text-sm font-medium">
+                              <span className="px-3 py-1 text-xs sm:text-sm font-medium whitespace-nowrap">
                                 {activeBookingsPage + 1} of {Math.ceil(activeBookings.length / itemsPerPage)}
                               </span>
                               <button
@@ -1639,10 +2064,10 @@ export default function AdminDashboard() {
                   </div>
                 </TabsContent>
                 <TabsContent value="pendingList" className="space-y-4 mt-6 md:mt-0">
-                  <div className="bg-gray-50 rounded-lg p-6">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-lg font-semibold text-gray-900">Scheduled Facility Bookings</h3>
-                      <span className="text-sm text-gray-600">{upcomingBookings?.length || 0} bookings</span>
+                  <div className="bg-gray-50 rounded-lg p-3 sm:p-6">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 mb-4">
+                      <h3 className="text-base sm:text-lg font-semibold text-gray-900">Scheduled Facility Bookings</h3>
+                      <span className="text-xs sm:text-sm text-gray-600 whitespace-nowrap">{upcomingBookings?.length || 0} bookings</span>
                     </div>
                     
                     {upcomingBookings && upcomingBookings.length > 0 ? (
@@ -1650,8 +2075,111 @@ export default function AdminDashboard() {
                         {upcomingBookings
                           ?.slice(upcomingBookingsPage * itemsPerPage, (upcomingBookingsPage + 1) * itemsPerPage)
                           .map((booking: FacilityBooking) => (
-                          <div key={booking.id} className="bg-white rounded-lg p-4 border border-gray-200 hover:border-pink-200 transition-colors duration-200">
-                            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                          <div key={booking.id} className="bg-white rounded-lg p-3 sm:p-4 border border-gray-200 hover:border-pink-200 transition-colors duration-200">
+                            {/* Mobile Layout */}
+                            <div className="flex flex-col gap-3 md:hidden">
+                              {/* Header: Icon + User Email */}
+                              <div className="flex items-start gap-3">
+                                <div className="bg-pink-100 p-2 rounded-lg flex-shrink-0">
+                                  <Clock className="h-5 w-5 text-pink-600" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <h4 className="font-medium text-gray-900 text-sm break-words">{getUserEmail(booking.userId)}</h4>
+                                  <p className="text-xs text-gray-600 mt-0.5 break-words">{getFacilityName(booking.facilityId)}</p>
+                                </div>
+                              </div>
+
+                              {/* Participants */}
+                              <div className="flex items-center gap-2 pl-11">
+                                <span className="text-xs font-medium text-gray-500">Participants:</span>
+                                <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">{booking.participants || 0}</span>
+                              </div>
+
+                              {/* Time Details */}
+                              <div className="grid grid-cols-2 gap-2 pl-11">
+                                <div>
+                                  <p className="text-xs font-medium text-gray-900">Starts</p>
+                                  <p className="text-xs text-gray-600 mt-0.5">{formatDateTime(booking.startTime)}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs font-medium text-gray-900">Ends</p>
+                                  <p className="text-xs text-gray-600 mt-0.5">{formatDateTime(booking.endTime)}</p>
+                                </div>
+                              </div>
+
+                              {/* Status Badges */}
+                              <div className="flex flex-wrap gap-2 pl-11">
+                                <span className="inline-flex items-center justify-center px-3 py-1 rounded-full text-xs font-medium bg-pink-100 text-pink-800">Scheduled</span>
+                                { ((booking.status === 'approved' || String(booking.status).toLowerCase() === 'pending') && !!booking.equipment) && (
+                                  (() => {
+                                    const ns = getNeedsStatusForBooking(booking);
+                                    if (ns === 'prepared') {
+                                      return <span className="inline-flex items-center justify-center px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-medium">Prepared</span>;
+                                    }
+                                    if (ns === 'not_available') return null;
+                                    return <span className="inline-flex items-center justify-center px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">NEEDS</span>;
+                                  })()
+                                )}
+                              </div>
+
+                              {/* Purpose Button */}
+                              {booking.purpose && (() => {
+                                const id = String(booking.id || Math.random());
+                                const isOpen = !!openPurpose[id];
+                                return (
+                                  <div className="pl-11">
+                                    <button
+                                      onClick={() => setOpenPurpose(prev => ({ ...prev, [id]: !prev[id] }))}
+                                      className="flex items-center gap-1 text-xs text-pink-600 hover:text-pink-700 transition-colors"
+                                    >
+                                      <Eye className="h-3 w-3 text-pink-600" />
+                                      <span>View purpose</span>
+                                    </button>
+                                    {isOpen && (
+                                      <div className="fixed inset-0 z-50 flex items-start justify-center pt-20" onClick={() => setOpenPurpose(prev => ({ ...prev, [id]: false }))}>
+                                        <div className="w-[calc(100vw-2rem)] max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                                          <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                            <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
+                                          </div>
+                                          <div className="p-3">
+                                            <p className="text-sm text-gray-900 leading-5 break-words text-left">
+                                              {booking.purpose || 'No purpose specified'}
+                                            </p>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })()}
+
+                              {/* Equipment and Actions */}
+                              {((booking.status === 'approved' || String(booking.status).toLowerCase() === 'pending') && new Date(booking.startTime) > new Date()) && (
+                                <div className="pl-11 space-y-2">
+                                  {renderEquipmentLine(booking)}
+                                  {isAdmin && !!booking.equipment && !getNeedsStatusForBooking(booking) && (
+                                    <Button size="sm" onClick={() => openEquipmentModal(booking)} aria-label={`Check equipment for ${booking.id}`} className="w-full text-xs">
+                                      🔎 Check Equipment
+                                    </Button>
+                                  )}
+                                  {isAdmin && (
+                                    <Button 
+                                      size="sm" 
+                                      variant="outline"
+                                      onClick={() => forceActiveBookingMutation.mutate(booking)} 
+                                      disabled={forceActiveBookingMutation.isPending}
+                                      className="w-full bg-blue-50 border-blue-200 hover:bg-blue-100 text-blue-700 text-xs"
+                                      aria-label={`Force booking ${booking.id} to active`}
+                                    >
+                                      ⚡ Force Active (Test)
+                                    </Button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Desktop Layout */}
+                            <div className="hidden md:flex items-start justify-between gap-4">
                               <div className="flex items-center gap-4">
                                 <div className="bg-pink-100 p-2 rounded-lg">
                                   <Clock className="h-5 w-5 text-pink-600" />
@@ -1659,10 +2187,10 @@ export default function AdminDashboard() {
                                 <div className="flex-1">
                                   <h4 className="font-medium text-gray-900">{getUserEmail(booking.userId)}</h4>
                                   <p className="text-sm text-gray-600">{getFacilityName(booking.facilityId)}</p>
-                                <div className="flex items-center gap-2 mt-1">
-                                  <span className="text-xs font-medium text-gray-500">Participants:</span>
-                                  <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">{booking.participants || 0}</span>
-                                </div>
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <span className="text-xs font-medium text-gray-500">Participants:</span>
+                                    <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">{booking.participants || 0}</span>
+                                  </div>
                                 </div>
                               </div>
                               
@@ -1681,7 +2209,7 @@ export default function AdminDashboard() {
                                                   <PopoverTrigger asChild>
                                                     <button
                                                       onClick={() => setOpenPurpose(prev => ({ ...prev, [id]: !prev[id] }))}
-                                                      className="flex items-center gap-1 cursor-help justify-end text-xs text-pink-600"
+                                                      className="flex items-center gap-1 cursor-help justify-end text-xs text-pink-600 hover:text-pink-700 transition-colors"
                                                       aria-expanded={isOpen}
                                                     >
                                                       <Eye className="h-3 w-3 text-pink-600" />
@@ -1759,6 +2287,20 @@ export default function AdminDashboard() {
                                       <Button size="sm" onClick={() => openEquipmentModal(booking)} aria-label={`Check equipment for ${booking.id}`}>🔎 Check Equipment</Button>
                                     </div>
                                   )}
+                                  {isAdmin && new Date(booking.startTime) > new Date() && (
+                                    <div className="flex items-center gap-2 mt-2">
+                                      <Button 
+                                        size="sm" 
+                                        variant="outline"
+                                        onClick={() => forceActiveBookingMutation.mutate(booking)} 
+                                        disabled={forceActiveBookingMutation.isPending}
+                                        className="bg-blue-50 border-blue-200 hover:bg-blue-100 text-blue-700"
+                                        aria-label={`Force booking ${booking.id} to active`}
+                                      >
+                                        ⚡ Force Active (Test)
+                                      </Button>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             </div>
@@ -1767,8 +2309,8 @@ export default function AdminDashboard() {
                         
                         {/* Pagination for pending-list (upcoming) bookings */}
                         {upcomingBookings.length > itemsPerPage && (
-                          <div className="flex items-center justify-between pt-4 border-t border-gray-200">
-                              <p className="text-sm text-gray-600">
+                          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-gray-200">
+                            <p className="text-xs sm:text-sm text-gray-600 text-center sm:text-left">
                               Showing {upcomingBookingsPage * itemsPerPage + 1} to {Math.min((upcomingBookingsPage + 1) * itemsPerPage, upcomingBookings.length)} of {upcomingBookings.length} results
                             </p>
                             <div className="flex items-center gap-2">
@@ -1779,7 +2321,7 @@ export default function AdminDashboard() {
                               >
                                 <ChevronLeft className="h-4 w-4" />
                               </button>
-                              <span className="px-3 py-1 text-sm font-medium">
+                              <span className="px-3 py-1 text-xs sm:text-sm font-medium whitespace-nowrap">
                                 {upcomingBookingsPage + 1} of {Math.ceil(upcomingBookings.length / itemsPerPage)}
                               </span>
                               <button
@@ -1814,28 +2356,28 @@ export default function AdminDashboard() {
   const bannedUsers = usersData?.filter(user => user.status === "banned");
 
         return (
-          <div className="space-y-6">
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h2 className="text-2xl font-bold text-gray-900">User Management</h2>
-                  <p className="text-gray-600 mt-1">Manage facility booking users and suspended accounts</p>
+          <div className="space-y-4 sm:space-y-6">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4 sm:mb-6">
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-xl sm:text-2xl font-bold text-gray-900">User Management</h2>
+                  <p className="text-sm sm:text-base text-gray-600 mt-1">Manage facility booking users and suspended accounts</p>
                 </div>
-                <div className="flex flex-col md:flex-row gap-2 items-start md:items-center">
-                  <div className="w-full md:w-auto bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">{bookingUsers?.length || 0} Booking Users</div>
-                  <div className="w-full md:w-auto bg-red-100 text-red-800 px-3 py-1 rounded-full text-sm font-medium">{bannedUsers?.length || 0} Suspended</div>
+                <div className="flex flex-row flex-wrap sm:flex-col md:flex-row gap-2 items-start md:items-center">
+                  <div className="bg-blue-100 text-blue-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap">{bookingUsers?.length || 0} Booking Users</div>
+                  <div className="bg-red-100 text-red-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap">{bannedUsers?.length || 0} Suspended</div>
                 </div>
               </div>
 
-              <Tabs value={userTab} onValueChange={(v: string) => setUserTab(v)} className="space-y-6">
-                <TabsList className="grid w-full grid-cols-2 md:grid-cols-2 gap-2">
-                  <TabsTrigger value="booking-users" className="w-full whitespace-normal flex items-center justify-start gap-2 text-left md:justify-center md:text-center">
-                    <Users className="h-4 w-4 text-blue-600" />
-                    Booking Users
+              <Tabs value={userTab} onValueChange={(v: string) => setUserTab(v)} className="space-y-4 sm:space-y-6">
+                <TabsList className="grid w-full grid-cols-1 md:grid-cols-2 gap-2">
+                  <TabsTrigger value="booking-users" className="w-full whitespace-normal flex items-center justify-start md:justify-center gap-2 text-left md:text-center">
+                    <Users className="h-4 w-4 text-blue-600 flex-shrink-0" />
+                    <span className="truncate">Booking Users</span>
                   </TabsTrigger>
-                  <TabsTrigger value="banned-users" className="w-full whitespace-normal flex items-center justify-start gap-2 text-left md:justify-center md:text-center">
-                    <UserX className="h-4 w-4 text-red-600" />
-                    Suspended
+                  <TabsTrigger value="banned-users" className="w-full whitespace-normal flex items-center justify-start md:justify-center gap-2 text-left md:text-center">
+                    <UserX className="h-4 w-4 text-red-600 flex-shrink-0" />
+                    <span className="truncate">Suspended</span>
                   </TabsTrigger>
                 </TabsList>
 
@@ -2065,35 +2607,35 @@ export default function AdminDashboard() {
         const { unread: securityUnread, total: securityTotal } = computeSecurityCounts(securityTab);
 
         return (
-          <div className="space-y-6">
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h2 className="text-2xl font-bold text-gray-900">System Alerts</h2>
-                  <p className="text-gray-600 mt-1 text-sm">Monitor system security alerts and notifications</p>
+          <div className="space-y-4 sm:space-y-6">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4 sm:mb-6">
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-xl sm:text-2xl font-bold text-gray-900">System Alerts</h2>
+                  <p className="text-xs sm:text-sm text-gray-600 mt-1">Monitor system security alerts and notifications</p>
                 </div>
-                <div className="flex flex-col md:flex-row gap-2 items-start md:items-center">
-                  <div className="w-full md:w-auto bg-orange-100 text-orange-800 px-3 py-1 rounded-full text-sm font-medium">{securityUnread || 0} Unread</div>
-                  <div className="w-full md:w-auto bg-gray-100 text-gray-800 px-3 py-1 rounded-full text-sm font-medium">{securityTotal || 0} Total</div>
+                <div className="flex flex-row flex-wrap gap-2 items-center">
+                  <div className="bg-orange-100 text-orange-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center">{securityUnread || 0} alerts</div>
+                  <div className="bg-gray-100 text-gray-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center">{securityTotal || 0} Total</div>
                 </div>
               </div>
 
-              <Tabs value={securityTab} onValueChange={(v: string) => setSecurityTab(v)} className="space-y-6">
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="booking" onClick={() => setSecurityTab('booking')} className="w-full whitespace-normal flex items-center justify-start gap-2 text-left md:justify-center md:text-center">
-                    <AlertTriangle className="h-4 w-4 text-orange-600" />
-                    Booking Alerts
+              <Tabs value={securityTab} onValueChange={(v: string) => setSecurityTab(v)} className="space-y-4 sm:space-y-6">
+                <TabsList className="grid w-full grid-cols-1 md:grid-cols-2 gap-2">
+                  <TabsTrigger value="booking" onClick={() => setSecurityTab('booking')} className="w-full whitespace-normal flex items-center justify-start md:justify-center gap-2 text-left md:text-center">
+                    <AlertTriangle className="h-4 w-4 text-orange-600 flex-shrink-0" />
+                    <span className="truncate">Booking Alerts</span>
                   </TabsTrigger>
-                  <TabsTrigger value="users" onClick={() => setSecurityTab('users')} className="w-full whitespace-normal flex items-center justify-start gap-2 text-left md:justify-center md:text-center">
-                    <Users className="h-4 w-4 text-blue-600" />
-                    User Management
+                  <TabsTrigger value="users" onClick={() => setSecurityTab('users')} className="w-full whitespace-normal flex items-center justify-start md:justify-center gap-2 text-left md:text-center">
+                    <Users className="h-4 w-4 text-blue-600 flex-shrink-0" />
+                    <span className="truncate">User Management</span>
                   </TabsTrigger>
                 </TabsList>
                 <TabsContent value="booking" className="space-y-4 mt-6 md:mt-0">
-                  <div className="bg-gray-50 rounded-lg p-6">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-lg font-semibold text-gray-900">Booking System Alerts</h3>
-                      <span className="text-sm text-gray-600">
+                  <div className="bg-gray-50 rounded-lg p-3 sm:p-6">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 mb-4">
+                      <h3 className="text-base sm:text-lg font-semibold text-gray-900">Booking System Alerts</h3>
+                      <span className="text-xs sm:text-sm text-gray-600 whitespace-nowrap">
                         {alerts?.filter(a => {
                           if (a.type === 'booking') return true;
                           const t = (a.title || '').toLowerCase();
@@ -2211,7 +2753,91 @@ export default function AdminDashboard() {
 
                             return (
                               <div key={alert.id} className={`bg-white rounded-md p-3 border border-gray-200 transition-colors duration-200 ${alert.isRead ? 'opacity-60' : ''}`}>
-                                <div className="flex items-start gap-3">
+                                {/* Mobile Layout */}
+                                <div className="flex flex-col gap-3 md:hidden">
+                                  <div className="flex items-start gap-3">
+                                    <div className={`p-2 rounded-lg flex-shrink-0 ${
+                                      isHighPriority ? 'bg-red-100' : 'bg-orange-100'
+                                    }`}>
+                                      <AlertTriangle className={`h-5 w-5 ${
+                                        isHighPriority ? 'text-red-600' : 'text-orange-600'
+                                      }`} />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <p className="font-medium text-sm text-gray-900 break-words">{visibleTitle}</p>
+                                      {titleRequesterEmail && (
+                                        <div className="text-xs text-gray-500 mt-0.5 break-words">{titleRequesterEmail}</div>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <div className="pl-11">
+                                    <div className="text-xs text-gray-500 mb-2">{formatDateTime(alert.createdAt)}</div>
+                                    <p className="text-xs text-gray-600 break-words whitespace-pre-wrap">
+                                      {needsObj ? cleaned : cleaned}
+                                    </p>
+
+                                    {(equipmentList && equipmentList.length > 0) && (
+                                      <div className="mt-2">
+                                        <div className="text-xs font-medium text-gray-700">Requested equipment:</div>
+                                        <ul className="text-xs text-gray-600 list-disc list-inside mt-1">
+                                          {equipmentList.map((it, idx) => <li key={idx} className="break-words">{it}</li>)}
+                                        </ul>
+
+                                        {othersText && (
+                                          <div className="mt-2">
+                                            <div className="p-2 text-xs text-gray-900 break-words whitespace-pre-wrap">{othersText}</div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                    {bookingId && (
+                                      <div className="mt-2">
+                                        <button
+                                          onClick={() => {
+                                            setSelectedView('booking-management');
+                                            setBookingTab('pendingList');
+                                            try { setLocation(`/booking#id-${bookingId}`); } catch (e) { /* ignore */ }
+                                          }}
+                                          className="text-xs text-blue-600 underline"
+                                        >
+                                          View booking
+                                        </button>
+                                      </div>
+                                    )}
+                                    <div className="mt-2">
+                                      {alert.isRead ? (
+                                        <span className="inline-flex px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-600">
+                                          Read
+                                        </span>
+                                      ) : (
+                                        <button
+                                          className="w-full px-3 py-2 rounded text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors duration-200"
+                                          onClick={async () => {
+                                            try {
+                                              queryClient.setQueryData(['/api/admin/alerts'], (old: any) => {
+                                                if (!Array.isArray(old)) return old;
+                                                return old.map((a: any) => 
+                                                  a.id === alert.id ? { ...a, isRead: true } : a
+                                                );
+                                              });
+                                              await apiRequest('POST', `/api/admin/alerts/${alert.id}/read`);
+                                              queryClient.invalidateQueries({ queryKey: ['/api/admin/alerts'] });
+                                              queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] });
+                                            } catch (e) {
+                                              queryClient.invalidateQueries({ queryKey: ['/api/admin/alerts'] });
+                                            }
+                                          }}
+                                        >
+                                          Mark as Read
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Desktop Layout */}
+                                <div className="hidden md:flex items-start gap-3">
                                   <div className={`p-2 rounded-lg flex-shrink-0 ${
                                     isHighPriority ? 'bg-red-100' : 'bg-orange-100'
                                   }`}>
@@ -2277,10 +2903,24 @@ export default function AdminDashboard() {
                                             className="px-2 py-1 rounded text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors duration-200"
                                             onClick={async () => {
                                               try {
+                                                // Optimistically update the UI
+                                                queryClient.setQueryData(['/api/admin/alerts'], (old: any) => {
+                                                  if (!Array.isArray(old)) return old;
+                                                  return old.map((a: any) => 
+                                                    a.id === alert.id ? { ...a, isRead: true } : a
+                                                  );
+                                                });
+                                                
+                                                // Make the API call
                                                 await apiRequest('POST', `/api/admin/alerts/${alert.id}/read`);
+                                                
+                                                // Refetch to ensure consistency
                                                 queryClient.invalidateQueries({ queryKey: ['/api/admin/alerts'] });
                                                 queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] });
-                                              } catch (e) {}
+                                              } catch (e) {
+                                                // Revert on error
+                                                queryClient.invalidateQueries({ queryKey: ['/api/admin/alerts'] });
+                                              }
                                             }}
                                           >
                                             Mark as Read
@@ -2296,11 +2936,11 @@ export default function AdminDashboard() {
 
                         {/* Pagination controls for booking alerts */}
                         {bookingAlerts.length > 10 && (
-                          <div className="flex items-center justify-between pt-4 border-t border-gray-200">
-                            <p className="text-sm text-gray-600">Showing {start + 1} to {Math.min(start + 10, bookingAlerts.length)} of {bookingAlerts.length} alerts</p>
+                          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-gray-200">
+                            <p className="text-xs sm:text-sm text-gray-600 text-center sm:text-left">Showing {start + 1} to {Math.min(start + 10, bookingAlerts.length)} of {bookingAlerts.length} alerts</p>
                             <div className="flex items-center gap-2">
                               <button onClick={() => setBookingAlertsPage(prev => Math.max(prev - 1, 0))} disabled={page === 0} className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"><ChevronLeft className="h-4 w-4" /></button>
-                              <span className="px-3 py-1 text-sm font-medium">{page + 1} of {Math.ceil(bookingAlerts.length / alertsPerPage)}</span>
+                              <span className="px-3 py-1 text-xs sm:text-sm font-medium whitespace-nowrap">{page + 1} of {Math.ceil(bookingAlerts.length / alertsPerPage)}</span>
                               <button onClick={() => setBookingAlertsPage(prev => (bookingAlerts.length > (prev + 1) * alertsPerPage ? prev + 1 : prev))} disabled={bookingAlerts.length <= (page + 1) * alertsPerPage} className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"><ChevronRight className="h-4 w-4" /></button>
                             </div>
                           </div>
@@ -2325,10 +2965,10 @@ export default function AdminDashboard() {
                   </div>
                 </TabsContent>
                 <TabsContent value="users" className="space-y-4 mt-6 md:mt-0">
-                  <div className="bg-gray-50 rounded-lg p-6">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-lg font-semibold text-gray-900">User Management Activities</h3>
-                      <span className="text-sm text-gray-600">
+                  <div className="bg-gray-50 rounded-lg p-3 sm:p-6">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 mb-4">
+                      <h3 className="text-base sm:text-lg font-semibold text-gray-900">User Management Activities</h3>
+                      <span className="text-xs sm:text-sm text-gray-600 whitespace-nowrap">
                         {alerts?.filter(a => {
                           const t = (a.title || '').toLowerCase();
                           const m = (a.message || '').toLowerCase();
@@ -2358,21 +2998,159 @@ export default function AdminDashboard() {
                         return (
                           <>
                             {pageItems.map((alert: SystemAlert) => {
-                          const formattedMessage = formatAlertMessage(alert.message);
+                          // Helper function to parse equipment data from message
+                          const parseEquipmentFromMessage = (message: string) => {
+                            const equipmentMarker = message.indexOf('[Equipment:');
+                            if (equipmentMarker !== -1) {
+                              try {
+                                const baseMessage = message.substring(0, equipmentMarker).trim();
+                                const jsonStart = message.indexOf('{', equipmentMarker);
+                                if (jsonStart === -1) {
+                                  return { baseMessage, equipment: null };
+                                }
+                                let depth = 0;
+                                let jsonEnd = -1;
+                                for (let i = jsonStart; i < message.length; i++) {
+                                  if (message[i] === '{') depth++;
+                                  if (message[i] === '}') {
+                                    depth--;
+                                    if (depth === 0) {
+                                      jsonEnd = i + 1;
+                                      break;
+                                    }
+                                  }
+                                }
+                                if (jsonEnd !== -1) {
+                                  const jsonStr = message.substring(jsonStart, jsonEnd);
+                                  const equipmentData = JSON.parse(jsonStr);
+                                  return { baseMessage, equipment: equipmentData.items || equipmentData || {} };
+                                }
+                                return { baseMessage, equipment: null };
+                              } catch (e) {
+                                const baseMessage = message.substring(0, equipmentMarker).trim();
+                                return { baseMessage, equipment: null };
+                              }
+                            }
+                            return { baseMessage: message, equipment: null };
+                          };
+
+                          // Helper function to get color for equipment status
+                          const getEquipmentStatusColor = (status: string) => {
+                            const normalized = status.toLowerCase().replace(/_/g, ' ');
+                            if (normalized === 'prepared' || normalized === 'available') {
+                              return 'bg-green-100 text-green-800';
+                            } else if (normalized === 'not available') {
+                              return 'bg-red-100 text-red-800';
+                            }
+                            return 'bg-gray-100 text-gray-800';
+                          };
+
+                          const { baseMessage, equipment } = parseEquipmentFromMessage(alert.message);
+                          const formattedMessage = formatAlertMessage(baseMessage);
                           // If this alert relates to equipment/needs, also append the createdAt time inline
                           const isEquipmentRelated = /equipment|needs/i.test(String(alert.title || '') + ' ' + String(alert.message || ''));
-                          const formattedMessageWithTime = isEquipmentRelated ? `${formattedMessage} at ${formatDateTime(alert.createdAt)}` : formattedMessage;
+                          const formattedMessageWithTime = (isEquipmentRelated && !equipment) ? `${formattedMessage} at ${formatDateTime(alert.createdAt)}` : formattedMessage;
                           const isUnbanActivity = (alert.title || '').toLowerCase().includes('unbanned') || 
                                                 (alert.message || '').toLowerCase().includes('unbanned');
                           const isBanActivity = (alert.title || '').toLowerCase().includes('banned') && !isUnbanActivity;
                           
                           return (
-                            <div key={alert.id} className={`bg-white rounded-lg p-4 border transition-colors duration-200 ${
+                            <div key={alert.id} className={`bg-white rounded-lg p-3 border transition-colors duration-200 ${
                               isBanActivity ? 'border-red-200 hover:border-red-300' : 
                               isUnbanActivity ? 'border-green-200 hover:border-green-300' : 
                               'border-gray-200 hover:border-gray-300'
                             } ${alert.isRead ? 'opacity-60' : ''}`}>
-                              <div className="flex items-start gap-3">
+                              {/* Mobile Layout */}
+                              <div className="flex flex-col gap-3 md:hidden">
+                                <div className="flex items-start gap-3">
+                                  <div className={`p-2 rounded-lg flex-shrink-0 ${
+                                    isBanActivity ? 'bg-red-100' : 
+                                    isUnbanActivity ? 'bg-green-100' : 
+                                    'bg-blue-100'
+                                  }`}>
+                                    {isBanActivity ? (
+                                      <UserX className="h-5 w-5 text-red-600" />
+                                    ) : isUnbanActivity ? (
+                                      <UserCheck className="h-5 w-5 text-green-600" />
+                                    ) : (
+                                      <UserIcon className="h-5 w-5 text-blue-600" />
+                                    )}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="font-medium text-sm text-gray-900 break-words">{alert.title}</p>
+                                  </div>
+                                </div>
+
+                                <div className="pl-11">
+                                  <div className="text-xs text-gray-500 mb-2">{formatDateTime(alert.createdAt)}</div>
+                                  <p className="text-xs text-gray-600 break-words whitespace-pre-wrap">{formattedMessageWithTime}</p>
+                                  
+                                  {equipment && (
+                                    <div className="mt-2 flex flex-wrap gap-1.5">
+                                      {Object.entries(equipment).map(([key, value]: [string, any]) => {
+                                        const displayKey = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                                        return (
+                                          <span
+                                            key={key}
+                                            className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}
+                                          >
+                                            {displayKey}
+                                          </span>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                  
+                                  {(isUnbanActivity || isBanActivity) && (
+                                    <div className="mt-2 flex flex-wrap gap-2">
+                                      {isUnbanActivity && (
+                                        <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                          <UserCheck className="h-3 w-3" />
+                                          User Restored
+                                        </div>
+                                      )}
+                                      {isBanActivity && (
+                                        <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                          <UserX className="h-3 w-3" />
+                                          User Suspended
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  <div className="mt-2">
+                                    {alert.isRead ? (
+                                      <span className="inline-flex px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-600">
+                                        Read
+                                      </span>
+                                    ) : (
+                                      <button
+                                        className="w-full px-3 py-2 rounded text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors duration-200"
+                                        onClick={async () => {
+                                          try {
+                                            queryClient.setQueryData(['/api/admin/alerts'], (old: any) => {
+                                              if (!Array.isArray(old)) return old;
+                                              return old.map((a: any) => 
+                                                a.id === alert.id ? { ...a, isRead: true } : a
+                                              );
+                                            });
+                                            await apiRequest('POST', `/api/admin/alerts/${alert.id}/read`);
+                                            queryClient.invalidateQueries({ queryKey: ['/api/admin/alerts'] });
+                                            queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] });
+                                          } catch (e) {
+                                            queryClient.invalidateQueries({ queryKey: ['/api/admin/alerts'] });
+                                          }
+                                        }}
+                                      >
+                                        Mark as Read
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Desktop Layout */}
+                              <div className="hidden md:flex items-start gap-3">
                                 <div className={`p-2 rounded-lg flex-shrink-0 ${
                                   isBanActivity ? 'bg-red-100' : 
                                   isUnbanActivity ? 'bg-green-100' : 
@@ -2388,9 +3166,24 @@ export default function AdminDashboard() {
                                 </div>
                                 <div className="flex-grow min-w-0">
                                   <div className="flex items-start justify-between">
-                                    <div className="pr-4 min-w-0">
+                                    <div className="pr-4 min-w-0 flex-1">
                                       <p className="font-medium text-sm text-gray-900">{alert.title}</p>
                                       <p className="text-xs text-gray-600 mt-1 break-words break-all whitespace-pre-wrap max-w-full">{formattedMessageWithTime}</p>
+                                      {equipment && (
+                                        <div className="mt-2 flex flex-wrap gap-1.5">
+                                          {Object.entries(equipment).map(([key, value]: [string, any]) => {
+                                            const displayKey = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                                            return (
+                                              <span
+                                                key={key}
+                                                className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}
+                                              >
+                                                {displayKey}
+                                              </span>
+                                            );
+                                          })}
+                                        </div>
+                                      )}
                                       {/* source not available on SystemAlert type */}
                                       { (isUnbanActivity || isBanActivity) && (
                                         <div className="mt-2 flex flex-col md:flex-row gap-2 items-start md:items-center">
@@ -2420,10 +3213,24 @@ export default function AdminDashboard() {
                                           className="px-2 py-1 rounded text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors duration-200"
                                           onClick={async () => {
                                             try {
+                                              // Optimistically update the UI
+                                              queryClient.setQueryData(['/api/admin/alerts'], (old: any) => {
+                                                if (!Array.isArray(old)) return old;
+                                                return old.map((a: any) => 
+                                                  a.id === alert.id ? { ...a, isRead: true } : a
+                                                );
+                                              });
+                                              
+                                              // Make the API call
                                               await apiRequest('POST', `/api/admin/alerts/${alert.id}/read`);
+                                              
+                                              // Refetch to ensure consistency
                                               queryClient.invalidateQueries({ queryKey: ['/api/admin/alerts'] });
                                               queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] });
-                                            } catch (e) {}
+                                            } catch (e) {
+                                              // Revert on error
+                                              queryClient.invalidateQueries({ queryKey: ['/api/admin/alerts'] });
+                                            }
                                           }}
                                         >
                                           Mark as Read
@@ -2439,11 +3246,11 @@ export default function AdminDashboard() {
 
                         {/* Pagination controls for user activity alerts */}
                         {userAlerts.length > 10 && (
-                          <div className="flex items-center justify-between pt-4 border-t border-gray-200">
-                            <p className="text-sm text-gray-600">Showing {start + 1} to {Math.min(start + 10, userAlerts.length)} of {userAlerts.length} activities</p>
+                          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-gray-200">
+                            <p className="text-xs sm:text-sm text-gray-600 text-center sm:text-left">Showing {start + 1} to {Math.min(start + 10, userAlerts.length)} of {userAlerts.length} activities</p>
                             <div className="flex items-center gap-2">
                               <button onClick={() => setUserAlertsPage(prev => Math.max(prev - 1, 0))} disabled={page === 0} className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"><ChevronLeft className="h-4 w-4" /></button>
-                              <span className="px-3 py-1 text-sm font-medium">{page + 1} of {Math.ceil(userAlerts.length / alertsPerPage)}</span>
+                              <span className="px-3 py-1 text-xs sm:text-sm font-medium whitespace-nowrap">{page + 1} of {Math.ceil(userAlerts.length / alertsPerPage)}</span>
                               <button onClick={() => setUserAlertsPage(prev => (userAlerts.length > (prev + 1) * alertsPerPage ? prev + 1 : prev))} disabled={userAlerts.length <= (page + 1) * alertsPerPage} className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"><ChevronRight className="h-4 w-4" /></button>
                             </div>
                           </div>
@@ -2479,7 +3286,19 @@ export default function AdminDashboard() {
         // Prepare lists for the activity logs view (improved with richer details)
         const successfullyBooked = allBookings.filter(b => b.status === 'approved' && b.arrivalConfirmed && new Date(b.endTime) < new Date());
         const bookingHistory = allBookings.filter(b => ['denied', 'cancelled', 'expired', 'void'].includes(b.status) || (b.status === 'approved' && new Date(b.endTime) < new Date() && !b.arrivalConfirmed));
-        const systemActivity = [ ...(activities || []), ...(alerts || []) ].sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        
+        // Deduplicate activities and alerts by id to prevent duplicates
+        const combinedActivity = [ ...(activities || []), ...(alerts || []) ];
+        const seenIds = new Set();
+        const systemActivity = combinedActivity
+          .filter((item: any) => {
+            if (seenIds.has(item.id)) {
+              return false; // Skip duplicates
+            }
+            seenIds.add(item.id);
+            return true;
+          })
+          .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
         // bookingDuration removed (unused) — compute inline if needed
 
@@ -2493,33 +3312,33 @@ export default function AdminDashboard() {
         };
 
         return (
-          <div className="space-y-6">
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-                <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h2 className="text-2xl font-bold text-gray-900">Admin Activity Logs</h2>
-                  <p className="text-gray-600 mt-1 text-sm">Centralized booking and system logs — detailed view for auditing and troubleshooting</p>
+          <div className="space-y-4 sm:space-y-6">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4 sm:mb-6">
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Activity Logs</h2>
+                  <p className="text-xs sm:text-sm text-gray-600 mt-1">Centralized booking and system logs — detailed view for auditing and troubleshooting</p>
                 </div>
-                <div className="flex flex-col md:flex-row gap-2 items-start md:items-center">
-                  <div className="w-full md:w-auto bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium">{successfullyBooked.length || 0} Successful</div>
-                  <div className="w-full md:w-auto bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-medium">{bookingHistory.length || 0} History</div>
-                  <div className="w-full md:w-auto bg-gray-100 text-gray-800 px-3 py-1 rounded-full text-sm font-medium">{systemActivity.length || 0} System</div>
+                <div className="flex flex-row flex-wrap gap-2 items-center">
+                  <div className="bg-green-100 text-green-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center">{successfullyBooked.length || 0} Successful</div>
+                  <div className="bg-yellow-100 text-yellow-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center">{bookingHistory.length || 0} History</div>
+                  <div className="bg-gray-100 text-gray-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center">{systemActivity.length || 0} System</div>
                 </div>
               </div>
 
-              <Tabs value={settingsTab} onValueChange={(v: string) => setSettingsTab(v)} className="space-y-6">
+              <Tabs value={settingsTab} onValueChange={(v: string) => setSettingsTab(v)} className="space-y-4 sm:space-y-6">
                 <TabsList className="grid w-full grid-cols-1 md:grid-cols-3 gap-2">
-                  <TabsTrigger value="success" className="w-full whitespace-normal flex items-center justify-start gap-2 text-left md:justify-center md:text-center">
-                    <CheckCircle className="h-4 w-4 text-green-600" />
-                    Successfully Booked
+                  <TabsTrigger value="success" className="w-full whitespace-normal flex items-center justify-start md:justify-center gap-2 text-left md:text-center">
+                    <CheckCircle className="h-4 w-4 text-green-600 flex-shrink-0" />
+                    <span className="truncate">Successfully Booked</span>
                   </TabsTrigger>
-                  <TabsTrigger value="history" className="w-full whitespace-normal flex items-center justify-start gap-2 text-left md:justify-center md:text-center">
-                    <BarChart3 className="h-4 w-4 text-yellow-600" />
-                    Booking History
+                  <TabsTrigger value="history" className="w-full whitespace-normal flex items-center justify-start md:justify-center gap-2 text-left md:text-center">
+                    <BarChart3 className="h-4 w-4 text-yellow-600 flex-shrink-0" />
+                    <span className="truncate">Booking History</span>
                   </TabsTrigger>
-                  <TabsTrigger value="system" className="w-full whitespace-normal flex items-center justify-start gap-2 text-left md:justify-center md:text-center">
-                    <Activity className="h-4 w-4 text-gray-600" />
-                    System Activity
+                  <TabsTrigger value="system" className="w-full whitespace-normal flex items-center justify-start md:justify-center gap-2 text-left md:text-center">
+                    <Activity className="h-4 w-4 text-gray-600 flex-shrink-0" />
+                    <span className="truncate">System Activity</span>
                   </TabsTrigger>
                 </TabsList>
 
@@ -2548,42 +3367,40 @@ export default function AdminDashboard() {
                                       const id = `purpose-${b.id}`;
                                       const isOpen = !!openPurpose[id];
                                       return (
-                                        <div className="flex items-center gap-2">
-                                          <Popover open={isOpen} onOpenChange={(v) => setOpenPurpose(prev => ({ ...prev, [id]: v }))}>
-                                            <TooltipProvider>
-                                              <Tooltip>
-                                                <TooltipTrigger asChild>
-                                                  <PopoverTrigger asChild>
-                                                    <button
-                                                      onClick={() => setOpenPurpose(prev => ({ ...prev, [id]: !prev[id] }))}
-                                                      className="flex items-center gap-1 cursor-help text-xs text-pink-600"
-                                                      aria-expanded={isOpen}
-                                                    >
-                                                      <Eye className="h-3 w-3 text-pink-600" />
-                                                      <span>View</span>
-                                                    </button>
-                                                  </PopoverTrigger>
-                                                </TooltipTrigger>
-                                                <TooltipContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
-                                                  <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                                                    <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
-                                                  </div>
-                                                  <div className="p-3">
-                                                    <p className="text-sm text-gray-900 leading-5 break-words text-left">{b.purpose}</p>
-                                                  </div>
-                                                </TooltipContent>
-                                              </Tooltip>
-                                            </TooltipProvider>
-                                            <PopoverContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50 origin-top-left">
-                                              <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                                                <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
-                                              </div>
-                                              <div className="p-3">
-                                                <p className="text-sm text-gray-900 leading-5 break-words text-left">{b.purpose}</p>
-                                              </div>
-                                            </PopoverContent>
-                                          </Popover>
-                                        </div>
+                                        <Popover open={isOpen} onOpenChange={(v) => setOpenPurpose(prev => ({ ...prev, [id]: v }))}>
+                                          <TooltipProvider>
+                                            <Tooltip>
+                                              <TooltipTrigger asChild>
+                                                <PopoverTrigger asChild>
+                                                  <button
+                                                    onClick={() => setOpenPurpose(prev => ({ ...prev, [id]: !prev[id] }))}
+                                                    className="flex items-center gap-1 cursor-help text-xs text-pink-600"
+                                                    aria-expanded={isOpen}
+                                                  >
+                                                    <Eye className="h-3 w-3 text-pink-600" />
+                                                    <span>View</span>
+                                                  </button>
+                                                </PopoverTrigger>
+                                              </TooltipTrigger>
+                                              <TooltipContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
+                                                <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                                  <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
+                                                </div>
+                                                <div className="p-3">
+                                                  <p className="text-sm text-gray-900 leading-5 break-words text-left">{b.purpose}</p>
+                                                </div>
+                                              </TooltipContent>
+                                            </Tooltip>
+                                          </TooltipProvider>
+                                          <PopoverContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50">
+                                            <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                              <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
+                                            </div>
+                                            <div className="p-3">
+                                              <p className="text-sm text-gray-900 leading-5 break-words text-left">{b.purpose}</p>
+                                            </div>
+                                          </PopoverContent>
+                                        </Popover>
                                       );
                                     })() : null}
                                     <span className="text-xs text-gray-400 whitespace-nowrap">|</span>
@@ -2659,7 +3476,7 @@ export default function AdminDashboard() {
                                     {/* Purpose: block on mobile, inline + truncate on md+ */}
                                     <div className="block md:hidden text-sm text-gray-900 mb-1">
                                       {b.purpose && (() => {
-                                        const id = `purpose-${b.id}`;
+                                        const id = `purpose-mobile-${b.id}`;
                                         const isOpen = !!openPurpose[id];
                                         return (
                                           <div className="flex items-center gap-2">
@@ -2689,7 +3506,7 @@ export default function AdminDashboard() {
                                                   </TooltipContent>
                                                 </Tooltip>
                                               </TooltipProvider>
-                                              <PopoverContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50 origin-top-left">
+                                              <PopoverContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50">
                                                 <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
                                                   <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
                                                 </div>
@@ -2709,42 +3526,40 @@ export default function AdminDashboard() {
                                         const id = `purpose-${b.id}`;
                                         const isOpen = !!openPurpose[id];
                                         return (
-                                          <div className="flex items-center gap-2">
-                                            <Popover open={isOpen} onOpenChange={(v) => setOpenPurpose(prev => ({ ...prev, [id]: v }))}>
-                                              <TooltipProvider>
-                                                <Tooltip>
-                                                  <TooltipTrigger asChild>
-                                                    <PopoverTrigger asChild>
-                                                      <button
-                                                        onClick={() => setOpenPurpose(prev => ({ ...prev, [id]: !prev[id] }))}
-                                                        className="flex items-center gap-1 cursor-help text-xs text-pink-600"
-                                                        aria-expanded={isOpen}
-                                                      >
-                                                        <Eye className="h-3 w-3 text-pink-600" />
-                                                        <span>View</span>
-                                                      </button>
-                                                    </PopoverTrigger>
-                                                  </TooltipTrigger>
-                                                  <TooltipContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
-                                                    <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                                                      <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
-                                                    </div>
-                                                    <div className="p-3">
-                                                      <p className="text-sm text-gray-900 leading-5 break-words text-left">{b.purpose}</p>
-                                                    </div>
-                                                  </TooltipContent>
-                                                </Tooltip>
-                                              </TooltipProvider>
-                                              <PopoverContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50 origin-top-left">
-                                                <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                                                  <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
-                                                </div>
-                                                <div className="p-3">
-                                                  <p className="text-sm text-gray-900 leading-5 break-words text-left">{b.purpose}</p>
-                                                </div>
-                                              </PopoverContent>
-                                            </Popover>
-                                          </div>
+                                          <Popover open={isOpen} onOpenChange={(v) => setOpenPurpose(prev => ({ ...prev, [id]: v }))}>
+                                            <TooltipProvider>
+                                              <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                  <PopoverTrigger asChild>
+                                                    <button
+                                                      onClick={() => setOpenPurpose(prev => ({ ...prev, [id]: !prev[id] }))}
+                                                      className="flex items-center gap-1 cursor-help text-xs text-pink-600"
+                                                      aria-expanded={isOpen}
+                                                    >
+                                                      <Eye className="h-3 w-3 text-pink-600" />
+                                                      <span>View</span>
+                                                    </button>
+                                                  </PopoverTrigger>
+                                                </TooltipTrigger>
+                                                <TooltipContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
+                                                  <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                                    <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
+                                                  </div>
+                                                  <div className="p-3">
+                                                    <p className="text-sm text-gray-900 leading-5 break-words text-left">{b.purpose}</p>
+                                                  </div>
+                                                </TooltipContent>
+                                              </Tooltip>
+                                            </TooltipProvider>
+                                            <PopoverContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50">
+                                              <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                                <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
+                                              </div>
+                                              <div className="p-3">
+                                                <p className="text-sm text-gray-900 leading-5 break-words text-left">{b.purpose}</p>
+                                              </div>
+                                            </PopoverContent>
+                                          </Popover>
                                         );
                                       })() : null}
                                       <span className="text-xs text-gray-400">|</span>
@@ -2815,7 +3630,55 @@ export default function AdminDashboard() {
                     {systemActivity.length > 0 ? (
                       <>
                         <div className="space-y-2 mt-3">
-                          {systemActivity.slice(systemPage * itemsPerPage, (systemPage + 1) * itemsPerPage).map((a: any, idx: number) => (
+                          {systemActivity.slice(systemPage * itemsPerPage, (systemPage + 1) * itemsPerPage).map((a: any, idx: number) => {
+                            // Helper function to parse equipment data from message
+                            const parseEquipmentFromMessage = (message: string) => {
+                              const equipmentMarker = message.indexOf('[Equipment:');
+                              if (equipmentMarker !== -1) {
+                                try {
+                                  const baseMessage = message.substring(0, equipmentMarker).trim();
+                                  const jsonStart = message.indexOf('{', equipmentMarker);
+                                  if (jsonStart === -1) {
+                                    return { baseMessage, equipment: null };
+                                  }
+                                  let depth = 0;
+                                  let jsonEnd = -1;
+                                  for (let i = jsonStart; i < message.length; i++) {
+                                    if (message[i] === '{') depth++;
+                                    if (message[i] === '}') {
+                                      depth--;
+                                      if (depth === 0) {
+                                        jsonEnd = i + 1;
+                                        break;
+                                      }
+                                    }
+                                  }
+                                  if (jsonEnd !== -1) {
+                                    const jsonStr = message.substring(jsonStart, jsonEnd);
+                                    const equipmentData = JSON.parse(jsonStr);
+                                    return { baseMessage, equipment: equipmentData.items || equipmentData || {} };
+                                  }
+                                  return { baseMessage, equipment: null };
+                                } catch (e) {
+                                  const baseMessage = message.substring(0, equipmentMarker).trim();
+                                  return { baseMessage, equipment: null };
+                                }
+                              }
+                              return { baseMessage: message, equipment: null };
+                            };
+
+                            // Helper function to get color for equipment status
+                            const getEquipmentStatusColor = (status: string) => {
+                              const normalized = status.toLowerCase().replace(/_/g, ' ');
+                              if (normalized === 'prepared' || normalized === 'available') {
+                                return 'bg-green-100 text-green-800';
+                              } else if (normalized === 'not available') {
+                                return 'bg-red-100 text-red-800';
+                              }
+                              return 'bg-gray-100 text-gray-800';
+                            };
+
+                            return (
                             (() => {
                             // Resolve actor email: userId -> email in details -> usersMap lookup -> current user email
                             let actorEmail = '';
@@ -3111,28 +3974,76 @@ export default function AdminDashboard() {
                                 }
                               } catch (e) {}
 
+                              // Parse equipment from the message
+                              const { baseMessage, equipment } = parseEquipmentFromMessage(a.message || a.details || '');
+                              const displaySubLine = equipment ? baseMessage : subLine;
+
                                 return (
                               <div key={a.id || idx} className="bg-white rounded-md p-3 border border-gray-200">
-                                <div className="flex items-start justify-between gap-3">
-                                      <div className="flex-1 pr-4">
-                                        <p className="font-medium text-sm text-gray-900">{(visibleTitle || (a.title || a.action)) ?? 'System Event'}</p>
-                                        <p className="text-xs text-gray-600 mt-1">{subLine}</p>
-                                        <div className="mt-1 text-xs text-gray-400">{a.source ? `Source: ${a.source}` : ''}</div>
-                                      </div>
-
-                                      <div className="w-44 text-right text-xs text-gray-500 flex flex-col items-end gap-1">
-                                        <div className="w-full">{(activityTime ? formatDateTime(activityTime) : (a.createdAt ? formatDateTime(a.createdAt) : ''))}</div>
-                                      </div>
+                                {/* Mobile Layout */}
+                                <div className="flex flex-col gap-2 md:hidden">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <p className="font-medium text-sm text-gray-900 flex-1 break-words">{(visibleTitle || (a.title || a.action)) ?? 'System Event'}</p>
+                                    <div className="text-xs text-gray-500 whitespace-nowrap flex-shrink-0">
+                                      {(activityTime ? formatDateTime(activityTime) : (a.createdAt ? formatDateTime(a.createdAt) : ''))}
                                     </div>
+                                  </div>
+                                  <p className="text-xs text-gray-600 break-words">{displaySubLine}</p>
+                                  {equipment && (
+                                    <div className="flex flex-wrap gap-1.5">
+                                      {Object.entries(equipment).map(([key, value]: [string, any]) => {
+                                        const displayKey = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                                        return (
+                                          <span
+                                            key={key}
+                                            className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}
+                                          >
+                                            {displayKey}
+                                          </span>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                  {a.source && <div className="text-xs text-gray-400">Source: {a.source}</div>}
+                                </div>
+
+                                {/* Desktop Layout */}
+                                <div className="hidden md:flex items-start justify-between gap-3">
+                                  <div className="flex-1 pr-4">
+                                    <p className="font-medium text-sm text-gray-900">{(visibleTitle || (a.title || a.action)) ?? 'System Event'}</p>
+                                    <p className="text-xs text-gray-600 mt-1">{displaySubLine}</p>
+                                    {equipment && (
+                                      <div className="mt-2 flex flex-wrap gap-1.5">
+                                        {Object.entries(equipment).map(([key, value]: [string, any]) => {
+                                          const displayKey = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                                          return (
+                                            <span
+                                              key={key}
+                                              className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}
+                                            >
+                                              {displayKey}
+                                            </span>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                    <div className="mt-1 text-xs text-gray-400">{a.source ? `Source: ${a.source}` : ''}</div>
+                                  </div>
+
+                                  <div className="w-44 text-right text-xs text-gray-500 flex flex-col items-end gap-1">
+                                    <div className="w-full">{(activityTime ? formatDateTime(activityTime) : (a.createdAt ? formatDateTime(a.createdAt) : ''))}</div>
+                                  </div>
+                                </div>
                               </div>
                             );
                           })()
-                          ))}
+                          );
+                          })}
                         </div>
 
                         {systemActivity.length > itemsPerPage && (
-                          <div className="flex items-center justify-between pt-4 border-t border-gray-200">
-                            <p className="text-sm text-gray-600">
+                          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-gray-200">
+                            <p className="text-xs sm:text-sm text-gray-600 text-center sm:text-left">
                               Showing {systemPage * itemsPerPage + 1} to {Math.min((systemPage + 1) * itemsPerPage, systemActivity.length)} of {systemActivity.length} results
                             </p>
                             <div className="flex items-center gap-2">
@@ -3143,7 +4054,7 @@ export default function AdminDashboard() {
                               >
                                 <ChevronLeft className="h-4 w-4" />
                               </button>
-                              <span className="px-3 py-1 text-sm font-medium">
+                              <span className="px-3 py-1 text-xs sm:text-sm font-medium whitespace-nowrap">
                                 {systemPage + 1} of {Math.ceil(systemActivity.length / itemsPerPage)}
                               </span>
                               <button
@@ -3187,10 +4098,10 @@ export default function AdminDashboard() {
                 </TabsList>
 
                 <TabsContent value="facilities" className="space-y-4 mt-6 md:mt-0">
-                  <div className="bg-gray-50 rounded-lg p-6">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-lg font-semibold text-gray-900">Facility Availability Control</h3>
-                      <span className="text-sm text-gray-600">{facilities?.length || 0} facilities</span>
+                  <div className="bg-gray-50 rounded-lg p-4 sm:p-6">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-0 mb-4">
+                      <h3 className="text-base sm:text-lg font-semibold text-gray-900">Facility Availability Control</h3>
+                      <span className="text-xs sm:text-sm text-gray-600 whitespace-nowrap">{facilities?.length || 0} facilities</span>
                     </div>
                     
                     {facilities && facilities.length > 0 ? (
@@ -3256,9 +4167,9 @@ export default function AdminDashboard() {
 
       default: // Dashboard overview
         return (
-          <div className="space-y-8">
+          <div className="space-y-4 sm:space-y-6">
             {/* Stats Overview */}
-            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-3 gap-3 sm:gap-4 md:gap-6">
               <OverviewTile
                 title="Active Bookings"
                 count={activeBookings?.length || 0}
@@ -3275,8 +4186,6 @@ export default function AdminDashboard() {
                 icon={<Clock className="h-6 w-6 text-green-600" />}
               />
 
-
-
               <OverviewTile
                 title="System Alerts"
                 count={stats?.systemAlerts || 0}
@@ -3284,6 +4193,25 @@ export default function AdminDashboard() {
                 onClick={() => setSelectedView("security")}
                 icon={<TriangleAlert className="h-6 w-6 text-orange-600" />}
               />
+            </div>
+
+            {/* Quick Actions Bar */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                  <h3 className="text-base sm:text-lg font-bold text-gray-900">Quick Actions</h3>
+                  <p className="text-xs sm:text-sm text-gray-600 mt-1">Generate reports and manage system</p>
+                </div>
+                <Button 
+                  size="default" 
+                  className="bg-pink-600 hover:bg-pink-700 text-white shadow-sm text-sm w-full sm:w-auto"
+                  onClick={() => generateBookingWeeklyReport?.()} 
+                  aria-label="Generate weekly booking report"
+                >
+                  <BarChart3 className="h-4 w-4 mr-2" />
+                  <span className="whitespace-nowrap">Generate Weekly Report</span>
+                </Button>
+              </div>
             </div>
 
             {/* Overview Sections */}
@@ -3301,14 +4229,14 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 flex flex-col justify-between">
-                <div className="flex items-center justify-between mb-6">
-                  <div>
-                    <h3 className="text-lg font-bold text-gray-900">Scheduled Bookings</h3>
-                    <p className="text-gray-600 text-sm mt-1">Upcoming approved and auto-scheduled reservations</p>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 md:gap-6">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 flex flex-col justify-between">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4 sm:mb-6">
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-base sm:text-lg font-bold text-gray-900">Scheduled Bookings</h3>
+                    <p className="text-xs sm:text-sm text-gray-600 mt-1">Upcoming approved and auto-scheduled reservations</p>
                   </div>
-                  <div className="bg-pink-100 text-pink-800 px-3 py-1 rounded-full text-sm font-medium">
+                  <div className="bg-pink-100 text-pink-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium self-start whitespace-nowrap">
                     {scheduledCount || 0} scheduled
                   </div>
                 </div>
@@ -3354,13 +4282,13 @@ export default function AdminDashboard() {
                 )}
               </div>
 
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 flex flex-col justify-between">
-                <div className="flex items-center justify-between mb-6">
-                  <div>
-                    <h3 className="text-lg font-bold text-gray-900">Recent Booking History</h3>
-                    <p className="text-gray-600 text-sm mt-1">A quick preview of the most recent booking records</p>
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 flex flex-col justify-between">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-base sm:text-lg font-bold text-gray-900">Recent Booking History</h3>
+                    <p className="text-xs sm:text-sm text-gray-600 mt-1">A quick preview of the most recent booking records</p>
                   </div>
-                  <div className="bg-pink-100 text-pink-800 px-3 py-1 rounded-full text-sm font-medium">
+                  <div className="bg-pink-100 text-pink-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium self-start whitespace-nowrap">
                     {recentBookings?.length || 0} records
                   </div>
                 </div>
@@ -3418,28 +4346,28 @@ export default function AdminDashboard() {
             {/* Recent System Activity & Recent System Alerts (stacked) */}
             <div className="space-y-6">
               {/* Block 1: Recent System Alerts with two preview tabs */}
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-                <div className="flex items-center justify-between mb-6">
-                  <div>
-                    <h3 className="text-2xl font-bold text-gray-900">Recent System Alerts</h3>
-                    <p className="text-gray-600 mt-1 text-sm">Booking and user management alerts</p>
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-xl sm:text-2xl font-bold text-gray-900">Recent System Alerts</h3>
+                    <p className="text-xs sm:text-sm text-gray-600 mt-1">Booking and user management alerts</p>
                   </div>
-                  <div className="bg-pink-100 text-pink-800 px-3 py-1 rounded-full text-sm font-medium">
+                  <div className="bg-pink-100 text-pink-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center self-start">
                     {alerts?.length || 0} alerts
                   </div>
                 </div>
 
                 <div className="mb-4">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                     <button
                       onClick={() => setAlertsPreviewTab('booking')}
-                      className={`px-3 py-1 rounded-lg text-sm ${alertsPreviewTab === 'booking' ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+                      className={`px-3 py-2 rounded-lg text-xs sm:text-sm font-medium ${alertsPreviewTab === 'booking' ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-700'}`}
                     >
                       Booking Alerts
                     </button>
                     <button
                       onClick={() => setAlertsPreviewTab('users')}
-                      className={`px-3 py-1 rounded-lg text-sm ${alertsPreviewTab === 'users' ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+                      className={`px-3 py-2 rounded-lg text-xs sm:text-sm font-medium ${alertsPreviewTab === 'users' ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-700'}`}
                     >
                       User Management Alerts
                     </button>
@@ -3455,20 +4383,106 @@ export default function AdminDashboard() {
                         const m = (a.message || '').toLowerCase();
                         return t.includes('booking') || m.includes('booking');
                       }).slice(0,5).map((alert: SystemAlert) => {
-                        const fm = formatAlertMessage(alert.message);
+                        // Helper function to parse equipment data from message
+                        const parseEquipmentFromMessage = (message: string) => {
+                          const equipmentMarker = message.indexOf('[Equipment:');
+                          if (equipmentMarker !== -1) {
+                            try {
+                              const baseMessage = message.substring(0, equipmentMarker).trim();
+                              const jsonStart = message.indexOf('{', equipmentMarker);
+                              if (jsonStart === -1) {
+                                return { baseMessage, equipment: null };
+                              }
+                              let depth = 0;
+                              let jsonEnd = -1;
+                              for (let i = jsonStart; i < message.length; i++) {
+                                if (message[i] === '{') depth++;
+                                if (message[i] === '}') {
+                                  depth--;
+                                  if (depth === 0) {
+                                    jsonEnd = i + 1;
+                                    break;
+                                  }
+                                }
+                              }
+                              if (jsonEnd !== -1) {
+                                const jsonStr = message.substring(jsonStart, jsonEnd);
+                                const equipmentData = JSON.parse(jsonStr);
+                                return { baseMessage, equipment: equipmentData.items || equipmentData || {} };
+                              }
+                              return { baseMessage, equipment: null };
+                            } catch (e) {
+                              const baseMessage = message.substring(0, equipmentMarker).trim();
+                              return { baseMessage, equipment: null };
+                            }
+                          }
+                          return { baseMessage: message, equipment: null };
+                        };
+
+                        // Helper function to get color for equipment status
+                        const getEquipmentStatusColor = (status: string) => {
+                          const normalized = status.toLowerCase().replace(/_/g, ' ');
+                          if (normalized === 'prepared' || normalized === 'available') {
+                            return 'bg-green-100 text-green-800';
+                          } else if (normalized === 'not available') {
+                            return 'bg-red-100 text-red-800';
+                          }
+                          return 'bg-gray-100 text-gray-800';
+                        };
+
+                        const { baseMessage, equipment } = parseEquipmentFromMessage(alert.message);
+                        const fm = formatAlertMessage(baseMessage);
                         const isEquipmentRelated = /equipment|needs/i.test(String(alert.title || '') + ' ' + String(alert.message || ''));
                         // Don't append inline time if the message already contains date/time text (e.g., booking 'from ... to ...')
                         const hasDateLike = /\d{1,2}\/\d{1,2}\/\d{4}/.test(fm) || /\bfrom\b[\s\S]*\bto\b/i.test(fm) || /\bat\s*\d{1,2}:\d{2}/i.test(fm);
-                        const shouldAppendTime = isEquipmentRelated && !hasDateLike;
+                        const shouldAppendTime = isEquipmentRelated && !hasDateLike && !equipment;
                         const fmWithTime = shouldAppendTime ? `${fm} at ${formatDateTime(alert.createdAt)}` : fm;
                         return (
                           <div key={alert.id} className="bg-white rounded-md p-3 border border-gray-200 hover:border-gray-300 transition-colors duration-150">
-                            <div className="flex items-start justify-between">
-                              <div>
-                                <h4 className="font-medium text-gray-900 text-sm">{alert.title}</h4>
-                                <p className="text-xs text-gray-600">{fmWithTime}</p>
-                              </div>
+                            {/* Mobile Layout */}
+                            <div className="flex flex-col gap-2 md:hidden">
+                              <h4 className="font-medium text-gray-900 text-sm break-words">{alert.title}</h4>
                               <div className="text-xs text-gray-500">{formatDateTime(alert.createdAt)}</div>
+                              <p className="text-xs text-gray-600 break-words">{fmWithTime}</p>
+                              {equipment && (
+                                <div className="flex flex-wrap gap-1.5">
+                                  {Object.entries(equipment).map(([key, value]: [string, any]) => {
+                                    const displayKey = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                                    return (
+                                      <span
+                                        key={key}
+                                        className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}
+                                      >
+                                        {displayKey}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                            
+                            {/* Desktop Layout */}
+                            <div className="hidden md:flex items-start justify-between">
+                              <div className="flex-1 min-w-0 pr-4">
+                                <h4 className="font-medium text-gray-900 text-sm">{alert.title}</h4>
+                                <p className="text-xs text-gray-600 break-words">{fmWithTime}</p>
+                                {equipment && (
+                                  <div className="mt-2 flex flex-wrap gap-1.5">
+                                    {Object.entries(equipment).map(([key, value]: [string, any]) => {
+                                      const displayKey = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                                      return (
+                                        <span
+                                          key={key}
+                                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}
+                                        >
+                                          {displayKey}
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="text-xs text-gray-500 whitespace-nowrap flex-shrink-0">{formatDateTime(alert.createdAt)}</div>
                             </div>
                           </div>
                         );
@@ -3483,20 +4497,106 @@ export default function AdminDashboard() {
                         return t.includes('user') || m.includes('banned') || m.includes('unbanned') || t.includes('suspension') ||
                                t.includes('equipment') || t.includes('needs') || m.includes('equipment') || m.includes('needs');
                       }).slice(0,5).map((alert: SystemAlert) => {
-                        const fm = formatAlertMessage(alert.message);
+                        // Helper function to parse equipment data from message
+                        const parseEquipmentFromMessage = (message: string) => {
+                          const equipmentMarker = message.indexOf('[Equipment:');
+                          if (equipmentMarker !== -1) {
+                            try {
+                              const baseMessage = message.substring(0, equipmentMarker).trim();
+                              const jsonStart = message.indexOf('{', equipmentMarker);
+                              if (jsonStart === -1) {
+                                return { baseMessage, equipment: null };
+                              }
+                              let depth = 0;
+                              let jsonEnd = -1;
+                              for (let i = jsonStart; i < message.length; i++) {
+                                if (message[i] === '{') depth++;
+                                if (message[i] === '}') {
+                                  depth--;
+                                  if (depth === 0) {
+                                    jsonEnd = i + 1;
+                                    break;
+                                  }
+                                }
+                              }
+                              if (jsonEnd !== -1) {
+                                const jsonStr = message.substring(jsonStart, jsonEnd);
+                                const equipmentData = JSON.parse(jsonStr);
+                                return { baseMessage, equipment: equipmentData.items || equipmentData || {} };
+                              }
+                              return { baseMessage, equipment: null };
+                            } catch (e) {
+                              const baseMessage = message.substring(0, equipmentMarker).trim();
+                              return { baseMessage, equipment: null };
+                            }
+                          }
+                          return { baseMessage: message, equipment: null };
+                        };
+
+                        // Helper function to get color for equipment status
+                        const getEquipmentStatusColor = (status: string) => {
+                          const normalized = status.toLowerCase().replace(/_/g, ' ');
+                          if (normalized === 'prepared' || normalized === 'available') {
+                            return 'bg-green-100 text-green-800';
+                          } else if (normalized === 'not available') {
+                            return 'bg-red-100 text-red-800';
+                          }
+                          return 'bg-gray-100 text-gray-800';
+                        };
+
+                        const { baseMessage, equipment } = parseEquipmentFromMessage(alert.message);
+                        const fm = formatAlertMessage(baseMessage);
                         const isEquipmentRelated = /equipment|needs/i.test(String(alert.title || '') + ' ' + String(alert.message || ''));
                         // Don't append inline time if the message already contains date/time text (e.g., booking 'from ... to ...')
                         const hasDateLike = /\d{1,2}\/\d{1,2}\/\d{4}/.test(fm) || /\bfrom\b[\s\S]*\bto\b/i.test(fm) || /\bat\s*\d{1,2}:\d{2}/i.test(fm);
-                        const shouldAppendTime = isEquipmentRelated && !hasDateLike;
+                        const shouldAppendTime = isEquipmentRelated && !hasDateLike && !equipment;
                         const fmWithTime = shouldAppendTime ? `${fm} at ${formatDateTime(alert.createdAt)}` : fm;
                         return (
                           <div key={alert.id} className="bg-white rounded-md p-3 border border-gray-200 hover:border-gray-300 transition-colors duration-150">
-                            <div className="flex items-start justify-between">
-                              <div>
-                                <h4 className="font-medium text-gray-900 text-sm">{alert.title}</h4>
-                                <p className="text-xs text-gray-600">{fmWithTime}</p>
-                              </div>
+                            {/* Mobile Layout */}
+                            <div className="flex flex-col gap-2 md:hidden">
+                              <h4 className="font-medium text-gray-900 text-sm break-words">{alert.title}</h4>
                               <div className="text-xs text-gray-500">{formatDateTime(alert.createdAt)}</div>
+                              <p className="text-xs text-gray-600 break-words">{fmWithTime}</p>
+                              {equipment && (
+                                <div className="flex flex-wrap gap-1.5">
+                                  {Object.entries(equipment).map(([key, value]: [string, any]) => {
+                                    const displayKey = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                                    return (
+                                      <span
+                                        key={key}
+                                        className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}
+                                      >
+                                        {displayKey}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                            
+                            {/* Desktop Layout */}
+                            <div className="hidden md:flex items-start justify-between">
+                              <div className="flex-1 min-w-0 pr-4">
+                                <h4 className="font-medium text-gray-900 text-sm">{alert.title}</h4>
+                                <p className="text-xs text-gray-600 break-words">{fmWithTime}</p>
+                                {equipment && (
+                                  <div className="mt-2 flex flex-wrap gap-1.5">
+                                    {Object.entries(equipment).map(([key, value]: [string, any]) => {
+                                      const displayKey = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                                      return (
+                                        <span
+                                          key={key}
+                                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}
+                                        >
+                                          {displayKey}
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="text-xs text-gray-500 whitespace-nowrap flex-shrink-0">{formatDateTime(alert.createdAt)}</div>
                             </div>
                           </div>
                         );
@@ -3507,7 +4607,7 @@ export default function AdminDashboard() {
                   <div className="pt-4 border-t border-gray-200 flex justify-end">
                     <button
                       onClick={() => { setSelectedView('admin-activity-logs'); setSettingsTab('system'); }}
-                      className="inline-flex items-center gap-2 px-4 py-2 bg-pink-600 text-white rounded-lg text-sm hover:bg-pink-700 transition-colors duration-150"
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-pink-600 text-white rounded-lg text-sm font-medium hover:bg-pink-700 transition-colors duration-150"
                     >
                       View All
                     </button>
@@ -3516,20 +4616,47 @@ export default function AdminDashboard() {
               </div>
 
               {/* Block 2: Recent System Activity (preview of activities) */}
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <div>
-                    <h3 className="text-xl font-bold text-gray-900">Recent System Activity</h3>
-                    <p className="text-gray-600 mt-1">Monitor system events and user actions</p>
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-base sm:text-xl font-bold text-gray-900">Recent System Activity</h3>
+                    <p className="text-xs sm:text-base text-gray-600 mt-1">Monitor system events and user actions</p>
                   </div>
-                  <div className="bg-pink-100 text-pink-800 px-3 py-1 rounded-full text-sm font-medium">
+                  <div className="bg-pink-100 text-pink-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium self-start whitespace-nowrap">
                     {activities?.length || 0} Events
                   </div>
                 </div>
 
                 {activities && activities.length > 0 ? (
                   <div className="space-y-2">
-                    {activities.slice(0, 5).map((a: any, idx: number) => (
+                    {activities.slice(0, 5).map((a: any, idx: number) => {
+                      // Helper function to parse equipment data from message
+                      const parseEquipmentFromMessage = (message: string) => {
+                        const equipmentMatch = message.match(/\[Equipment:\s*(\{.*\})\]/i);
+                        if (equipmentMatch) {
+                          try {
+                            const baseMessage = message.substring(0, equipmentMatch.index).trim();
+                            const equipmentData = JSON.parse(equipmentMatch[1]);
+                            return { baseMessage, equipment: equipmentData.items || {} };
+                          } catch (e) {
+                            return { baseMessage: message, equipment: null };
+                          }
+                        }
+                        return { baseMessage: message, equipment: null };
+                      };
+
+                      // Helper function to get color for equipment status
+                      const getEquipmentStatusColor = (status: string) => {
+                        const normalized = status.toLowerCase().replace(/_/g, ' ');
+                        if (normalized === 'prepared' || normalized === 'available') {
+                          return 'bg-green-100 text-green-800';
+                        } else if (normalized === 'not available') {
+                          return 'bg-red-100 text-red-800';
+                        }
+                        return 'bg-gray-100 text-gray-800';
+                      };
+
+                      return (
                       (() => {
                         // Use the same rich formatting logic as the System Activity list so the preview matches
                         // Resolve actor email
@@ -3723,20 +4850,40 @@ export default function AdminDashboard() {
                           }
                         } catch (e) {}
 
+                        // Parse equipment from the message
+                        const { baseMessage, equipment } = parseEquipmentFromMessage(a.message || a.details || '');
+                        const displaySubLine = equipment ? baseMessage : subLine;
+
                         return (
                           <div key={a.id || idx} className="bg-white rounded-md p-3 border border-gray-200 hover:border-gray-300 transition-colors duration-150">
                             <div className="flex items-start justify-between">
-                              <div>
+                              <div className="flex-1">
                                 <h4 className="font-medium text-sm text-gray-900">{(visibleTitle || (a.title || a.action)) ?? 'System Event'}</h4>
-                                <p className="text-xs text-gray-600 mt-1 break-words">{subLine}</p>
+                                <p className="text-xs text-gray-600 mt-1 break-words">{displaySubLine}</p>
+                                {equipment && (
+                                  <div className="mt-2 flex flex-wrap gap-1.5">
+                                    {Object.entries(equipment).map(([key, value]: [string, any]) => {
+                                      const displayKey = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                                      return (
+                                        <span
+                                          key={key}
+                                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}
+                                        >
+                                          {displayKey}
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                )}
                               </div>
 
-                              <div className="text-xs text-gray-500">{a.createdAt ? formatDateTime(a.createdAt) : ''}</div>
+                              <div className="text-xs text-gray-500 ml-4">{a.createdAt ? formatDateTime(a.createdAt) : ''}</div>
                             </div>
                           </div>
                         );
                       })()
-                    ))}
+                      );
+                    })}
 
                     <div className="pt-4 border-t border-gray-200 flex justify-end">
                       <button
@@ -3796,13 +4943,7 @@ export default function AdminDashboard() {
           <div className={`md:hidden fixed inset-x-0 top-16 bottom-0 z-40 transition-transform ${mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`} aria-hidden={!mobileSidebarOpen}>
           {/* overlay behind drawer */}
           <div className="absolute inset-0 bg-black/40" onClick={() => closeMobileSidebar()} />
-          <div className="relative w-64 h-full bg-card border-r rounded-none pt-2">
-            {/* Close button inside the sidebar panel (top-right) */}
-            <div className="absolute right-3 top-3 md:hidden z-40">
-              <button aria-label="Close sidebar" onClick={() => closeMobileSidebar()} className="w-9 h-9 flex items-center justify-center rounded-full bg-white/90 border border-gray-200 text-gray-700 hover:bg-white">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
+          <div className="relative w-64 h-full bg-card border-r rounded-none">
             <Sidebar
               items={sidebarItems}
               activeItem={selectedView}
@@ -3881,16 +5022,16 @@ export default function AdminDashboard() {
             </div>
 
             <div className="flex items-center justify-end gap-2 mt-4">
-              <Button variant="outline" onClick={() => { setShowEquipmentModal(false); setEquipmentModalBooking(null); setEquipmentModalItemStatuses({}); }}>Cancel</Button>
+              <Button variant="outline" onClick={() => { setShowEquipmentModal(false); setEquipmentModalBooking(null); setEquipmentModalItemStatuses({}); }} disabled={isConfirmingEquipment}>Cancel</Button>
               {
                 // disable confirm until every item has a selected status
               }
               <Button
                 onClick={() => confirmEquipmentModal()}
-                disabled={!(Object.keys(equipmentModalItemStatuses).length > 0 && Object.values(equipmentModalItemStatuses).every(s => s === 'prepared' || s === 'not_available'))}
-                className={`${!(Object.keys(equipmentModalItemStatuses).length > 0 && Object.values(equipmentModalItemStatuses).every(s => s === 'prepared' || s === 'not_available')) ? 'opacity-60 cursor-not-allowed' : ''}`}
+                disabled={isConfirmingEquipment || !(Object.keys(equipmentModalItemStatuses).length > 0 && Object.values(equipmentModalItemStatuses).every(s => s === 'prepared' || s === 'not_available'))}
+                className={`${(isConfirmingEquipment || !(Object.keys(equipmentModalItemStatuses).length > 0 && Object.values(equipmentModalItemStatuses).every(s => s === 'prepared' || s === 'not_available'))) ? 'opacity-60 cursor-not-allowed' : ''}`}
               >
-                Confirm
+                {isConfirmingEquipment ? 'Saving...' : 'Confirm'}
               </Button>
             </div>
           </div>

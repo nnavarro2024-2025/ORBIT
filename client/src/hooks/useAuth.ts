@@ -35,11 +35,20 @@ export function useAuth() {
             
             if (isMounted) setUser(userData);
           } catch (syncError) {
-            console.error("Auth sync failed. This is a critical error, logging out.", syncError);
+            console.error("Auth sync failed.", syncError);
             // If we can't sync the user with our backend, we shouldn't let them proceed.
             // This prevents data inconsistency and logs the user out cleanly.
-            supabase.auth.signOut();
+            await supabase.auth.signOut();
             if (isMounted) setUser(null);
+            
+            // Check if it's a 403 domain block error
+            const errorMessage = (syncError as any)?.message || '';
+            if (errorMessage.includes('403') || errorMessage.includes('restricted')) {
+              // Redirect to login with a notification
+              if (!window.location.pathname.includes('/login')) {
+                window.location.href = '/login?error=domain_restricted';
+              }
+            }
           }
         } else {
           if (isMounted) setUser(null);

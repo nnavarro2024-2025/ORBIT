@@ -48,32 +48,32 @@ export default function Landing() {
 
           <div className="mx-auto">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-5 mb-4 sm:mb-8 lg:mb-10">
-              <div className="bg-white border border-gray-200 rounded-2xl p-4 sm:p-6 text-center transform transition-all duration-200 hover:scale-105 hover:shadow-xl shadow-md">
-                <div className="inline-flex items-center justify-center w-12 h-12 sm:w-14 sm:h-14 bg-gradient-to-br from-pink-600 to-rose-700 rounded-full mb-3 sm:mb-4 shadow-lg">
+              <div className="bg-white border border-gray-200 rounded-2xl p-3 sm:p-4 md:p-6 text-center transform transition-all duration-200 hover:scale-105 hover:shadow-xl shadow-md">
+                <div className="inline-flex items-center justify-center w-12 h-12 sm:w-14 sm:h-14 bg-gradient-to-br from-pink-600 to-rose-700 rounded-full mb-2 sm:mb-3 md:mb-4 shadow-lg">
                   <Users className="h-5 w-5 sm:h-7 sm:w-7 text-white" />
                 </div>
-                <h3 className="text-base sm:text-lg font-semibold mb-2 text-gray-900">User-Friendly Interface</h3>
-                  <p className="text-sm text-gray-600 leading-tight">
+                <h3 className="text-sm sm:text-base md:text-lg font-semibold mb-1 sm:mb-2 text-gray-900">User-Friendly Interface</h3>
+                  <p className="text-xs sm:text-sm text-gray-600 leading-tight break-words">
                   Easy-to-use system designed specifically for school users
                 </p>
               </div>
 
-              <div className="bg-white border border-gray-200 rounded-2xl p-4 sm:p-6 text-center transform transition-all duration-200 hover:scale-105 hover:shadow-xl shadow-md mx-auto">
-                <div className="inline-flex items-center justify-center w-12 h-12 sm:w-14 sm:h-14 bg-gradient-to-br from-pink-500 to-rose-600 rounded-full mb-3 sm:mb-4 shadow-lg">
+              <div className="bg-white border border-gray-200 rounded-2xl p-3 sm:p-4 md:p-6 text-center transform transition-all duration-200 hover:scale-105 hover:shadow-xl shadow-md">
+                <div className="inline-flex items-center justify-center w-12 h-12 sm:w-14 sm:h-14 bg-gradient-to-br from-pink-500 to-rose-600 rounded-full mb-2 sm:mb-3 md:mb-4 shadow-lg">
                   <Calendar className="h-5 w-5 sm:h-7 sm:w-7 text-white" />
                 </div>
-                <h3 className="text-base sm:text-lg font-semibold mb-2 text-gray-900">Facility Booking</h3>
-                <p className="text-sm text-gray-600 leading-tight">
+                <h3 className="text-sm sm:text-base md:text-lg font-semibold mb-1 sm:mb-2 text-gray-900">Facility Booking</h3>
+                <p className="text-xs sm:text-sm text-gray-600 leading-tight break-words">
                   Quickly reserve rooms and manage bookings
                 </p>
               </div>
 
-              <div className="bg-white border border-gray-200 rounded-2xl p-4 sm:p-6 text-center transform transition-all duration-200 hover:scale-105 hover:shadow-xl shadow-md">
-                <div className="inline-flex items-center justify-center w-12 h-12 sm:w-14 sm:h-14 bg-gradient-to-br from-pink-500 to-rose-600 rounded-full mb-3 sm:mb-4 shadow-lg">
+              <div className="bg-white border border-gray-200 rounded-2xl p-3 sm:p-4 md:p-6 text-center transform transition-all duration-200 hover:scale-105 hover:shadow-xl shadow-md">
+                <div className="inline-flex items-center justify-center w-12 h-12 sm:w-14 sm:h-14 bg-gradient-to-br from-pink-500 to-rose-600 rounded-full mb-2 sm:mb-3 md:mb-4 shadow-lg">
                   <Shield className="h-5 w-5 sm:h-7 sm:w-7 text-white" />
                 </div>
-                <h3 className="text-base sm:text-lg font-semibold mb-2 text-gray-900">Secure UIC-only Access</h3>
-                <p className="text-sm text-gray-600 leading-tight">
+                <h3 className="text-sm sm:text-base md:text-lg font-semibold mb-1 sm:mb-2 text-gray-900">Secure UIC-only Access</h3>
+                <p className="text-xs sm:text-sm text-gray-600 leading-tight break-words">
                   Sign in with your UIC account for authorized and secure access to system features.
                 </p>
               </div>

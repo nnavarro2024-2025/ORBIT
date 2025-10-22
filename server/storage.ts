@@ -567,37 +567,43 @@ class DatabaseStorage implements IStorage {
         } catch (e) { return String(text || '').trim(); }
       };
 
-      // Choose a lookback window: admin/global alerts get a longer window
-      const FIVE_MIN = 5 * 60 * 1000;
-      const ONE_DAY = 24 * 60 * 60 * 1000;
-      const lookbackMs = alert.userId == null ? ONE_DAY : FIVE_MIN;
-      const cutoff = new Date(Date.now() - lookbackMs);
+      // Skip deduplication for "Booking Created" and "Equipment Needs Submitted" notifications 
+      // to ensure each booking/equipment request gets its own notification
+      const skipDedup = alert.title === 'Booking Created' || alert.title === 'Equipment Needs Submitted';
+      
+      if (!skipDedup) {
+        // Choose a lookback window: admin/global alerts get a longer window
+        const FIVE_MIN = 5 * 60 * 1000;
+        const ONE_DAY = 24 * 60 * 60 * 1000;
+        const lookbackMs = alert.userId == null ? ONE_DAY : FIVE_MIN;
+        const cutoff = new Date(Date.now() - lookbackMs);
 
-      // Build user filter: match same userId (including NULL for global/admin)
-      const userCondition = alert.userId == null ? sql`${systemAlerts.userId} IS NULL` : eq(systemAlerts.userId, alert.userId as any);
+        // Build user filter: match same userId (including NULL for global/admin)
+        const userCondition = alert.userId == null ? sql`${systemAlerts.userId} IS NULL` : eq(systemAlerts.userId, alert.userId as any);
 
-      // Find recent candidate alerts with same title and user scope
-      const candidates: SystemAlert[] = await db.select().from(systemAlerts).where(
-        and(
-          eq(systemAlerts.title, alert.title as any),
-          userCondition,
-          gte(systemAlerts.createdAt, cutoff as any)
-        )
-      ).orderBy(desc(systemAlerts.createdAt));
+        // Find recent candidate alerts with same title and user scope
+        const candidates: SystemAlert[] = await db.select().from(systemAlerts).where(
+          and(
+            eq(systemAlerts.title, alert.title as any),
+            userCondition,
+            gte(systemAlerts.createdAt, cutoff as any)
+          )
+        ).orderBy(desc(systemAlerts.createdAt));
 
-      const incomingKey = normalizeFirstLine(alert.message);
-      for (const cand of (candidates || [])) {
-        const candKey = normalizeFirstLine(cand.message as any);
-        if (candKey && candKey === incomingKey) {
-          // Found a near-duplicate: update existing alert's message and updatedAt, return it
-          try {
-            const [updated] = await db.update(systemAlerts).set({ message: alert.message, updatedAt: new Date() } as any).where(eq(systemAlerts.id, cand.id)).returning();
-            try { console.log('[storage][DEBUG] createSystemAlert deduped to existing id=' + String(cand.id)); } catch (e) {}
-            return updated || cand;
-          } catch (e) {
-            // If update fails, fall back to inserting a new alert below
-            console.warn('[storage][WARN] Failed to update existing alert during dedupe, proceeding to insert new alert', e);
-            break;
+        const incomingKey = normalizeFirstLine(alert.message);
+        for (const cand of (candidates || [])) {
+          const candKey = normalizeFirstLine(cand.message as any);
+          if (candKey && candKey === incomingKey) {
+            // Found a near-duplicate: update existing alert's message and updatedAt, return it
+            try {
+              const [updated] = await db.update(systemAlerts).set({ message: alert.message, updatedAt: new Date() } as any).where(eq(systemAlerts.id, cand.id)).returning();
+              try { console.log('[storage][DEBUG] createSystemAlert deduped to existing id=' + String(cand.id)); } catch (e) {}
+              return updated || cand;
+            } catch (e) {
+              // If update fails, fall back to inserting a new alert below
+              console.warn('[storage][WARN] Failed to update existing alert during dedupe, proceeding to insert new alert', e);
+              break;
+            }
           }
         }
       }
@@ -640,7 +646,8 @@ class DatabaseStorage implements IStorage {
 
   // Mark a global/admin alert as read (only when userId IS NULL). Intended for admin routes.
   async markAlertAsReadForAdmin(id: string): Promise<number> {
-    const result = await db.update(systemAlerts).set({ isRead: true }).where(and(eq(systemAlerts.id, id), sql`${systemAlerts.userId} IS NULL`));
+    // Admin can mark any alert as read (both global alerts and user-specific equipment/needs alerts)
+    const result = await db.update(systemAlerts).set({ isRead: true }).where(eq(systemAlerts.id, id));
     // @ts-ignore
     return (result && (result as any).rowCount) || 0;
   }

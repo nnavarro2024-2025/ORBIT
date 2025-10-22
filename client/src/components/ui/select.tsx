@@ -135,12 +135,12 @@ const SelectItem = React.forwardRef<
         {available ? <Check className="h-4 w-4" /> : <X className="h-4 w-4 text-gray-400" />}
       </SelectPrimitive.ItemIndicator>
     </span>
-    <div className="ml-3 flex flex-col justify-center">
+    <div className="ml-3 flex flex-col justify-center min-w-0 flex-1">
       <SelectPrimitive.ItemText asChild>
         <span className="block truncate">{children}</span>
       </SelectPrimitive.ItemText>
       {description && (
-        <span className="text-xs text-muted-foreground mt-0">{description}</span>
+        <span className="text-xs text-muted-foreground mt-0 whitespace-normal break-words">{description}</span>
       )}
     </div>
   </SelectPrimitive.Item>

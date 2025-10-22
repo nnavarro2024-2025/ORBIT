@@ -42,6 +42,51 @@ async function startServer() {
   await pool.query(`ALTER TABLE facility_bookings ADD COLUMN IF NOT EXISTS arrival_confirmation_deadline TIMESTAMP;`);
   await pool.query(`ALTER TABLE facility_bookings ADD COLUMN IF NOT EXISTS arrival_confirmed BOOLEAN DEFAULT false;`);
       console.log("✅ Applied development-safe schema updates (unavailable_reason, equipment)");
+      
+      // One-time cleanup: remove JSON payloads and duplicate item listings from notification messages
+      try {
+        // First, remove everything after the first occurrence of " - " (the duplicate item list and JSON)
+        const result = await pool.query(`
+          UPDATE system_alerts 
+          SET message = CASE
+            WHEN message ~ ' - \\w+ - .* \\{' THEN 
+              REGEXP_REPLACE(message, ' - \\w+.*$', '', 'g')
+            WHEN message ~ '\\{"items"' THEN 
+              REGEXP_REPLACE(message, ' \\{"items".*$', '', 'g')
+            ELSE message
+          END
+          WHERE (title LIKE '%Equipment%' OR title LIKE '%Needs%')
+          AND (message ~ ' - \\w+ - ' OR message ~ '\\{"items"')
+        `);
+        if (result.rowCount && result.rowCount > 0) {
+          console.log(`✅ Cleaned up ${result.rowCount} notification messages (removed duplicate lists and JSON)`);
+        }
+        
+        // Remove global equipment alerts (userId = null) - they should only be per-user alerts
+        const deleteResult = await pool.query(`
+          DELETE FROM system_alerts 
+          WHERE title = 'Equipment or Needs Request'
+          AND user_id IS NULL
+        `);
+        if (deleteResult.rowCount && deleteResult.rowCount > 0) {
+          console.log(`✅ Removed ${deleteResult.rowCount} global equipment alerts from booking system alerts`);
+        }
+        
+        // Update activity log titles and details for equipment updates
+        const updateActivityResult = await pool.query(`
+          UPDATE activity_log 
+          SET 
+            action = 'Equipment Status Updated',
+            details = REGEXP_REPLACE(details, 'marked the requested equipment as (prepared|not available) for', 'updated \\1''s equipment request at', 'i')
+          WHERE action = 'Equipment Not Available'
+          OR details ~ 'marked the requested equipment as not available'
+        `);
+        if (updateActivityResult.rowCount && updateActivityResult.rowCount > 0) {
+          console.log(`✅ Updated ${updateActivityResult.rowCount} activity log entries to use cleaner formatting`);
+        }
+      } catch (cleanupErr) {
+        console.warn("⚠️ Failed to cleanup notification messages:", cleanupErr);
+      }
     } catch (err) {
       console.error("⚠️ Failed to apply development-safe schema updates:", err);
     }

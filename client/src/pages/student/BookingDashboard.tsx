@@ -7,7 +7,7 @@ import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
 import BookingModal from "@/components/modals/BookingModal";
 import EditBookingModal from "@/components/modals/EditBookingModal";
-import { Plus, Calendar, Home, Eye, AlertTriangle, BarChart3, Settings, Clock, CheckCircle } from "lucide-react";
+import { Plus, Calendar, Home, Eye, AlertTriangle, BarChart3, Settings, Clock, CheckCircle, Loader2, Menu, X } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { useLocation } from 'wouter';
@@ -29,10 +29,22 @@ export default function BookingDashboard() {
   const [openOthers, setOpenOthers] = useState<Record<string, boolean>>({});
   const [selectedView, setSelectedView] = useState("dashboard");
   const [devForceOpen, setDevForceOpen] = useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   // Common hooks used throughout the dashboard
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+
+  // Close mobile sidebar on Escape key
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isMobileSidebarOpen) {
+        setIsMobileSidebarOpen(false);
+      }
+    };
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [isMobileSidebarOpen]);
 
   // Fetch availability once for the dashboard so cards can show next available ranges
   const todayDateStr = format(new Date(), 'yyyy-MM-dd');
@@ -93,21 +105,34 @@ export default function BookingDashboard() {
 
   // Small Countdown component (lightweight replacement to satisfy usage)
   function Countdown({ expiry, onExpire }: { expiry: string | Date | undefined; onExpire?: () => void }) {
+    const [now, setNow] = useState(Date.now());
+    
+    useEffect(() => {
+      const interval = setInterval(() => {
+        setNow(Date.now());
+      }, 1000);
+      return () => clearInterval(interval);
+    }, []);
+    
     useEffect(() => {
       if (!expiry) return;
-      const ms = new Date(expiry).getTime() - Date.now();
+      const ms = new Date(expiry).getTime() - now;
       if (ms <= 0) {
         onExpire?.();
         return;
       }
-      const t = setTimeout(() => onExpire?.(), ms);
-      return () => clearTimeout(t);
-    }, [expiry]);
+    }, [expiry, now, onExpire]);
+    
     if (!expiry) return <span />;
-    const diff = Math.max(0, new Date(expiry).getTime() - Date.now());
-    const mins = Math.floor(diff / 60000);
+    const diff = Math.max(0, new Date(expiry).getTime() - now);
+    const hours = Math.floor(diff / 3600000);
+    const mins = Math.floor((diff % 3600000) / 60000);
     const secs = Math.floor((diff % 60000) / 1000);
-    return <span>{mins}:{secs.toString().padStart(2, '0')}</span>;
+    return (
+      <span className="font-mono text-base font-semibold">
+        {hours.toString().padStart(2, '0')}:{mins.toString().padStart(2, '0')}:{secs.toString().padStart(2, '0')}
+      </span>
+    );
   }
   // Sidebar items (include admin-only links)
   let sidebarItems: any[] = [];
@@ -124,7 +149,7 @@ export default function BookingDashboard() {
       { id: 'my-bookings', label: 'My Bookings', icon: Calendar },
       { id: 'available-rooms', label: 'Available Rooms', icon: Home },
       { id: 'activity-logs', label: 'Activity Logs', icon: BarChart3 },
-      { id: 'booking-settings', label: 'Booking Settings', icon: Settings },
+      { id: 'booking-settings', label: 'Guidelines & Policy', icon: Settings },
     ];
     if (user && user.role === 'admin') {
       sidebarItems.push({ id: 'divider-1', type: 'divider' });
@@ -181,13 +206,16 @@ export default function BookingDashboard() {
     }
     if (id === 'new-booking') {
       openBookingModal();
+      setIsMobileSidebarOpen(false);
       return;
     }
     if (id === 'booking-settings') {
       setSelectedView('booking-settings');
+      setIsMobileSidebarOpen(false);
       return;
     }
     setSelectedView(id);
+    setIsMobileSidebarOpen(false);
   };
   const itemsPerPage = 5; // show first 5 bookings in My Bookings (no pagination)
   // Full Activity Logs notifications page size
@@ -383,7 +411,7 @@ export default function BookingDashboard() {
       }
     },
     // Expect the server to return the updated booking object; update cache optimistically
-    onSuccess: (data: any) => {
+    onSuccess: async (data: any) => {
       try {
         // If server returned the updated booking, update the bookings cache
         if (data && data.id) {
@@ -393,23 +421,23 @@ export default function BookingDashboard() {
           });
           // If we're currently editing this booking, update that local state too
           setEditingBooking((prev: any) => (prev && prev.id === data.id ? data : prev));
+          // Ensure queries are refetched to get latest state
+          await queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
         } else {
           // Fallback: server returned a legacy success payload (no booking object).
           // Fetch the full bookings list and replace the cache so the UI reflects persisted changes.
-          (async () => {
-            try {
-              const res = await apiRequest("GET", "/api/bookings");
-              const fresh = await res.json();
-              if (Array.isArray(fresh)) {
-                queryClient.setQueryData(["/api/bookings"], fresh);
-              } else {
-                queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
-              }
-            } catch (fetchErr) {
-              console.warn('[BookingDashboard] onSuccess fallback fetch failed', fetchErr);
-              queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
+          try {
+            const res = await apiRequest("GET", "/api/bookings");
+            const fresh = await res.json();
+            if (Array.isArray(fresh)) {
+              queryClient.setQueryData(["/api/bookings"], fresh);
+            } else {
+              await queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
             }
-          })();
+          } catch (fetchErr) {
+            console.warn('[BookingDashboard] onSuccess fallback fetch failed', fetchErr);
+            await queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
+          }
         }
       } catch (e) {
         console.warn('[BookingDashboard] updateBookingMutation.onSuccess handler failed', e);
@@ -459,12 +487,14 @@ export default function BookingDashboard() {
 
   const cancelBookingMutation = useMutation({
     mutationFn: (bookingId: string) => apiRequest("POST", `/api/bookings/${bookingId}/cancel`),
-    onSuccess: () => {
-      // Cache invalidation handled here; toast is shown per-mutation in the confirm flow
-      // Give admin dashboard a nudge by invalidating potential shared caches
-      queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/alerts"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/activity"] });
+    onSuccess: async () => {
+      // Wait for cache invalidation to complete before hiding loading state
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["/api/bookings"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/notifications"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/alerts"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/activity"] }),
+      ]);
     },
     onError: (error: any) => {
       toast({
@@ -496,13 +526,17 @@ export default function BookingDashboard() {
           } else {
             toast({ title: 'Booking Cancelled', description: 'Your booking has been cancelled.' });
           }
+          // Close modal only after mutation succeeds and cache is updated
+          setShowCancelModal(false);
+          setBookingToCancel(null);
         },
         onError: (error: any) => {
           toast({ title: 'Cancellation Failed', description: error?.message || 'An error occurred while cancelling the booking.', variant: 'destructive' });
+          // Close modal on error too
+          setShowCancelModal(false);
+          setBookingToCancel(null);
         }
       });
-      setShowCancelModal(false);
-      setBookingToCancel(null);
     }
   };
 
@@ -588,8 +622,9 @@ export default function BookingDashboard() {
   // Mutation to mark a notification as read from the notification logs tab
   const markNotificationReadMutation = useMutation({
     mutationFn: async (id: string) => apiRequest('POST', `/api/notifications/${id}/read`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/notifications'] });
+    onSuccess: async () => {
+      // Wait for query to refetch before hiding loading state
+      await queryClient.invalidateQueries({ queryKey: ['/api/notifications'] });
     }
   });
 
@@ -797,6 +832,20 @@ export default function BookingDashboard() {
 
   // Helper function to open booking modal with a specific facility
   const openBookingModal = async (facilityId?: number, start?: Date, end?: Date) => {
+    // Prevent non-faculty users from opening the booking modal for restricted facilities
+    try {
+      const facility = facilityId ? facilities.find((f) => f.id === facilityId) : undefined;
+      const name = facility?.name || '';
+  const isRestricted = /board room|boardroom|lounge/i.test(name);
+      const userRole = user?.role || 'student';
+      const isFacultyOrAdmin = userRole === 'faculty' || userRole === 'admin';
+      if (isRestricted && !isFacultyOrAdmin) {
+        toast({ title: 'Access Restricted', description: 'Only faculty members may book this facility. Contact an administrator for access.', variant: 'destructive' });
+        return; // do not open modal
+      }
+    } catch (e) {
+      // ignore and continue - open modal as fallback
+    }
     setSelectedFacilityForBooking(facilityId || null);
     // If no start/end provided, try to pick the first 'available' slot from availabilityMap
     if (!start) {
@@ -906,15 +955,41 @@ export default function BookingDashboard() {
     setInitialEndForBooking(null);
   };
 
-  const getFacilityDisplay = (facilityId: number) => {
+    const getFacilityDisplay = (facilityId: number) => {
     const facility = facilities.find((f) => f.id === facilityId);
     if (!facility) return `Facility ${facilityId}`;
-    const name = facility.name || `Facility ${facilityId}`;
+    let name = facility.name || `Facility ${facilityId}`;
+    
+    // Ensure proper facility naming - add "Facility" prefix if missing for Lounge
     const lower = name.toLowerCase();
+    if (lower === 'lounge' && !lower.includes('facility')) {
+      name = 'Facility Lounge';
+    }
+    
     if (lower.includes('collaborative learning room 1') || lower.includes('collaborative learning room 2')) {
       // Room capacity is 8
     } else if (lower.includes('board room') || lower.includes('boardroom')) {
       // Room capacity is 12
+    } else if (lower.includes('lounge')) {
+      // Lounge behaves similarly to board room for display purposes
+    }
+    return name;
+  };
+
+  // Helper to determine restricted facilities (faculty-only)
+  const isRestrictedFacility = (facility?: any) => {
+    if (!facility) return false;
+  const name = String(facility.name || '').toLowerCase();
+  return name.includes('board room') || name.includes('boardroom') || name.includes('lounge');
+  };
+
+  // Helper to format facility name for display
+  const formatFacilityName = (name: string) => {
+    if (!name) return name;
+    const lower = name.toLowerCase();
+    // Ensure proper facility naming - add "Facility" prefix if missing for Lounge
+    if (lower === 'lounge' && !lower.includes('facility')) {
+      return 'Facility Lounge';
     }
     return name;
   };
@@ -943,6 +1018,9 @@ export default function BookingDashboard() {
     if (lower.includes('board room') || lower.includes('boardroom')) {
       return 'Conference room for group meetings';
     }
+    if (lower.includes('lounge')) {
+      return 'Comfortable lounge area for informal study and relaxation.';
+    }
     return 'Comfortable study space for individual or small group use.';
   };
 
@@ -955,7 +1033,8 @@ export default function BookingDashboard() {
     if (lower.includes('collaborative learning') || 
         lower.includes('collaraborative learning') || // Handle the typo in facility names
         lower.includes('board room') || 
-        lower.includes('boardroom')) {
+        lower.includes('boardroom') ||
+        lower.includes('lounge')) {
       return '/images/facility-overview.jpg';
     }
     
@@ -980,9 +1059,27 @@ export default function BookingDashboard() {
   };
 
   const canEditBooking = (booking: any): boolean => {
-    // Keep editing allowed for pending bookings to match server-side rules where
-    // users can still modify a booking while the system is finalizing scheduling.
-    return booking && booking.status === 'pending';
+    // Allow editing for:
+    // - pending bookings (system is finalizing scheduling)
+    // - approved/scheduled bookings that haven't started yet AND admin hasn't confirmed equipment
+    if (!booking) return false;
+    try {
+      const now = new Date();
+      const start = new Date(booking.startTime);
+      
+      // Check if admin has confirmed/prepared equipment
+      const hasAdminResponse = booking.adminResponse && String(booking.adminResponse).trim().length > 0;
+      
+      // Allow editing pending bookings (unless admin already responded)
+      if (booking.status === 'pending' && !hasAdminResponse) return true;
+      
+      // Allow editing approved bookings that haven't started (unless admin already confirmed equipment)
+      if (booking.status === 'approved' && start > now && !hasAdminResponse) return true;
+      
+      return false;
+    } catch (e) {
+      return false;
+    }
   };
 
   // Client-side rule matching server: allow cancelling when
@@ -1010,19 +1107,74 @@ export default function BookingDashboard() {
   // Small component: render per-facility columns of merged time ranges from /api/availability
   // Availability list columns removed; availability rendering is handled inline above.
 
+  // Helper function to parse equipment data from notification message
+  const parseEquipmentFromMessage = (message: string) => {
+    const equipmentMarker = message.indexOf('[Equipment:');
+    if (equipmentMarker !== -1) {
+      try {
+        // Extract base message before the equipment marker
+        const baseMessage = message.substring(0, equipmentMarker).trim();
+        
+        // Find the JSON object - look for the closing bracket that matches the opening
+        const jsonStart = message.indexOf('{', equipmentMarker);
+        if (jsonStart === -1) {
+          return { baseMessage, equipment: null };
+        }
+        
+        // Find matching closing brace
+        let depth = 0;
+        let jsonEnd = -1;
+        for (let i = jsonStart; i < message.length; i++) {
+          if (message[i] === '{') depth++;
+          if (message[i] === '}') {
+            depth--;
+            if (depth === 0) {
+              jsonEnd = i + 1;
+              break;
+            }
+          }
+        }
+        
+        if (jsonEnd !== -1) {
+          const jsonStr = message.substring(jsonStart, jsonEnd);
+          const equipmentData = JSON.parse(jsonStr);
+          return { baseMessage, equipment: equipmentData.items || equipmentData || {} };
+        }
+        
+        return { baseMessage, equipment: null };
+      } catch (e) {
+        // If parsing fails, just return the base message without the equipment marker
+        const baseMessage = message.substring(0, equipmentMarker).trim();
+        return { baseMessage, equipment: null };
+      }
+    }
+    return { baseMessage: message, equipment: null };
+  };
+
+  // Helper function to get color for equipment status
+  const getEquipmentStatusColor = (status: string) => {
+    const normalized = status.toLowerCase().replace(/_/g, ' ');
+    if (normalized === 'prepared' || normalized === 'available') {
+      return 'bg-green-100 text-green-800';
+    } else if (normalized === 'not available') {
+      return 'bg-red-100 text-red-800';
+    }
+    return 'bg-gray-100 text-gray-800';
+  };
+
   const renderContent = () => {
     switch (selectedView) {
       case "my-bookings":
         return (
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-              <div className="flex items-center justify-between mb-6">
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4 sm:mb-6">
                 <div>
-                  <h3 className="text-xl font-semibold text-gray-900">My Bookings</h3>
-                  <p className="text-sm text-gray-600 mt-1">Manage your facility reservations</p>
+                  <h3 className="text-lg sm:text-xl font-semibold text-gray-900">My Bookings</h3>
+                  <p className="text-xs sm:text-sm text-gray-600 mt-1">Manage your facility reservations</p>
                 </div>
                 <button
                   onClick={() => openBookingModal()}
-                  className="bg-pink-600 hover:bg-pink-700 text-white px-4 py-2 rounded-lg font-medium transition-colors duration-200 flex items-center gap-2"
+                  className="bg-pink-600 hover:bg-pink-700 text-white px-4 py-2 rounded-lg font-medium transition-colors duration-200 flex items-center gap-2 text-sm sm:text-base self-start sm:self-auto"
                 >
                   <Plus className="h-4 w-4" />
                   New Booking
@@ -1059,19 +1211,19 @@ export default function BookingDashboard() {
                     };
 
                     return (
-                      <div id={`booking-${booking.id}`} key={booking.id} className="bg-white border border-gray-200 rounded-xl p-6 hover:shadow-md transition-all duration-200">
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center gap-4">
-                            <div className="bg-pink-100 p-3 rounded-lg">
-                              <Calendar className="h-6 w-6 text-pink-600" />
+                      <div id={`booking-${booking.id}`} key={booking.id} className="bg-white border border-gray-200 rounded-xl p-3 sm:p-6 hover:shadow-md transition-all duration-200">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3 sm:mb-2">
+                          <div className="flex items-center gap-2 sm:gap-4 min-w-0 flex-1">
+                            <div className="bg-pink-100 p-2 sm:p-3 rounded-lg flex-shrink-0">
+                              <Calendar className="h-4 w-4 sm:h-6 sm:w-6 text-pink-600" />
                             </div>
-                            <div>
-                              <h4 className="font-bold text-lg text-gray-900">{getFacilityDisplay(booking.facilityId)}</h4>
-                              <p className="text-sm text-gray-600">Room #{booking.facilityId}</p>
+                            <div className="min-w-0 flex-1">
+                              <h4 className="font-bold text-sm sm:text-lg text-gray-900 truncate">{getFacilityDisplay(booking.facilityId)}</h4>
+                              <p className="text-[10px] sm:text-sm text-gray-600">Room #{booking.facilityId}</p>
                             </div>
                           </div>
-                          <span className={`px-3 py-0.5 rounded-full text-sm font-medium border ${statusColors[status.label as keyof typeof statusColors] || 'bg-gray-100 text-gray-800 border-gray-200'}`}>
-                            <span className={`w-2 h-2 rounded-full mr-2 inline-block ${
+                          <span className={`px-2 sm:px-3 py-1 rounded-full text-[10px] sm:text-sm font-medium border self-start flex-shrink-0 whitespace-nowrap ${statusColors[status.label as keyof typeof statusColors] || 'bg-gray-100 text-gray-800 border-gray-200'}`}>
+                            <span className={`w-2 h-2 rounded-full mr-1 sm:mr-2 inline-block ${
                               status.label === 'Active' ? 'bg-green-500' :
                               status.label === 'Scheduled' ? 'bg-yellow-500' :
                               status.label === 'Done' ? 'bg-gray-500' :
@@ -1082,18 +1234,18 @@ export default function BookingDashboard() {
                           </span>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-                          <div className="bg-gray-50 rounded-lg p-4">
-                            <p className="text-sm font-medium text-gray-600 mb-1">Date & Time</p>
-                            <p className="font-semibold text-gray-900">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-3 sm:mb-4">
+                          <div className="bg-gray-50 rounded-lg p-3 sm:p-4">
+                            <p className="text-xs sm:text-sm font-medium text-gray-600 mb-1">Date & Time</p>
+                            <p className="text-sm sm:text-base font-semibold text-gray-900 break-words">
                               {new Date(booking.startTime).toLocaleDateString('en-US', {
-                                weekday: 'long',
+                                weekday: 'short',
                                 year: 'numeric',
-                                month: 'long',
+                                month: 'short',
                                 day: 'numeric'
                               })}
                             </p>
-                            <p className="text-sm text-gray-600">
+                            <p className="text-xs sm:text-sm text-gray-600">
                               {new Date(booking.startTime).toLocaleTimeString('en-US', {
                                 hour: 'numeric',
                                 minute: '2-digit',
@@ -1106,8 +1258,8 @@ export default function BookingDashboard() {
                             </p>
                           </div>
 
-                          <div className="bg-gray-50 rounded-lg p-4">
-                            <p className="text-sm font-medium text-gray-600 mb-1">Purpose</p>
+                          <div className="bg-gray-50 rounded-lg p-3 sm:p-4">
+                            <p className="text-xs sm:text-sm font-medium text-gray-600 mb-1">Purpose</p>
                               {(booking.purpose || '').length > 30 ? (
                                 <TooltipProvider>
                                   <Tooltip>
@@ -1115,41 +1267,40 @@ export default function BookingDashboard() {
                                       <TooltipTrigger asChild>
                                         <PopoverTrigger asChild>
                                           <div className="flex items-center gap-2 cursor-help">
-                                            <Eye className="h-4 w-4 text-pink-600 flex-shrink-0" />
-                                            <p className="text-gray-900 text-sm">
-                                              <span className="font-medium">Purpose</span>
+                                            <Eye className="h-3 w-3 sm:h-4 sm:w-4 text-pink-600 flex-shrink-0" />
+                                            <p className="text-gray-900 text-xs sm:text-sm">
+                                              <span className="font-medium">View full purpose</span>
                                             </p>
                                           </div>
                                         </PopoverTrigger>
                                       </TooltipTrigger>
-                                      <TooltipContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
-                                        <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                                          <p className="font-medium text-sm text-gray-800">Full Purpose</p>
+                                      <TooltipContent side="top" className="max-w-[90vw] sm:max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
+                                        <div className="bg-gray-50 px-3 sm:px-4 py-2 border-b border-gray-200">
+                                          <p className="font-medium text-xs sm:text-sm text-gray-800">Full Purpose</p>
                                         </div>
-                                        <div className="p-3">
-                                          <p className="text-sm text-gray-900 leading-5 break-words font-normal">{booking.purpose || 'No purpose specified'}</p>
+                                        <div className="p-3 max-h-48 overflow-y-auto">
+                                          <p className="text-xs sm:text-sm text-gray-900 leading-5 break-words font-normal">{booking.purpose || 'No purpose specified'}</p>
                                         </div>
                                       </TooltipContent>
-                                      <PopoverContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50 origin-top-left">
-                                        <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                                          <p className="font-medium text-sm text-gray-800">Full Purpose</p>
+                                      <PopoverContent side="top" className="max-w-[90vw] sm:max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50 origin-top-left">
+                                        <div className="bg-gray-50 px-3 sm:px-4 py-2 border-b border-gray-200">
+                                          <p className="font-medium text-xs sm:text-sm text-gray-800">Full Purpose</p>
                                         </div>
-                                        <div className="p-3">
-                                          <p className="text-sm text-gray-900 leading-5 break-words font-normal">{booking.purpose || 'No purpose specified'}</p>
+                                        <div className="p-3 max-h-48 overflow-y-auto">
+                                          <p className="text-xs sm:text-sm text-gray-900 leading-5 break-words font-normal">{booking.purpose || 'No purpose specified'}</p>
                                         </div>
                                       </PopoverContent>
                                     </Popover>
                                   </Tooltip>
                                 </TooltipProvider>
                               ) : (
-                                <p className="text-gray-900 text-sm">
-                                  <span className="font-medium">Purpose:&nbsp;</span>
-                                  <span className="font-normal">{booking.purpose || 'No purpose specified'}</span>
+                                <p className="text-gray-900 text-xs sm:text-sm break-words">
+                                  {booking.purpose || 'No purpose specified'}
                                 </p>
                               )}
                           </div>
 
-                          <div className="bg-gray-50 rounded-lg p-4">
+                          <div className="bg-gray-50 rounded-lg p-3 sm:p-4">
                             {/* Equipment / Needs box as its own column */}
                               {booking.equipment && (function() {
                                 const eq = booking.equipment;
@@ -1158,8 +1309,8 @@ export default function BookingDashboard() {
                                 if ((!Array.isArray(eq.items) || eq.items.length === 0) && !(eq.others && String(eq.others).trim().length > 0)) return null;
                                 return (
                                   <div>
-                                    <div className="flex items-center gap-2">
-                                      <div className="text-xs font-medium text-gray-700">Equipment or Needs</div>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <div className="text-xs sm:text-sm font-medium text-gray-700">Equipment or Needs</div>
                                       {eq.others && String(eq.others).trim().length > 0 && (
                                         <Popover open={isOpen} onOpenChange={(v) => setOpenOthers(prev => ({ ...prev, [id]: v }))}>
                                           <TooltipProvider>
@@ -1168,59 +1319,117 @@ export default function BookingDashboard() {
                                                 <PopoverTrigger asChild>
                                                   <button
                                                     onClick={() => setOpenOthers(prev => ({ ...prev, [id]: !prev[id] }))}
-                                                    className="flex items-center gap-1 text-[11px] text-gray-700"
+                                                    className="flex items-center gap-1 text-[10px] sm:text-[11px] text-gray-700 hover:text-pink-600 transition-colors"
                                                     aria-expanded={isOpen}
                                                   >
                                                     <Eye className="h-3 w-3 text-pink-600" />
-                                                    <span className="text-gray-700">View other</span>
+                                                    <span>View other</span>
                                                   </button>
                                                 </PopoverTrigger>
                                               </TooltipTrigger>
 
-                                              <TooltipContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
-                                                <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                                                  <p className="font-semibold text-sm text-gray-800">Other equipment</p>
+                                              <TooltipContent side="top" className="max-w-[90vw] sm:max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
+                                                <div className="bg-gray-50 px-3 sm:px-4 py-2 border-b border-gray-200">
+                                                  <p className="font-semibold text-xs sm:text-sm text-gray-800">Other equipment</p>
                                                 </div>
-                                                <div className="p-3">
-                                                  <p className="whitespace-pre-wrap text-sm text-gray-900 leading-6 break-words font-normal">{String(eq.others).trim()}</p>
+                                                <div className="p-3 max-h-48 overflow-y-auto">
+                                                  <p className="whitespace-pre-wrap text-xs sm:text-sm text-gray-900 leading-5 break-words font-normal">{String(eq.others).trim()}</p>
                                                 </div>
                                               </TooltipContent>
                                             </Tooltip>
                                           </TooltipProvider>
 
-                                          <PopoverContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50 origin-top-left">
-                                            <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                                              <p className="font-semibold text-sm text-gray-800">Other equipment</p>
+                                          <PopoverContent side="top" className="max-w-[90vw] sm:max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50">
+                                            <div className="bg-gray-50 px-3 sm:px-4 py-2 border-b border-gray-200">
+                                              <p className="font-semibold text-xs sm:text-sm text-gray-800">Other equipment</p>
                                             </div>
-                                            <div className="p-3">
-                                              <p className="text-sm text-gray-900 leading-5 break-words font-normal">{String(eq.others).trim()}</p>
+                                            <div className="p-3 max-h-48 overflow-y-auto">
+                                              <p className="text-xs sm:text-sm text-gray-900 leading-5 break-words font-normal">{String(eq.others).trim()}</p>
                                             </div>
                                           </PopoverContent>
                                         </Popover>
                                       )}
                                     </div>
 
-                                    <div className="flex items-center gap-2 flex-wrap mt-2">
-                                      {/* Render pre-made items as chips */}
-                                      {Array.isArray(eq.items) && eq.items.length > 0 && eq.items.map((it: string, idx: number) => (
-                                        <span key={`eq-${id}-${idx}`} className="text-xs bg-gray-100 text-gray-800 px-2 py-1 rounded-full border border-gray-200">{it}</span>
-                                      ))}
+                                    <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap mt-2">
+                                      {/* Render pre-made items as chips with color based on needs status */}
+                                      {Array.isArray(eq.items) && eq.items.length > 0 && eq.items.map((it: string, idx: number) => {
+                                        // Parse per-item equipment status from adminResponse JSON
+                                        let itemStatus: 'prepared' | 'not_available' | undefined;
+                                        try {
+                                          const resp = String(booking?.adminResponse || '');
+                                          
+                                          // First try to extract JSON with per-item statuses
+                                          // Look for JSON block starting with {"items":
+                                          const jsonMatch = resp.match(/\{"items":\{[^}]*\}\}/);
+                                          if (jsonMatch) {
+                                            const parsed = JSON.parse(jsonMatch[0]);
+                                            
+                                            if (parsed.items && typeof parsed.items === 'object') {
+                                              // Check for exact match or normalized match
+                                              const itemKey = String(it).toLowerCase().replace(/\s+/g, '_');
+                                              const itemKeyNoUnderscore = String(it).toLowerCase().replace(/_/g, ' ');
+                                              
+                                              for (const [key, value] of Object.entries(parsed.items)) {
+                                                const normalizedKey = String(key).toLowerCase().replace(/\s+/g, '_');
+                                                const keyNoUnderscore = String(key).toLowerCase().replace(/_/g, ' ');
+                                                
+                                                // Match with multiple variations: exact, normalized, with/without underscores
+                                                if (normalizedKey === itemKey || 
+                                                    key === it || 
+                                                    keyNoUnderscore === itemKeyNoUnderscore ||
+                                                    String(key).toLowerCase() === String(it).toLowerCase()) {
+                                                  const val = String(value).toLowerCase();
+                                                  if (val === 'prepared' || val === 'true' || val === 'yes') {
+                                                    itemStatus = 'prepared';
+                                                  } else if (val === 'not_available' || val === 'not available' || val === 'false' || val === 'no') {
+                                                    itemStatus = 'not_available';
+                                                  }
+                                                  break;
+                                                }
+                                              }
+                                            }
+                                          }
+                                          
+                                          // Fallback: check for global status if no per-item status found
+                                          if (!itemStatus) {
+                                            const match = resp.match(/Needs:\s*(Prepared|Not Available)/i);
+                                            if (match) {
+                                              itemStatus = /prepared/i.test(match[1]) ? 'prepared' : 'not_available';
+                                            }
+                                          }
+                                        } catch (e) {
+                                          // ignore parse errors
+                                        }
+                                        
+                                        // Apply colors based on status
+                                        let chipClass = "text-[10px] sm:text-xs bg-pink-50 text-pink-700 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full border border-pink-200 whitespace-nowrap";
+                                        if (itemStatus === 'prepared') {
+                                          chipClass = "text-[10px] sm:text-xs bg-green-100 text-green-800 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full border border-green-200 whitespace-nowrap";
+                                        } else if (itemStatus === 'not_available') {
+                                          chipClass = "text-[10px] sm:text-xs bg-red-100 text-red-800 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full border border-red-200 whitespace-nowrap";
+                                        }
+                                        
+                                        return (
+                                          <span key={`eq-${id}-${idx}`} className={chipClass}>{it}</span>
+                                        );
+                                      })}
                                     </div>
                                   </div>
                                 );
                               })()}
                           </div>
 
-                          <div className="bg-gray-50 rounded-lg p-4">
-                            <p className="text-sm font-medium text-gray-600 mb-1">Group Size</p>
+                          <div className="bg-gray-50 rounded-lg p-3 sm:p-4">
+                            <p className="text-xs sm:text-sm font-medium text-gray-600 mb-1">Group Size</p>
                             <p className="font-semibold text-gray-900">
-                              <span className="inline-flex items-center gap-2 px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 text-sm font-medium">
-                                <svg className="h-3 w-3 text-gray-600" viewBox="0 0 8 8" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><circle cx="4" cy="4" r="4" /></svg>
+                              <span className="inline-flex items-center gap-1.5 sm:gap-2 px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 text-xs sm:text-sm font-medium">
+                                <svg className="h-3 w-3 text-gray-600 flex-shrink-0" viewBox="0 0 8 8" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><circle cx="4" cy="4" r="4" /></svg>
                                 <span>{booking.participants != null ? booking.participants : 1}</span>
-                                <span className="text-xs text-gray-600">participant{booking.participants != null && booking.participants > 1 ? 's' : ''}</span>
+                                <span className="text-[10px] sm:text-xs text-gray-600 whitespace-nowrap">participant{booking.participants != null && booking.participants > 1 ? 's' : ''}</span>
                               </span>
                             </p>
-                            <p className="text-sm text-gray-600">
+                            <p className="text-xs sm:text-sm text-gray-600 mt-1 break-words">
                               {(() => {
                                 const facility = facilities.find(f => f.id === booking.facilityId);
                                 if (!facility) return '';
@@ -1231,23 +1440,25 @@ export default function BookingDashboard() {
                           </div>
                         </div>
 
-                        <div className="flex items-center justify-between pt-4 border-t border-gray-100">
-                          <div className="text-sm text-gray-500">
-                            Booked on {new Date(booking.createdAt || booking.startTime).toLocaleDateString()}
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-3 sm:pt-4 border-t border-gray-100">
+                          <div className="text-[11px] sm:text-sm text-gray-500">
+                            <div className="mb-2">Booked on {new Date(booking.createdAt || booking.startTime).toLocaleDateString()}</div>
                             {/* Arrival-confirmation: if an arrivalConfirmationDeadline exists and arrival not yet confirmed, show confirmation countdown in Active Booking; otherwise show time remaining */}
                             {getBookingStatus(booking).label === 'Active' && booking.userId === user?.id && (
-                              <div className="text-xs text-gray-500 mt-1">
+                              <div className="mt-2">
                                 {booking.arrivalConfirmationDeadline && !booking.arrivalConfirmed ? (
-                                  <div>
-                                    Confirmation required in: <Countdown expiry={booking.arrivalConfirmationDeadline} onExpire={() => {
+                                  <div className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-300 rounded-lg">
+                                    <span className="text-[10px] sm:text-xs font-medium text-amber-700 whitespace-nowrap">Confirm in:</span>
+                                    <Countdown expiry={booking.arrivalConfirmationDeadline} onExpire={() => {
                                       // Refresh bookings so expired arrivals are re-evaluated
                                       queryClient.invalidateQueries({ queryKey: ['/api/bookings'] });
                                       toast({ title: 'Arrival Confirmation Expired', description: `Your booking for ${getFacilityDisplay(booking.facilityId)} was not confirmed and may be cancelled.` });
                                     }} />
                                   </div>
                                 ) : (
-                                  <div>
-                                    Time remaining: <Countdown expiry={booking.endTime} onExpire={() => {
+                                  <div className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 bg-gradient-to-r from-green-50 to-emerald-50 border border-green-300 rounded-lg shadow-sm">
+                                    <span className="text-[10px] sm:text-xs font-medium text-green-700 whitespace-nowrap">Time remaining:</span>
+                                    <Countdown expiry={booking.endTime} onExpire={() => {
                                       queryClient.invalidateQueries({ queryKey: ['/api/bookings'] });
                                       toast({ title: 'Booking Ended', description: `Your booking for ${getFacilityDisplay(booking.facilityId)} has ended.` });
                                     }} />
@@ -1256,7 +1467,7 @@ export default function BookingDashboard() {
                               </div>
                             )}
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
                             {canEditBooking(booking) && (
                               <button
                                 onClick={() => {
@@ -1264,7 +1475,7 @@ export default function BookingDashboard() {
                                   setEditingBooking(booking);
                                   setShowEditBookingModal(true);
                                 }}
-                                className="px-3 py-1.5 bg-pink-600 text-white text-sm font-medium rounded-lg hover:bg-pink-700 transition-colors duration-200"
+                                className="flex-1 sm:flex-none px-3 py-1.5 bg-pink-600 text-white text-xs sm:text-sm font-medium rounded-lg hover:bg-pink-700 transition-colors duration-200 whitespace-nowrap"
                               >
                                 Edit
                               </button>
@@ -1274,13 +1485,20 @@ export default function BookingDashboard() {
                               <button
                                 onClick={() => handleCancelBooking(booking)}
                                 disabled={cancelBookingMutation.status === 'pending'}
-                                className={`px-3 py-1.5 text-white text-sm font-medium rounded-lg transition-colors duration-200 ${cancelBookingMutation.status === 'pending' ? 'bg-red-400 cursor-wait' : 'bg-red-600 hover:bg-red-700'}`}
+                                className={`flex-1 sm:flex-none px-3 py-1.5 text-white text-xs sm:text-sm font-medium rounded-lg transition-colors duration-200 flex items-center justify-center gap-1.5 whitespace-nowrap ${cancelBookingMutation.status === 'pending' ? 'bg-red-400 cursor-wait' : 'bg-red-600 hover:bg-red-700'}`}
                               >
-                                {getBookingStatus(booking).label === 'Active' ? 'End Booking' : 'Cancel'}
+                                {cancelBookingMutation.status === 'pending' ? (
+                                  <>
+                                    <Loader2 className="h-3 w-3 sm:h-4 sm:w-4 animate-spin" />
+                                    <span className="hidden sm:inline">Processing...</span>
+                                  </>
+                                ) : (
+                                  getBookingStatus(booking).label === 'Active' ? 'End Booking' : 'Cancel'
+                                )}
                               </button>
                             )}
                             {!canEditBooking(booking) && !canCancelBooking(booking) && !(booking.userId === user?.id && getBookingStatus(booking).label === 'Active') && (
-                              <span className="text-gray-400 text-sm">No actions available</span>
+                              <span className="text-gray-400 text-[11px] sm:text-sm">No actions available</span>
                             )}
                           </div>
                         </div>
@@ -1320,21 +1538,21 @@ export default function BookingDashboard() {
 
       case "activity-logs":
         return (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center justify-between mb-6">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
               <div>
                 <h3 className="text-xl font-semibold text-gray-900">Activity Logs</h3>
                 <p className="text-sm text-gray-600 mt-1">View booking history and notification logs</p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 overflow-x-auto">
                 <button
                   onClick={() => setActivityTab('booking')}
-                  className={`px-3 py-1 rounded ${activityTab === 'booking' ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
+                  className={`px-3 py-2 rounded whitespace-nowrap text-sm ${activityTab === 'booking' ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
                   Booking History
                 </button>
                 <button
                   onClick={() => setActivityTab('notifications')}
-                  className={`px-3 py-1 rounded ${activityTab === 'notifications' ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
+                  className={`px-3 py-2 rounded whitespace-nowrap text-sm ${activityTab === 'notifications' ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
                   Notification Logs
                 </button>
               </div>
@@ -1356,14 +1574,40 @@ export default function BookingDashboard() {
                       const items = Array.isArray(eq.items) ? eq.items : [];
                       const hasOthers = eq.others && String(eq.others).trim().length > 0;
                       return (
-                      <div key={booking.id} className="grid grid-cols-4 gap-4 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors duration-200 items-start">
+                      <div key={booking.id} className="relative grid grid-cols-1 md:grid-cols-4 gap-3 sm:gap-4 p-3 sm:p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors duration-200 items-start">
+                        {/* Mobile-only status badge at top right */}
+                        <div className="absolute top-3 right-3 md:hidden flex items-center gap-2">
+                          {(() => {
+                            const status = getBookingStatus(booking);
+                            const statusColors = {
+                              'Active': 'bg-pink-100 text-pink-800',
+                              'Scheduled': 'bg-yellow-50 text-yellow-800',
+                              'Done': 'bg-gray-100 text-gray-800',
+                              'Denied': 'bg-red-100 text-red-800'
+                            };
+                            return (
+                              <>
+                                <span className={`px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap ${statusColors[status.label as keyof typeof statusColors] || 'bg-gray-100 text-gray-800'}`}>
+                                  {status.label}
+                                </span>
+                                <button
+                                  onClick={() => setSelectedView("my-bookings")}
+                                  className="text-gray-400 hover:text-gray-600 transition-colors duration-200"
+                                >
+                                  <Eye className="h-4 w-4" />
+                                </button>
+                              </>
+                            );
+                          })()}
+                        </div>
+
                         {/* Column 1: facility, date/time, participants, purpose */}
-                        <div className="col-span-1 min-w-0">
+                        <div className="col-span-1 min-w-0 pr-24 md:pr-0">
                           <div className="flex items-start gap-3">
                             <div className="bg-white p-1.5 rounded-lg shadow-sm flex-shrink-0">
                               <Calendar className="h-4 w-4 text-gray-600" />
                             </div>
-                            <div className="min-w-0">
+                            <div className="min-w-0 flex-1">
                               <h4 className="font-medium text-gray-900 text-sm truncate">{getFacilityDisplay(booking.facilityId)}</h4>
                               <p className="text-xs text-gray-600 truncate">{format(new Date(booking.startTime), 'EEE, MMM d')} • {format(new Date(booking.startTime), 'hh:mm a')}</p>
                               {booking.participants && (
@@ -1375,42 +1619,42 @@ export default function BookingDashboard() {
                                   </span>
                                 </div>
                               )}
-                                <div className="text-[11px] text-gray-800 mt-2">
-                                  {(booking.purpose || '').length > 30 ? (
-                                    <TooltipProvider>
-                                      <Tooltip>
-                                        <Popover>
-                                          <TooltipTrigger asChild>
-                                            <PopoverTrigger asChild>
-                                                  <button className="flex items-center gap-1 text-[11px] text-gray-700" aria-expanded={false}>
-                                                    <Eye className="h-3 w-3 text-pink-600" />
-                                                    <span className="text-gray-700">View purpose</span>
-                                                  </button>
-                                            </PopoverTrigger>
-                                          </TooltipTrigger>
-                                          <TooltipContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
-                                            <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                                              <p className="font-medium text-sm text-gray-800">Full Purpose</p>
-                                            </div>
-                                            <div className="p-4 max-h-48 overflow-y-auto">
-                                              <p className="whitespace-pre-wrap text-sm text-gray-900 leading-6 break-words font-normal">{booking.purpose}</p>
-                                            </div>
-                                          </TooltipContent>
-                                          <PopoverContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50 origin-top-left">
-                                            <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                                              <p className="font-medium text-sm text-gray-800">Full Purpose</p>
-                                            </div>
-                                            <div className="p-3">
-                                              <p className="text-sm text-gray-900 leading-5 break-words font-normal">{booking.purpose || 'No purpose specified'}</p>
-                                            </div>
-                                          </PopoverContent>
-                                        </Popover>
-                                      </Tooltip>
-                                    </TooltipProvider>
-                                  ) : (
-                                    <p className="text-[11px] text-gray-800"><span className="font-medium">Purpose:&nbsp;</span><span className="font-normal">{booking.purpose || 'No purpose specified'}</span></p>
-                                  )}
-                                </div>
+                              <div className="text-[11px] text-gray-800 mt-2">
+                            {(booking.purpose || '').length > 30 ? (
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <Popover>
+                                    <TooltipTrigger asChild>
+                                      <PopoverTrigger asChild>
+                                        <button className="flex items-center gap-1 text-[11px] text-gray-700" aria-expanded={false}>
+                                          <Eye className="h-3 w-3 text-pink-600" />
+                                          <span className="text-gray-700">View purpose</span>
+                                        </button>
+                                      </PopoverTrigger>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
+                                      <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                        <p className="font-medium text-sm text-gray-800">Full Purpose</p>
+                                      </div>
+                                      <div className="p-4 max-h-48 overflow-y-auto">
+                                        <p className="whitespace-pre-wrap text-sm text-gray-900 leading-6 break-words font-normal">{booking.purpose}</p>
+                                      </div>
+                                    </TooltipContent>
+                                    <PopoverContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50 origin-top-left">
+                                      <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                        <p className="font-medium text-sm text-gray-800">Full Purpose</p>
+                                      </div>
+                                      <div className="p-3">
+                                        <p className="text-sm text-gray-900 leading-5 break-words font-normal">{booking.purpose || 'No purpose specified'}</p>
+                                      </div>
+                                    </PopoverContent>
+                                  </Popover>
+                                </Tooltip>
+                              </TooltipProvider>
+                            ) : (
+                              <p className="text-[11px] text-gray-800"><span className="font-medium">Purpose:&nbsp;</span><span className="font-normal">{booking.purpose || 'No purpose specified'}</span></p>
+                            )}
+                          </div>
                             </div>
                           </div>
                         </div>
@@ -1453,18 +1697,75 @@ export default function BookingDashboard() {
                             )}
                           </div>
 
-                          <div className="flex items-center gap-2 flex-wrap mt-2">
-                            {items.map((it: string, idx: number) => (
-                              <span key={`act-eq-${id}-${idx}`} className="text-xs bg-gray-100 text-gray-800 px-2 py-1 rounded-full border border-gray-200">{it}</span>
-                            ))}
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {items.map((it: string, idx: number) => {
+                              // Parse per-item equipment status from adminResponse JSON
+                              let itemStatus: 'prepared' | 'not_available' | undefined;
+                              try {
+                                const resp = String(booking?.adminResponse || '');
+                                
+                                // First try to extract JSON with per-item statuses
+                                // Look for JSON block starting with {"items":
+                                const jsonMatch = resp.match(/\{"items":\{[^}]*\}\}/);
+                                if (jsonMatch) {
+                                  const parsed = JSON.parse(jsonMatch[0]);
+                                  if (parsed.items && typeof parsed.items === 'object') {
+                                    // Check for exact match or normalized match
+                                    const itemKey = String(it).toLowerCase().replace(/\s+/g, '_');
+                                    const itemKeyNoUnderscore = String(it).toLowerCase().replace(/_/g, ' ');
+                                    
+                                    for (const [key, value] of Object.entries(parsed.items)) {
+                                      const normalizedKey = String(key).toLowerCase().replace(/\s+/g, '_');
+                                      const keyNoUnderscore = String(key).toLowerCase().replace(/_/g, ' ');
+                                      
+                                      // Match with multiple variations: exact, normalized, with/without underscores
+                                      if (normalizedKey === itemKey || 
+                                          key === it || 
+                                          keyNoUnderscore === itemKeyNoUnderscore ||
+                                          String(key).toLowerCase() === String(it).toLowerCase()) {
+                                        const val = String(value).toLowerCase();
+                                        if (val === 'prepared' || val === 'true' || val === 'yes') {
+                                          itemStatus = 'prepared';
+                                        } else if (val === 'not_available' || val === 'not available' || val === 'false' || val === 'no') {
+                                          itemStatus = 'not_available';
+                                        }
+                                        break;
+                                      }
+                                    }
+                                  }
+                                }
+                                
+                                // Fallback: check for global status if no per-item status found
+                                if (!itemStatus) {
+                                  const match = resp.match(/Needs:\s*(Prepared|Not Available)/i);
+                                  if (match) {
+                                    itemStatus = /prepared/i.test(match[1]) ? 'prepared' : 'not_available';
+                                  }
+                                }
+                              } catch (e) {
+                                // ignore parse errors
+                              }
+                              
+                              // Apply colors based on status
+                              let chipClass = "text-xs bg-pink-50 text-pink-700 px-2 py-1 rounded-full border border-pink-200";
+                              if (itemStatus === 'prepared') {
+                                chipClass = "text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full border border-green-200";
+                              } else if (itemStatus === 'not_available') {
+                                chipClass = "text-xs bg-red-100 text-red-800 px-2 py-1 rounded-full border border-red-200";
+                              }
+                              
+                              return (
+                                <span key={`act-eq-${id}-${idx}`} className={chipClass}>{it}</span>
+                              );
+                            })}
                           </div>
                         </div>
 
                         {/* Column 3: empty for future use */}
-                        <div className="col-span-1" />
+                        <div className="col-span-1 hidden md:block" />
 
-                        {/* Column 4: status badge (right aligned) + view button */}
-                        <div className="col-span-1 flex items-start justify-end">
+                        {/* Column 4: status badge (right aligned) + view button - Desktop only */}
+                        <div className="col-span-1 hidden md:flex items-start justify-end">
                           {(() => {
                             const status = getBookingStatus(booking);
                             const statusColors = {
@@ -1475,7 +1776,7 @@ export default function BookingDashboard() {
                             };
                             return (
                               <div className="flex items-center gap-3">
-                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[status.label as keyof typeof statusColors] || 'bg-gray-100 text-gray-800'}`}>
+                                <span className={`px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap ${statusColors[status.label as keyof typeof statusColors] || 'bg-gray-100 text-gray-800'}`}>
                                   {status.label}
                                 </span>
                                 <button
@@ -1501,40 +1802,72 @@ export default function BookingDashboard() {
                     <p className="text-gray-600 text-sm">No notifications</p>
                   </div>
                 ) : (
-                  notificationsData.slice(activityNotificationsPage * notificationsPerPage, (activityNotificationsPage + 1) * notificationsPerPage).map((n: any) => (
-                    <div key={n.id} className={`p-3 rounded-md bg-white border ${n.isRead ? 'opacity-70' : ''}`}>
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <div className="font-medium text-sm text-gray-900">{n.title}</div>
-                          <div className="text-xs text-gray-600 mt-1">{n.message}</div>
-                        </div>
-                        <div className="flex flex-col items-end gap-2">
-                          <div className="text-xs text-gray-400">{new Date(n.createdAt).toLocaleString()}</div>
-                          {!n.isRead && (
-                            <button className="text-xs px-2 py-1 bg-blue-600 text-white rounded" onClick={() => markNotificationReadMutation.mutate(n.id)}>Mark Read</button>
-                          )}
+                  notificationsData.slice(activityNotificationsPage * notificationsPerPage, (activityNotificationsPage + 1) * notificationsPerPage).map((n: any) => {
+                    const { baseMessage, equipment } = parseEquipmentFromMessage(n.message);
+                    
+                    return (
+                      <div key={n.id} className={`p-3 sm:p-4 rounded-md bg-white border ${n.isRead ? 'opacity-70' : ''}`}>
+                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-sm text-gray-900">{n.title}</div>
+                            <div className="text-xs text-gray-600 mt-1 break-words">{baseMessage}</div>
+                            {equipment && (
+                              <div className="mt-2 flex flex-wrap gap-1.5">
+                                {Object.entries(equipment).map(([key, value]: [string, any]) => {
+                                  const displayKey = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                                  return (
+                                    <span
+                                      key={key}
+                                      className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}
+                                    >
+                                      {displayKey}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 sm:ml-4 shrink-0">
+                            <div className="text-[10px] sm:text-xs text-gray-400 whitespace-nowrap">{new Date(n.createdAt).toLocaleString()}</div>
+                            {!n.isRead && (
+                              <button 
+                                className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors disabled:bg-blue-400 disabled:cursor-wait flex items-center gap-1 whitespace-nowrap" 
+                                onClick={() => markNotificationReadMutation.mutate(n.id)}
+                                disabled={markNotificationReadMutation.status === 'pending'}
+                              >
+                                {markNotificationReadMutation.status === 'pending' ? (
+                                  <>
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                    <span className="hidden sm:inline">Reading...</span>
+                                  </>
+                                ) : (
+                                  'Mark Read'
+                                )}
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             )}
             {/* Pagination footer for Activity Logs */}
-              <div className="pt-4 border-t border-gray-100 mt-4 flex items-center justify-between">
+              <div className="pt-4 border-t border-gray-100 mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 {activityTab === 'booking' ? (
                   // Compact summary for Recent Booking booking history (no pagination)
-                  <p className="text-sm text-gray-600">Showing {Math.min(bookingsPerPage, userBookings.length)} of {userBookings.length} bookings</p>
+                  <p className="text-[11px] sm:text-sm text-gray-600">Showing {Math.min(bookingsPerPage, userBookings.length)} of {userBookings.length} bookings</p>
                 ) : (
-                  <p className="text-sm text-gray-600">Showing {activityNotificationsPage * notificationsPerPage + 1} to {Math.min((activityNotificationsPage + 1) * notificationsPerPage, notificationsData.length)} of {notificationsData.length} notifications</p>
+                  <p className="text-[11px] sm:text-sm text-gray-600">Showing {activityNotificationsPage * notificationsPerPage + 1} to {Math.min((activityNotificationsPage + 1) * notificationsPerPage, notificationsData.length)} of {notificationsData.length} notifications</p>
                 )}
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center justify-between sm:justify-start gap-2 w-full sm:w-auto">
                   {/* Hide Prev/Next for recent bookings compact view */}
                   {activityTab === 'booking' ? null : (
                     <>
-                      <button onClick={() => setActivityNotificationsPage(p => Math.max(0, p - 1))} disabled={activityNotificationsPage === 0} className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50">Prev</button>
-                      <button onClick={() => setActivityNotificationsPage(p => ((p + 1) * notificationsPerPage < notificationsData.length ? p + 1 : p))} disabled={(activityNotificationsPage + 1) * notificationsPerPage >= notificationsData.length} className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50">Next</button>
+                      <button onClick={() => setActivityNotificationsPage(p => Math.max(0, p - 1))} disabled={activityNotificationsPage === 0} className="flex-1 sm:flex-none px-3 py-1.5 sm:py-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-xs sm:text-sm font-medium transition-colors">Prev</button>
+                      <button onClick={() => setActivityNotificationsPage(p => ((p + 1) * notificationsPerPage < notificationsData.length ? p + 1 : p))} disabled={(activityNotificationsPage + 1) * notificationsPerPage >= notificationsData.length} className="flex-1 sm:flex-none px-3 py-1.5 sm:py-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-xs sm:text-sm font-medium transition-colors">Next</button>
                     </>
                   )}
                 </div>
@@ -1544,11 +1877,11 @@ export default function BookingDashboard() {
 
       case "available-rooms":
         return (
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-              <div className="flex items-center justify-between mb-8">
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 sm:mb-8">
                 <div>
-                  <h2 className="text-2xl font-bold text-gray-900">Available Study Rooms</h2>
-                  <p className="text-gray-600 mt-1">Browse and book available facilities</p>
+                  <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Available Study Rooms</h2>
+                  <p className="text-sm sm:text-base text-gray-600 mt-1">Browse and book available facilities</p>
 
                   {/* counts/legend removed as requested */}
 
@@ -1558,26 +1891,34 @@ export default function BookingDashboard() {
                     </div>
                   )}
                 </div>
-                <button
-                  onClick={() => openBookingModal()}
-                  className="bg-pink-600 hover:bg-pink-700 text-white px-6 py-3 rounded-lg font-medium transition-colors duration-200 flex items-center gap-2 shadow-sm"
-                >
-                  <Plus className="h-5 w-5" />
-                  Book Room
-                </button>
-                {/* Dev-only: temporary toggle to force library open for debugging availability UI */}
-                {process.env.NODE_ENV !== 'production' && (
-                  <div className="ml-4 flex items-center gap-2">
-                    <label className="text-xs text-gray-600">Dev: Force Open</label>
-                    <button onClick={() => setDevForceOpen(v => !v)} className={`px-2 py-1 rounded text-sm ${devForceOpen ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
-                      {devForceOpen ? 'ON' : 'OFF'}
-                    </button>
-                  </div>
-                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => openBookingModal()}
+                    className="bg-pink-600 hover:bg-pink-700 text-white px-4 sm:px-6 py-2 sm:py-3 rounded-lg font-medium transition-colors duration-200 flex items-center gap-2 shadow-sm text-sm sm:text-base"
+                  >
+                    <Plus className="h-4 w-4 sm:h-5 sm:w-5" />
+                    Book Room
+                  </button>
+                  {/* Dev-only: temporary toggle to force library open for debugging availability UI */}
+                  {process.env.NODE_ENV !== 'production' && (
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-gray-600">Dev: Force Open</label>
+                      <button onClick={() => setDevForceOpen(v => !v)} className={`px-2 py-1 rounded text-sm ${devForceOpen ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
+                        {devForceOpen ? 'ON' : 'OFF'}
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
 
-              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {facilities.map((facility) => {
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-4 sm:gap-6">
+                {facilities
+                  .filter((f) => {
+                    const restricted = isRestrictedFacility(f);
+                    const allowedByRole = (user?.role === 'faculty' || user?.role === 'admin');
+                    return !(restricted && !allowedByRole);
+                  })
+                  .map((facility) => {
                   const bookingStatus = getFacilityBookingStatus(facility.id);
                   // Immediate availability for same-day booking
                   const isAvailableForBooking = facility.isActive && bookingStatus.status === "available";
@@ -1591,10 +1932,10 @@ export default function BookingDashboard() {
                       key={facility.id}
                       className={`group bg-white border rounded-xl overflow-hidden transition-all duration-300 flex flex-col h-full ${
                         isAvailableForBooking
-                          ? 'border-gray-200 hover:shadow-lg cursor-pointer hover:border-pink-200'
+                          ? (isRestrictedFacility(facility) && !(user?.role === 'faculty' || user?.role === 'admin') ? 'border-gray-200 bg-white opacity-95' : 'border-gray-200 hover:shadow-lg cursor-pointer hover:border-pink-200')
                           : 'border-gray-100 bg-gray-50 opacity-80'
                       }`}
-                      onClick={() => isAvailableForBooking && openBookingModal(facility.id)}
+                      onClick={() => { if (!isRestrictedFacility(facility) || (user?.role === 'faculty' || user?.role === 'admin')) { if (isAvailableForBooking) openBookingModal(facility.id); } else { /* ignore clicks for restricted users */ } }}
                     >
                       <div className="aspect-video bg-gradient-to-br from-pink-100 to-rose-100 flex items-center justify-center relative">
                           {isAvailableForBooking ? (
@@ -1638,7 +1979,7 @@ export default function BookingDashboard() {
                               ? 'text-gray-900 group-hover:text-pink-700' 
                               : 'text-gray-500'
                           }`}>
-                            {facility.name}
+                            {formatFacilityName(facility.name)}
                           </h3>
                           <span className={`px-2 py-1 rounded-full text-xs font-medium ${bookingStatus.badgeClass}`}>
                             {bookingStatus.label}
@@ -1678,7 +2019,7 @@ export default function BookingDashboard() {
                                   <div className="text-sm font-semibold text-gray-900">{format(new Date(nextAvailable.start), 'EEE, MMM d')} • {format(new Date(nextAvailable.start), 'hh:mm a')} - {format(new Date(nextAvailable.end), 'hh:mm a')}</div>
                                 </div>
                                 <div>
-                                  <button onClick={(e) => { e.stopPropagation(); const start = new Date(nextAvailable.start); const end = new Date(nextAvailable.end); setSelectedFacilityForBooking(facility.id); setInitialStartForBooking(start); setInitialEndForBooking(end); setInitialTimesAreSuggested(true); openBookingModal(facility.id, start, end); }} className="bg-pink-600 text-white px-3 py-1 rounded-lg text-sm">Book Now</button>
+                                  <button onClick={(e) => { e.stopPropagation(); const start = new Date(nextAvailable.start); const end = new Date(nextAvailable.end); const restricted = isRestrictedFacility(facility); const userRole = user?.role || 'student'; const allowed = userRole === 'faculty' || userRole === 'admin'; if (restricted && !allowed) { toast({ title: 'Access Restricted', description: 'Only faculty members may book this facility. Contact an administrator for access.', variant: 'destructive' }); return; } setSelectedFacilityForBooking(facility.id); setInitialStartForBooking(start); setInitialEndForBooking(end); setInitialTimesAreSuggested(true); openBookingModal(facility.id, start, end); }} className="bg-pink-600 text-white px-3 py-1 rounded-lg text-sm">Book Now</button>
                                 </div>
                               </div>
                             );
@@ -1714,9 +2055,37 @@ export default function BookingDashboard() {
                               )}
                             </p>
                             {bookingStatus.status === 'booked' && (
-                              <p className="text-xs text-gray-500 mt-1">
-                                Room is currently occupied
-                              </p>
+                              <>
+                                <p className="text-xs text-gray-500 mt-1">
+                                  Room is currently occupied
+                                </p>
+                                {bookingStatus.booking?.endTime && (
+                                  (() => {
+                                    try {
+                                      const end = new Date(bookingStatus.booking.endTime);
+                                      const entry = availabilityMap.get(facility.id);
+                                      if (entry && Array.isArray(entry.slots)) {
+                                        // find the next available slot that begins at or after the booking end
+                                        const next = entry.slots.find((s: any) => s.status === 'available' && new Date(s.start) >= end);
+                                        const display = next ? new Date(next.start) : end;
+                                        return (
+                                          <p className="text-xs text-green-600 font-medium mt-1">
+                                            Next available: {display.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                                          </p>
+                                        );
+                                      }
+                                      // fallback to end time
+                                      return (
+                                        <p className="text-xs text-green-600 font-medium mt-1">
+                                          Next available: {end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                                        </p>
+                                      );
+                                    } catch (e) {
+                                      return null;
+                                    }
+                                  })()
+                                )}
+                              </>
                             )}
                             {bookingStatus.status === 'scheduled' && bookingStatus.booking?.endTime && (
                               (() => {
@@ -1763,8 +2132,8 @@ export default function BookingDashboard() {
 
                             <div className="flex flex-col items-end">
                               <button
-                                onClick={(e) => { e.stopPropagation(); if (isAvailableForBooking) openBookingModal(facility.id); if (bookingStatus.status === 'closed') openBookingModal(facility.id); }}
-                                disabled={!canRequestBooking}
+                                onClick={(e) => { e.stopPropagation(); const restricted = isRestrictedFacility(facility); const userRole = user?.role || 'student'; const allowed = userRole === 'faculty' || userRole === 'admin'; if (restricted && !allowed) { toast({ title: 'Access Restricted', description: 'Only faculty members may book this facility. Contact an administrator for access.', variant: 'destructive' }); return; } if (isAvailableForBooking) openBookingModal(facility.id); if (bookingStatus.status === 'closed') openBookingModal(facility.id); }}
+                                disabled={!canRequestBooking || (isRestrictedFacility(facility) && !(user?.role === 'faculty' || user?.role === 'admin'))}
                                 className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors duration-200 shadow-sm flex-shrink-0 ${
                                   isAvailableForBooking
                                     ? 'bg-pink-600 hover:bg-pink-700 text-white'
@@ -1838,10 +2207,10 @@ export default function BookingDashboard() {
 
       case "booking-settings":
         return (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <div className="mb-6">
-              <h3 className="text-xl font-bold text-gray-900">Booking Settings</h3>
-              <p className="text-gray-600 mt-1">Manage your booking preferences and facility reservation settings</p>
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
+            <div className="mb-4 sm:mb-6">
+              <h3 className="text-lg sm:text-xl font-bold text-gray-900">Booking Guidelines & Policy</h3>
+              <p className="text-sm sm:text-base text-gray-600 mt-1">Review facility booking guidelines, policies, and usage rules</p>
             </div>
 
             <div className="space-y-6">
@@ -1905,10 +2274,10 @@ export default function BookingDashboard() {
         return (
           <>
             {/* Stats Cards */}
-            <div className="grid md:grid-cols-2 gap-6 mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 mb-6 sm:mb-8">
               <button
                 onClick={() => setSelectedView("my-bookings")}
-                className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-all duration-200 hover:border-pink-300 text-left group"
+                className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 hover:shadow-md transition-all duration-200 hover:border-pink-300 text-left group"
               >
                 <div className="flex items-center justify-between">
                   <div>
@@ -1924,7 +2293,7 @@ export default function BookingDashboard() {
 
               <button
                 onClick={() => setSelectedView("my-bookings")}
-                className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-all duration-200 hover:border-pink-200 text-left group"
+                className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 hover:shadow-md transition-all duration-200 hover:border-pink-200 text-left group"
               >
                 <div className="flex items-center justify-between">
                   <div>
@@ -1944,11 +2313,11 @@ export default function BookingDashboard() {
             {/* Quick actions removed (use sidebar / available rooms) */}
 
             {/* Available Rooms (full view content copied from the available-rooms case) */}
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-8">
-              <div className="flex items-center justify-between mb-8">
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6 mb-6 sm:mb-8">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 sm:mb-8">
                 <div>
-                  <h2 className="text-2xl font-bold text-gray-900">Available Study Rooms</h2>
-                  <p className="text-gray-600 mt-1">Browse and book available facilities</p>
+                  <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Available Study Rooms</h2>
+                  <p className="text-sm sm:text-base text-gray-600 mt-1">Browse and book available facilities</p>
 
                   {(isLibraryClosedNow() || facilities.some(f => getFacilityBookingStatus(f.id).status === 'closed')) && (
                     <div className="mt-3 text-sm text-gray-500 bg-gray-50 rounded p-2 border border-gray-100">
@@ -1956,25 +2325,33 @@ export default function BookingDashboard() {
                     </div>
                   )}
                 </div>
-                <button
-                  onClick={() => openBookingModal()}
-                  className="bg-pink-600 hover:bg-pink-700 text-white px-6 py-3 rounded-lg font-medium transition-colors duration-200 flex items-center gap-2 shadow-sm"
-                >
-                  <Plus className="h-5 w-5" />
-                  Book Room
-                </button>
-                {process.env.NODE_ENV !== 'production' && (
-                  <div className="ml-4 flex items-center gap-2">
-                    <label className="text-xs text-gray-600">Dev: Force Open</label>
-                    <button onClick={() => setDevForceOpen(v => !v)} className={`px-2 py-1 rounded text-sm ${devForceOpen ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
-                      {devForceOpen ? 'ON' : 'OFF'}
-                    </button>
-                  </div>
-                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => openBookingModal()}
+                    className="bg-pink-600 hover:bg-pink-700 text-white px-4 sm:px-6 py-2 sm:py-3 rounded-lg font-medium transition-colors duration-200 flex items-center gap-2 shadow-sm text-sm sm:text-base"
+                  >
+                    <Plus className="h-4 w-4 sm:h-5 sm:w-5" />
+                    Book Room
+                  </button>
+                  {process.env.NODE_ENV !== 'production' && (
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-gray-600">Dev: Force Open</label>
+                      <button onClick={() => setDevForceOpen(v => !v)} className={`px-2 py-1 rounded text-sm ${devForceOpen ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
+                        {devForceOpen ? 'ON' : 'OFF'}
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
 
-              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {facilities.map((facility) => {
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-4 sm:gap-6">
+                {facilities
+                  .filter((f) => {
+                    const restricted = isRestrictedFacility(f);
+                    const allowedByRole = (user?.role === 'faculty' || user?.role === 'admin');
+                    return !(restricted && !allowedByRole);
+                  })
+                  .map((facility) => {
                   const bookingStatus = getFacilityBookingStatus(facility.id);
                   const isAvailableForBooking = facility.isActive && bookingStatus.status === "available";
                   const isOwnerOrAdmin = (user?.role === 'admin') || (bookingStatus.booking && bookingStatus.booking.userId === user?.id);
@@ -2030,7 +2407,7 @@ export default function BookingDashboard() {
                               ? 'text-gray-900 group-hover:text-pink-700' 
                               : 'text-gray-500'
                           }`}>
-                            {facility.name}
+                            {formatFacilityName(facility.name)}
                           </h3>
                           <span className={`px-2 py-1 rounded-full text-xs font-medium ${bookingStatus.badgeClass}`}>
                             {bookingStatus.label}
@@ -2101,9 +2478,37 @@ export default function BookingDashboard() {
                               )}
                             </p>
                             {bookingStatus.status === 'booked' && (
-                              <p className="text-xs text-gray-500 mt-1">
-                                Room is currently occupied
-                              </p>
+                              <>
+                                <p className="text-xs text-gray-500 mt-1">
+                                  Room is currently occupied
+                                </p>
+                                {bookingStatus.booking?.endTime && (
+                                  (() => {
+                                    try {
+                                      const end = new Date(bookingStatus.booking.endTime);
+                                      const entry = availabilityMap.get(facility.id);
+                                      if (entry && Array.isArray(entry.slots)) {
+                                        // find the next available slot that begins at or after the booking end
+                                        const next = entry.slots.find((s: any) => s.status === 'available' && new Date(s.start) >= end);
+                                        const display = next ? new Date(next.start) : end;
+                                        return (
+                                          <p className="text-xs text-green-600 font-medium mt-1">
+                                            Next available: {display.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                                          </p>
+                                        );
+                                      }
+                                      // fallback to end time
+                                      return (
+                                        <p className="text-xs text-green-600 font-medium mt-1">
+                                          Next available: {end.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                                        </p>
+                                      );
+                                    } catch (e) {
+                                      return null;
+                                    }
+                                  })()
+                                )}
+                              </>
                             )}
                             {bookingStatus.status === 'scheduled' && bookingStatus.booking?.endTime && (
                               (() => {
@@ -2267,8 +2672,35 @@ export default function BookingDashboard() {
                           const items = Array.isArray(eq.items) ? eq.items : [];
                           const hasOthers = eq.others && String(eq.others).trim().length > 0;
                           return (
-                            <div key={booking.id} className="grid grid-cols-4 gap-4 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors duration-200 items-start">
-                              <div className="col-span-1 min-w-0">
+                            <div key={booking.id} className="relative grid grid-cols-1 md:grid-cols-4 gap-3 sm:gap-4 p-3 sm:p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors duration-200 items-start">
+                              {/* Mobile-only status badge at top right */}
+                              <div className="absolute top-3 right-3 md:hidden flex items-center gap-2">
+                                {(() => {
+                                  const status = getBookingStatus(booking);
+                                  const statusColors = {
+                                    'Active': 'bg-pink-100 text-pink-800',
+                                    'Scheduled': 'bg-yellow-50 text-yellow-800',
+                                    'Done': 'bg-gray-100 text-gray-800',
+                                    'Denied': 'bg-red-100 text-red-800'
+                                  };
+                                  return (
+                                    <>
+                                      <span className={`px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap ${statusColors[status.label as keyof typeof statusColors] || 'bg-gray-100 text-gray-800'}`}>
+                                        {status.label}
+                                      </span>
+                                      <button
+                                        onClick={() => setSelectedView("my-bookings")}
+                                        className="text-gray-400 hover:text-gray-600 transition-colors duration-200"
+                                      >
+                                        <Eye className="h-4 w-4" />
+                                      </button>
+                                    </>
+                                  );
+                                })()}
+                              </div>
+
+                              {/* Column 1: facility, date/time, participants, purpose */}
+                              <div className="col-span-1 min-w-0 pr-24 md:pr-0">
                                 <div className="flex items-start gap-3">
                                   <div className="bg-white p-1.5 rounded-lg shadow-sm flex-shrink-0">
                                     <Calendar className="h-4 w-4 text-gray-600" />
@@ -2325,6 +2757,7 @@ export default function BookingDashboard() {
                                 </div>
                               </div>
 
+                              {/* Column 2: Equipment / Needs */}
                               <div className="col-span-1 min-w-0">
                                 <div className="text-xs font-medium text-gray-700 mb-2 flex items-center gap-2">
                                   <span>Equipment or Needs</span>
@@ -2369,9 +2802,11 @@ export default function BookingDashboard() {
                                 </div>
                               </div>
 
-                              <div className="col-span-1" />
+                              {/* Column 3: empty for future use */}
+                              <div className="col-span-1 hidden md:block" />
 
-                              <div className="col-span-1 flex items-start justify-end">
+                              {/* Column 4: status badge (right aligned) + view button - Desktop only */}
+                              <div className="col-span-1 hidden md:flex items-start justify-end">
                                 {(() => {
                                   const status = getBookingStatus(booking);
                                   const statusColors = {
@@ -2382,7 +2817,7 @@ export default function BookingDashboard() {
                                   };
                                   return (
                                     <div className="flex items-center gap-3">
-                                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[status.label as keyof typeof statusColors] || 'bg-gray-100 text-gray-800'}`}>
+                                      <span className={`px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap ${statusColors[status.label as keyof typeof statusColors] || 'bg-gray-100 text-gray-800'}`}>
                                         {status.label}
                                       </span>
                                       <button
@@ -2409,17 +2844,54 @@ export default function BookingDashboard() {
                     </div>
                   ) : (
                     // Recent Booking compact preview: show first `itemsPerPage` notifications (no pagination)
-                    notificationsData.slice(0, itemsPerPage).map((n: any) => (
-                      <div key={n.id} className={`p-3 rounded-md bg-white border ${n.isRead ? 'opacity-70' : ''}`}>
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <div className="font-medium text-sm text-gray-900">{n.title}</div>
-                            <div className="text-xs text-gray-600 mt-1">{n.message}</div>
+                    notificationsData.slice(0, itemsPerPage).map((n: any) => {
+                      const { baseMessage, equipment } = parseEquipmentFromMessage(n.message);
+                      
+                      return (
+                        <div key={n.id} className={`p-3 sm:p-4 rounded-md bg-white border ${n.isRead ? 'opacity-70' : ''}`}>
+                          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-sm text-gray-900">{n.title}</div>
+                              <div className="text-xs text-gray-600 mt-1 break-words">{baseMessage}</div>
+                              {equipment && (
+                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                  {Object.entries(equipment).map(([key, value]: [string, any]) => {
+                                    const displayKey = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                                    return (
+                                      <span
+                                        key={key}
+                                        className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}
+                                      >
+                                        {displayKey}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 sm:ml-4 shrink-0">
+                              <div className="text-[10px] sm:text-xs text-gray-400 whitespace-nowrap">{new Date(n.createdAt).toLocaleString()}</div>
+                              {!n.isRead && (
+                                <button 
+                                  className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors disabled:bg-blue-400 disabled:cursor-wait flex items-center gap-1 whitespace-nowrap" 
+                                  onClick={() => markNotificationReadMutation.mutate(n.id)}
+                                  disabled={markNotificationReadMutation.status === 'pending'}
+                                >
+                                  {markNotificationReadMutation.status === 'pending' ? (
+                                    <>
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                      <span className="hidden sm:inline">Reading...</span>
+                                    </>
+                                  ) : (
+                                    'Mark Read'
+                                  )}
+                                </button>
+                              )}
+                            </div>
                           </div>
-                          <div className="text-xs text-gray-400">{new Date(n.createdAt).toLocaleString()}</div>
                         </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               )}
@@ -2446,16 +2918,41 @@ export default function BookingDashboard() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      <Header />
+      <Header onMobileToggle={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)} />
+      
+      {/* Mobile Overlay */}
+      {isMobileSidebarOpen && (
+        <div
+          className="lg:hidden fixed inset-0 bg-black bg-opacity-50 z-40 top-16"
+          onClick={() => setIsMobileSidebarOpen(false)}
+        />
+      )}
+
       <div className="flex flex-1 relative">
-  <div className="w-64 h-[calc(100vh-4rem)] border-r bg-card fixed top-16 left-0 z-30 overflow-y-auto">
+        {/* Desktop Sidebar - Hidden on mobile */}
+        <div className="hidden lg:block w-64 h-[calc(100vh-4rem)] border-r bg-card fixed top-16 left-0 z-30 overflow-y-auto">
           <Sidebar
             items={sidebarItems}
             activeItem={selectedView}
             onItemClick={handleSidebarClick}
           />
         </div>
-        <div className="flex-1 ml-64 container mx-auto px-6 py-8">{renderContent()}</div>
+
+        {/* Mobile Sidebar - Drawer style */}
+        <div
+          className={`lg:hidden fixed top-16 left-0 h-[calc(100vh-4rem)] w-64 bg-card border-r z-40 overflow-y-auto transition-transform duration-300 ease-in-out ${
+            isMobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+          }`}
+        >
+          <Sidebar
+            items={sidebarItems}
+            activeItem={selectedView}
+            onItemClick={handleSidebarClick}
+          />
+        </div>
+
+        {/* Main Content - Responsive margins */}
+        <div className="flex-1 lg:ml-64 ml-0 container mx-auto px-4 sm:px-6 py-4 sm:py-8">{renderContent()}</div>
       </div>
       <BookingModal
         isOpen={showBookingModal}
@@ -2551,6 +3048,7 @@ export default function BookingDashboard() {
                   onClick={cancelCancelBooking}
                   variant="outline"
                   className="flex-1"
+                  disabled={cancelBookingMutation.status === 'pending'}
                 >
                   Keep Booking
                 </Button>
@@ -2559,7 +3057,14 @@ export default function BookingDashboard() {
                   className="flex-1 bg-red-600 hover:bg-red-700 text-white"
                   disabled={cancelBookingMutation.status === 'pending'}
                 >
-                  {cancelBookingMutation.status === 'pending' ? (bookingToCancel && (new Date(bookingToCancel.startTime) <= new Date() && new Date() <= new Date(bookingToCancel.endTime)) ? 'Ending...' : 'Cancelling...') : (bookingToCancel && (new Date(bookingToCancel.startTime) <= new Date() && new Date() <= new Date(bookingToCancel.endTime)) ? 'Yes, End Booking' : 'Yes, Cancel Booking')}
+                  {cancelBookingMutation.status === 'pending' ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      {bookingToCancel && (new Date(bookingToCancel.startTime) <= new Date() && new Date() <= new Date(bookingToCancel.endTime)) ? 'Ending...' : 'Cancelling...'}
+                    </span>
+                  ) : (
+                    bookingToCancel && (new Date(bookingToCancel.startTime) <= new Date() && new Date() <= new Date(bookingToCancel.endTime)) ? 'Yes, End Booking' : 'Yes, Cancel Booking'
+                  )}
                 </Button>
               </div>
             </div>

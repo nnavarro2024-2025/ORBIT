@@ -16,6 +16,17 @@ interface FacilityAvailability {
   slots: SlotItem[];
 }
 
+// Helper to format facility name for display
+const formatFacilityName = (name: string) => {
+  if (!name) return name;
+  const lower = name.toLowerCase();
+  // Ensure proper facility naming - add "Facility" prefix if missing for Lounge
+  if (lower === 'lounge' && !lower.includes('facility')) {
+    return 'Facility Lounge';
+  }
+  return name;
+};
+
 export default function AvailabilityGrid({ date, onSelectRange }: { date?: Date; onSelectRange?: (facilityId: number, startIso: string, endIso: string) => void }) {
   const now = new Date();
   // selectedDate is writable so users can toggle between today / next day
@@ -86,11 +97,16 @@ export default function AvailabilityGrid({ date, onSelectRange }: { date?: Date;
     const mergeSlotsToRanges = (slots: SlotItem[]) => {
     const ranges: Array<{ start: string; end: string; status: string; bookings?: any[] }> = [];
     if (!slots || slots.length === 0) return ranges;
-    // Treat past slots as 'unavailable' for the purpose of merging
+    // Treat past slots as 'unavailable' for the purpose of merging, 
+    // but preserve 'scheduled' status if there are active/future bookings
     const now = new Date();
     const normalized = slots.map(s => {
       try {
-        if (new Date(s.end).getTime() <= now.getTime()) return { ...s, status: 'unavailable' };
+        const slotEnd = new Date(s.end).getTime();
+        // Only mark as unavailable if the slot has ended AND it doesn't have scheduled bookings
+        if (slotEnd <= now.getTime() && s.status !== 'scheduled') {
+          return { ...s, status: 'unavailable' };
+        }
         return s;
       } catch (e) { return s; }
     });
@@ -122,6 +138,7 @@ export default function AvailabilityGrid({ date, onSelectRange }: { date?: Date;
     // Deduplicate bookings inside each merged range. Sometimes the same booking
     // appears in multiple contiguous 30-min slots and gets concatenated; remove
     // duplicates by booking id or by a start/end/status signature.
+    // Also filter out active bookings from 'unavailable' ranges - they should only appear in 'scheduled' ranges.
     for (const r of ranges) {
       try {
         if (!r.bookings || !Array.isArray(r.bookings) || r.bookings.length === 0) continue;
@@ -131,6 +148,11 @@ export default function AvailabilityGrid({ date, onSelectRange }: { date?: Date;
           if (!b) continue;
           const key = b.id ? String(b.id) : `${b.startTime || b.start}-${b.endTime || b.end}-${b.status || ''}`;
           if (!seen.has(key)) {
+            // Don't show approved/pending bookings in unavailable ranges - they belong in scheduled ranges only
+            const bookingStatus = String(b.status || '').toLowerCase();
+            if (r.status === 'unavailable' && (bookingStatus === 'approved' || bookingStatus === 'pending')) {
+              continue;
+            }
             seen.add(key);
             dedup.push(b);
           }
@@ -173,18 +195,18 @@ export default function AvailabilityGrid({ date, onSelectRange }: { date?: Date;
 
   return (
     <div className="mt-6 space-y-4">
-  <div className="flex items-center justify-between">
-    <div className="text-sm text-gray-600">Showing availability for <strong>{dateStr}</strong>{isShiftedToNextDay ? ' (next day)' : ''}</div>
+  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+    <div className="text-xs sm:text-sm text-gray-600 break-words">Showing availability for <strong>{dateStr}</strong>{isShiftedToNextDay ? ' (next day)' : ''}</div>
     {!date && (
       <div className="flex items-center gap-2">
         <button
           onClick={() => setSelectedDate(dateForMode('today'))}
-          className={`px-3 py-1 rounded text-sm ${format(selectedDate, 'yyyy-MM-dd') === format(dateForMode('today'), 'yyyy-MM-dd') ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700'}`}>
+          className={`px-2 sm:px-3 py-1 rounded text-xs sm:text-sm whitespace-nowrap ${format(selectedDate, 'yyyy-MM-dd') === format(dateForMode('today'), 'yyyy-MM-dd') ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700'}`}>
           Today
         </button>
         <button
           onClick={() => setSelectedDate(dateForMode('next'))}
-          className={`px-3 py-1 rounded text-sm ${format(selectedDate, 'yyyy-MM-dd') === format(dateForMode('next'), 'yyyy-MM-dd') ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700'}`}>
+          className={`px-2 sm:px-3 py-1 rounded text-xs sm:text-sm whitespace-nowrap ${format(selectedDate, 'yyyy-MM-dd') === format(dateForMode('next'), 'yyyy-MM-dd') ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700'}`}>
           Next day
         </button>
       </div>
@@ -196,14 +218,14 @@ export default function AvailabilityGrid({ date, onSelectRange }: { date?: Date;
 
         return (
           <div key={f.facility.id} className="bg-white border rounded-lg p-3">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <div className="font-medium">{f.facility.name}</div>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+              <div className="min-w-0 flex-1">
+                <div className="font-medium text-sm sm:text-base truncate">{formatFacilityName(f.facility.name)}</div>
                 <div className="text-xs text-gray-500">Capacity: {f.facility.capacity} {f.maxUsageHours ? `• Max ${f.maxUsageHours}h` : ''}</div>
               </div>
-              <div className="flex items-center gap-3">
-                <div className="text-xs text-gray-500">Slots: {f.slots.length}</div>
-                <button onClick={() => setOpenMap(prev => ({ ...prev, [f.facility.id]: !prev[f.facility.id] }))} className="px-2 py-1 rounded text-sm bg-gray-100">{open ? 'Hide list' : 'Show full list'}</button>
+              <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+                <div className="text-xs text-gray-500 whitespace-nowrap">Slots: {f.slots.length}</div>
+                <button onClick={() => setOpenMap(prev => ({ ...prev, [f.facility.id]: !prev[f.facility.id] }))} className="px-2 py-1 rounded text-xs sm:text-sm bg-gray-100 whitespace-nowrap">{open ? 'Hide list' : 'Show full list'}</button>
               </div>
             </div>
 
@@ -272,7 +294,10 @@ export default function AvailabilityGrid({ date, onSelectRange }: { date?: Date;
                           <div className="flex items-center justify-between">
                             <div>
                               <div className="text-xs text-gray-700 font-medium">{r.status === 'available' ? 'Available' : r.status === 'scheduled' ? 'Scheduled' : 'Unavailable'}</div>
-                              <div className="text-xs text-gray-600">{format(new Date(r.start), 'hh:mm a')} - {format(new Date(r.end), 'hh:mm a')}</div>
+                              {/* Only show the merged range time if there's 0 or 1 booking - otherwise show individual times below */}
+                              {(!r.bookings || r.bookings.length <= 1) && (
+                                <div className="text-xs text-gray-600">{format(new Date(r.start), 'hh:mm a')} - {format(new Date(r.end), 'hh:mm a')}</div>
+                              )}
                             </div>
                             <div className="text-xs text-gray-500">
                               {(() => {
@@ -283,7 +308,7 @@ export default function AvailabilityGrid({ date, onSelectRange }: { date?: Date;
                               })()}
                             </div>
                           </div>
-                          {r.bookings && r.bookings.length > 0 && (
+                          {r.bookings && r.bookings.length > 1 && (
                             <div className="mt-1 text-xs text-gray-600">
                               {(() => {
                                 const out: any[] = [];
@@ -291,23 +316,22 @@ export default function AvailabilityGrid({ date, onSelectRange }: { date?: Date;
                                   if (!b) continue;
                                   const key = b.id ? String(b.id) : `${b.startTime || b.start}-${b.endTime || b.end}-${b.status || ''}`;
                                   if (facilitySeen.has(key)) continue;
-                                  // If this booking exactly matches the merged range's start/end, skip
-                                  // rendering the separate booking line to avoid duplicated info.
-                                  try {
-                                    const bs = new Date(b.startTime || b.start).getTime();
-                                    const be = new Date(b.endTime || b.end).getTime();
-                                    const rs = new Date(r.start).getTime();
-                                    const re = new Date(r.end).getTime();
-                                    if (bs === rs && be === re) {
-                                      facilitySeen.add(key);
-                                      continue;
-                                    }
-                                  } catch (ex) {
-                                    // ignore parse issues and fall back to showing the booking
-                                  }
+                                  
                                   facilitySeen.add(key);
+                                  // Map booking status to user-friendly labels
+                                  let statusLabel = '';
+                                  const rawStatus = String(b.status || '').toLowerCase();
+                                  if (rawStatus === 'approved' || rawStatus === 'pending') {
+                                    // Don't show status for approved/pending - it's implied by "Scheduled"
+                                    statusLabel = '';
+                                  } else if (rawStatus === 'denied') {
+                                    statusLabel = ' • Denied';
+                                  } else if (rawStatus === 'cancelled') {
+                                    statusLabel = ' • Cancelled';
+                                  }
+                                  
                                   out.push(
-                                    <div key={key}>{format(new Date(b.startTime || b.start), 'hh:mm a')} - {format(new Date(b.endTime || b.end), 'hh:mm a')} • {String(b.status)}</div>
+                                    <div key={key}>{format(new Date(b.startTime || b.start), 'hh:mm a')} - {format(new Date(b.endTime || b.end), 'hh:mm a')}{statusLabel}</div>
                                   );
                                 }
                                 return out.length > 0 ? out : null;

@@ -86,6 +86,45 @@ async function run() {
   const needsRes = await fetch(needsUrl, { method: 'POST', headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'prepared', note: JSON.stringify({ items: { projector: 'prepared', hdmi: 'prepared' } }) }) });
   console.log('Admin needs status:', needsRes.status, await needsRes.text());
 
+  // Force Active: Update the booking to start now (for testing arrival confirmation)
+  console.log('\n--- Force Active: Making booking active NOW ---');
+  const now = new Date();
+  const endTime = new Date(now.getTime() + 2 * 60 * 60 * 1000); // 2 hours from now
+  const arrivalDeadline = new Date(now.getTime() + 15 * 60 * 1000); // 15 minutes from now
+  
+  const forceActivePayload = {
+    purpose: booking.purpose,
+    startTime: now.toISOString(),
+    endTime: endTime.toISOString(),
+    facilityId: booking.facilityId,
+    participants: booking.participants,
+    status: 'approved',
+    arrivalConfirmationDeadline: arrivalDeadline.toISOString(),
+    arrivalConfirmed: false
+  };
+  
+  const updateUrl = serverBase.replace(/\/$/, '') + `/api/bookings/${booking.id}`;
+  const updateRes = await fetch(updateUrl, { 
+    method: 'PUT', 
+    headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' }, 
+    body: JSON.stringify(forceActivePayload) 
+  });
+  
+  console.log('Force Active response:', updateRes.status);
+  if (updateRes.status === 200) {
+    const updatedBooking = await updateRes.json();
+    console.log('Updated booking:', JSON.stringify(updatedBooking, null, 2));
+    console.log('\n✅ Booking is now ACTIVE');
+    console.log('   Start Time:', new Date(updatedBooking.startTime).toLocaleString());
+    console.log('   End Time:', new Date(updatedBooking.endTime).toLocaleString());
+    console.log('   Arrival Deadline:', new Date(updatedBooking.arrivalConfirmationDeadline).toLocaleString());
+    console.log('   Arrival Confirmed:', updatedBooking.arrivalConfirmed);
+    console.log('   Status:', updatedBooking.status);
+  } else {
+    const errorText = await updateRes.text();
+    console.error('Force Active failed:', errorText);
+  }
+
   // Wait briefly then fetch notifications
   await new Promise(r => setTimeout(r, 500));
 

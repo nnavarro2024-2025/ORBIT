@@ -101,6 +101,17 @@ function App() {
           credentials: "include",
         });
         if (!res.ok) {
+          // If server rejects due to domain restriction, sign user out client-side
+          if (res.status === 403) {
+            try {
+              // Clear local token and redirect to login with domain-block flag
+              localStorage.removeItem('auth.token');
+              window.location.href = '/login?domain_block=1';
+              return;
+            } catch (e) {
+              // fallback to throwing
+            }
+          }
           const text = await res.text();
           throw new Error(`Sync failed: ${res.status} ${text}`);
         }

@@ -15,7 +15,7 @@ import {
   facilityBookings,
   systemAlerts,
 } from "../shared/schema";
-import { eq, and, or, gt, lt, asc, lte, isNotNull, ne } from "drizzle-orm";
+import { eq, and, or, gt, lt, asc, lte, isNotNull, ne, sql } from "drizzle-orm";
 
 // School working hours validation
 function isWithinLibraryHours(date: Date): boolean {
@@ -101,6 +101,23 @@ function formatEquipmentForDisplay(eq: any): string {
         console.log('✅ Admin user created: admin@uic.edu.ph / password: 123');
       }
 
+      // Test faculty user
+      const { data: facultyUser, error: facultyUserError } = await supabaseAdmin.auth.admin.createUser({
+        email: 'faculty@uic.edu.ph',
+        password: '123',
+        email_confirm: true,
+        user_metadata: {
+          name: 'Faculty User',
+          role: 'faculty'
+        }
+      });
+
+      if (facultyUserError && !facultyUserError.message.includes('already exists')) {
+        console.log('❌ Error creating faculty user:', facultyUserError.message);
+      } else if (!facultyUserError) {
+        console.log('✅ Faculty user created: faculty@uic.edu.ph / password: 123');
+      }
+
     } catch (error) {
       console.log('⚠️ Test users creation skipped (may already exist)');
     }
@@ -134,6 +151,23 @@ function formatEquipmentForDisplay(eq: any): string {
         await storage.createFacility(facility);
       }
       facilities = await storage.getAllFacilities(); // Re-fetch facilities after creation
+    }
+
+    // Ensure a Lounge facility exists (create if missing)
+    try {
+      const hasLounge = facilities.some((f: any) => /lounge/i.test(String(f.name || '')));
+      if (!hasLounge) {
+        await storage.createFacility({
+          name: 'Lounge',
+          description: 'Comfortable lounge area for informal study and relaxation.',
+          capacity: 10,
+        });
+        // refresh list
+        facilities = await storage.getAllFacilities();
+        console.log('✅ Created default Lounge facility');
+      }
+    } catch (e) {
+      console.warn('⚠️ Could not ensure Lounge facility exists:', e);
     }
   }
 
@@ -313,12 +347,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           expiredArrival = await db.select().from(facilityBookings).where(
             and(
               eq(facilityBookings.status, 'approved'),
-              // arrival_confirmation_deadline <= now
+              // arrival_confirmation_deadline is set and < now (deadline must exist and be in the past)
+              isNotNull(facilityBookings.arrivalConfirmationDeadline as any),
               lt(facilityBookings.arrivalConfirmationDeadline as any, now as any),
               // arrival not confirmed
               eq(facilityBookings.arrivalConfirmed as any, false),
               // only consider bookings that have started (or are at start)
               lte(facilityBookings.startTime as any, now as any)
+              // Removed redundant check: the deadline already encodes startTime + 15 minutes
             )
           );
         } catch (selectErr: any) {
@@ -332,6 +368,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         for (const b of expiredArrival) {
           try {
+            // Log cancellation details for debugging
+            const minutesSinceStart = Math.floor((now.getTime() - new Date(b.startTime).getTime()) / (60 * 1000));
+            console.log(`[Sweep] 🔴 CANCELLING booking ${b.id}:`);
+            console.log(`  - startTime: ${new Date(b.startTime).toLocaleString()}`);
+            console.log(`  - arrivalConfirmationDeadline: ${new Date(b.arrivalConfirmationDeadline).toLocaleString()}`);
+            console.log(`  - now: ${now.toLocaleString()}`);
+            console.log(`  - minutesSinceStart: ${minutesSinceStart}`);
+            console.log(`  - arrivalConfirmed: ${b.arrivalConfirmed}`);
+            console.log(`  - status: ${b.status}`);
+            
             await storage.updateFacilityBooking(b.id, {
               status: 'cancelled',
               adminResponse: 'Automatically cancelled: no-show (not confirmed within 15 minutes)',
@@ -473,6 +519,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: 'User not found in authentication system.' });
       }
 
+      // Enforce allowed email domains (prevent sign-ins from non-UIC accounts)
+      try {
+        const allowed = (process.env.ALLOWED_EMAIL_DOMAINS || 'uic.edu.ph,uic.edu')
+          .split(',')
+          .map((s) => s.trim().toLowerCase())
+          .filter(Boolean);
+        const email = (supabaseUser.email || '').toLowerCase();
+        const domain = email.split('@')[1] || '';
+        if (!domain || !allowed.includes(domain)) {
+          console.warn(`[AUTH] Sign-in rejected for non-allowed domain: ${email}`);
+          return res.status(403).json({ message: 'Access restricted to UIC accounts only.' });
+        }
+      } catch (e) {
+        console.warn('[AUTH] Failed to validate email domain, allowing by default', e);
+      }
+
       // Sync user data with local database
       const existingUser = await storage.getUser(supabaseUser.id);
       const userRecord = {
@@ -606,6 +668,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         startTime: new Date(req.body.startTime),
         endTime: new Date(req.body.endTime),
         userId,
+        // SECURITY: Always set status to 'pending' on creation, never trust client input for status
+        status: 'pending',
       });
 
       // Validate library working hours
@@ -663,6 +727,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       } catch (e) {
         // continue; facility checks above already validated existence
+      }
+
+      // Restrict certain rooms to faculty-only access (IDs 1 and 2 or by name match)
+      try {
+        const localUser = await storage.getUser(userId);
+        const isFacultyOrAdmin = localUser && (localUser.role === 'faculty' || localUser.role === 'admin');
+        const restrictedByName = String(facility.name || '').toLowerCase().includes('board room') || String(facility.name || '').toLowerCase().includes('lounge');
+        if (restrictedByName && !isFacultyOrAdmin) {
+          return res.status(403).json({ message: 'This facility is restricted to faculty members. Please contact an administrator if you require access.' });
+        }
+      } catch (e) {
+        // ignore role-check failures and let other validations handle it
       }
 
       // Enforce minimum booking duration: at least 30 minutes
@@ -778,15 +854,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const facilityInfo = await storage.getFacility(data.facilityId);
         // Global alert for admins (userId omitted so it's visible to admin queries)
-        // Determine friendly actor label for admin-facing message
-        const actorLabel = user?.email || (user?.firstName && user?.lastName ? `${user.firstName} ${user.lastName}` : `User ${userId}`);
+        // Show user email in notification
+        const userEmail = user?.email || 'Unknown User';
+        const notificationMessage = `${userEmail} scheduled a booking for ${facilityInfo?.name || `Facility ${data.facilityId}`} from ${new Date(data.startTime).toLocaleString()} to ${new Date(data.endTime).toLocaleString()}.`;
         await storage.createSystemAlert({
           id: randomUUID(),
           type: 'booking',
           severity: 'low',
           title: 'Booking Created',
           // Use 'scheduled' to reflect the current flow (bookings are scheduled immediately)
-          message: `${actorLabel} scheduled a booking for ${facilityInfo?.name || `Facility ${data.facilityId}`} from ${new Date(data.startTime).toLocaleString()} to ${new Date(data.endTime).toLocaleString()}.`,
+          message: notificationMessage,
           userId: null,
           isRead: false,
           createdAt: new Date(),
@@ -810,15 +887,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const hasItems = eq && Array.isArray(eq.items) && eq.items.length > 0;
           const hasOthers = eq && eq.others;
             if (hasItems || hasOthers) {
-            const items = hasItems ? (eq.items as string[]).map((i: string) => i.replace(/_/g, ' ')) : [];
-            const others = hasOthers ? `Others: ${String(eq.others).trim()}` : null;
-            const needsList = [...items, ...(others ? [others] : [])].join(', ');
+            // Get facility info for better message
+            const bookingTime = new Date(data.startTime).toLocaleString();
+            const userEmail = user?.email || 'User';
+            
+            // Clean up old equipment notifications for this user to avoid confusion
+            try {
+              const oldAlerts = await storage.getSystemAlerts();
+              const oldEquipmentAlerts = oldAlerts.filter(a => 
+                a.userId === userId && 
+                a.title && 
+                (a.title.includes('Equipment') || a.title.includes('Needs'))
+              );
+              for (const old of oldEquipmentAlerts) {
+                await storage.updateSystemAlert(old.id, { isRead: true } as any);
+              }
+            } catch (e) {
+              console.warn('[Booking] Failed to clean up old equipment alerts', e);
+            }
+            
+            // Message that works for both user view and admin view
+            // Format: "User submitted an equipment request for Facility on Date. [Equipment: JSON]"
+            let message = `${userEmail} submitted an equipment request for ${facilityInfo?.name || `Facility ${data.facilityId}`} on ${bookingTime}.`;
+            
+            // Append JSON for frontend parsing, same format as admin updates use
+            message += ` [Equipment: ${JSON.stringify(eq)}]`;
+            
+            console.log('\n╔════════════════════════════════════════════════════════════════╗');
+            console.log('║  EQUIPMENT NOTIFICATION CREATED                                ║');
+            console.log('╠════════════════════════════════════════════════════════════════╣');
+            console.log('  User:', userEmail);
+            console.log('  Facility:', facilityInfo?.name || `Facility ${data.facilityId}`);
+            console.log('  Time:', bookingTime);
+            console.log('  ────────────────────────────────────────────────────────────');
+            console.log('  Equipment Data:');
+            console.log('  ', JSON.stringify(eq, null, 2));
+            console.log('  ────────────────────────────────────────────────────────────');
+            console.log('  Full Message:');
+            console.log('  ', message);
+            console.log('╚════════════════════════════════════════════════════════════════╝\n');
+            
             await storage.createSystemAlert({
               id: randomUUID(),
               type: 'user',
               severity: 'low',
               title: `Equipment Needs Submitted`,
-              message: `${user?.email || userId} requested equipment: ${needsList}`,
+              message: message,
               userId: userId, 
               isRead: false,
               createdAt: new Date(),
@@ -830,6 +944,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (e) {
         console.warn('[Alerts] Failed to create booking alerts', e);
       }
+
+      // Set arrival confirmation deadline for all new bookings
+      // This ensures the 15-minute rule applies from the start
+      try {
+        if (booking && booking.id) {
+          const arrivalDeadline = new Date(booking.startTime.getTime() + 15 * 60 * 1000); // +15 minutes from start
+          await storage.updateFacilityBooking(booking.id, {
+            arrivalConfirmationDeadline: arrivalDeadline,
+            arrivalConfirmed: false,
+            status: 'approved', // Auto-approve all bookings
+            updatedAt: new Date(),
+          } as any);
+          // Refresh booking data to include the updated fields
+          booking = await storage.getFacilityBooking(booking.id) as any;
+        }
+      } catch (e) {
+        console.warn('[Booking] Failed to set arrival confirmation deadline', e);
+      }
+
       res.json(booking);
     } catch (error) {
       res.status(400).json({ message: (error as Error).message });
@@ -885,6 +1018,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const result = facilities.map((f: any) => {
+        // Check if facility is unavailable on this specific date
+        const checkDate = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        let isUnavailableToday = false;
+        
+        if (f.unavailableDates && Array.isArray(f.unavailableDates)) {
+          isUnavailableToday = f.unavailableDates.some((range: any) => {
+            try {
+              const start = range.startDate || range.start;
+              const end = range.endDate || range.end;
+              if (!start || !end) return false;
+              return checkDate >= start && checkDate <= end;
+            } catch (e) {
+              return false;
+            }
+          });
+        }
+
         // For collaborative rooms, expose maxUsageHours for client guidance
         const isCollaborative = String(f.name || '').toLowerCase().includes('collaborative learning') || [1,2].includes(f.id);
         const maxUsageHours = isCollaborative ? 2 : null;
@@ -919,11 +1069,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
 
           if (overlapping.length > 0) {
+            // Deduplicate bookings by ID to avoid showing same booking multiple times
+            const uniqueBookings = Array.from(
+              new Map(overlapping.map(b => [b.id, b])).values()
+            );
+            
             return {
               start: s.start.toISOString(),
               end: s.end.toISOString(),
               status: 'scheduled',
-              bookings: overlapping.map((b: any) => ({ id: b.id, startTime: b.startTime, endTime: b.endTime, status: b.status, userId: b.userId }))
+              bookings: uniqueBookings.map((b: any) => ({ id: b.id, startTime: b.startTime, endTime: b.endTime, status: b.status, userId: b.userId }))
             };
           }
 
@@ -931,7 +1086,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
 
         return {
-          facility: { id: f.id, name: f.name, capacity: f.capacity, isActive: f.isActive },
+          facility: { 
+            id: f.id, 
+            name: f.name, 
+            capacity: f.capacity, 
+            isActive: f.isActive && !isUnavailableToday, // Mark as inactive if unavailable on this date
+            unavailableReason: isUnavailableToday ? f.unavailableReason : null
+          },
           maxUsageHours,
           slots: slotStates,
         };
@@ -966,15 +1127,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!existingBooking) {
         return res.status(404).json({ message: "Booking not found." });
       }
+      
+      // Check if the requesting user is an admin
+      let isAdmin = false;
+      let requestingUser = null;
       // Only the booking owner or an admin may modify a booking
       if (String(existingBooking.userId) !== String(userId)) {
         try {
-          const requestingUser = await storage.getUser(userId);
-          if (!requestingUser || requestingUser.role !== 'admin') {
+          requestingUser = await storage.getUser(userId);
+          isAdmin = requestingUser?.role === 'admin';
+          if (!isAdmin) {
             return res.status(403).json({ message: "You are not allowed to update this booking." });
           }
         } catch (e) {
           return res.status(403).json({ message: "You are not allowed to update this booking." });
+        }
+      } else {
+        // Owner is updating their own booking - check if they're also an admin
+        try {
+          requestingUser = await storage.getUser(userId);
+          isAdmin = requestingUser?.role === 'admin';
+        } catch (e) {
+          // ignore, they're the owner
         }
       }
 
@@ -991,65 +1165,73 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid start or end time format." });
       }
 
-      // Validate library working hours
-      if (!isWithinLibraryHours(parsedStartTime)) {
-        return res.status(400).json({ 
-          message: `Start time must be within school working hours (${formatLibraryHours()})` 
-        });
+      // Validate library working hours (admins can bypass this for force-active operations)
+      if (!isAdmin) {
+        if (!isWithinLibraryHours(parsedStartTime)) {
+          return res.status(400).json({ 
+            message: `Start time must be within school working hours (${formatLibraryHours()})` 
+          });
+        }
+
+        if (!isWithinLibraryHours(parsedEndTime)) {
+          return res.status(400).json({ 
+            message: `End time must be within school working hours (${formatLibraryHours()})` 
+          });
+        }
       }
 
-      if (!isWithinLibraryHours(parsedEndTime)) {
-        return res.status(400).json({ 
-          message: `End time must be within school working hours (${formatLibraryHours()})` 
-        });
-      }
-
-      // Validate same calendar day for updates as well
-      if (parsedStartTime.getFullYear() !== parsedEndTime.getFullYear() || parsedStartTime.getMonth() !== parsedEndTime.getMonth() || parsedStartTime.getDate() !== parsedEndTime.getDate()) {
+      // Validate same calendar day for updates as well (admins can bypass for force-active)
+      if (!isAdmin && (parsedStartTime.getFullYear() !== parsedEndTime.getFullYear() || parsedStartTime.getMonth() !== parsedEndTime.getMonth() || parsedStartTime.getDate() !== parsedEndTime.getDate())) {
         return res.status(400).json({ message: 'Bookings must start and end on the same calendar day. Please split multi-day bookings into separate requests.' });
       }
 
+      // For overlap checks, use the booking owner's ID, not the requesting admin's ID
+      const bookingOwnerId = existingBooking.userId;
+
       // Check if user has overlapping bookings (excluding current booking)
-      const userOverlappingBookings = await storage.checkUserOverlappingBookings(
-        userId,
-        parsedStartTime,
-        parsedEndTime,
-        bookingId
-      );
+      // Admins can bypass this check for force-active operations
+      if (!isAdmin) {
+        const userOverlappingBookings = await storage.checkUserOverlappingBookings(
+          bookingOwnerId,
+          parsedStartTime,
+          parsedEndTime,
+          bookingId
+        );
 
-      if (userOverlappingBookings.length > 0) {
-        const overlapping = userOverlappingBookings[0];
-        return res.status(409).json({ 
-          message: `You already have another booking during this time period. Existing booking: ${new Date(overlapping.startTime).toLocaleString()} - ${new Date(overlapping.endTime).toLocaleString()}. Please choose a different time.`,
-          existingBooking: {
-            id: overlapping.id,
-            startTime: overlapping.startTime,
-            endTime: overlapping.endTime,
-            facilityId: overlapping.facilityId,
-            status: overlapping.status
-          }
-        });
-      }
+        if (userOverlappingBookings.length > 0) {
+          const overlapping = userOverlappingBookings[0];
+          return res.status(409).json({ 
+            message: `You already have another booking during this time period. Existing booking: ${new Date(overlapping.startTime).toLocaleString()} - ${new Date(overlapping.endTime).toLocaleString()}. Please choose a different time.`,
+            existingBooking: {
+              id: overlapping.id,
+              startTime: overlapping.startTime,
+              endTime: overlapping.endTime,
+              facilityId: overlapping.facilityId,
+              status: overlapping.status
+            }
+          });
+        }
 
-      // Check if user already has any active booking for this facility (excluding current booking)
-      const userFacilityBookings = await storage.checkUserFacilityBookings(
-        userId,
-        parseInt(facilityId),
-        bookingId
-      );
+        // Check if user already has any active booking for this facility (excluding current booking)
+        const userFacilityBookings = await storage.checkUserFacilityBookings(
+          bookingOwnerId,
+          parseInt(facilityId),
+          bookingId
+        );
 
-      if (userFacilityBookings.length > 0) {
-        const existingBooking = userFacilityBookings[0];
-        return res.status(409).json({ 
-          message: `You already have an active booking for this facility. Please cancel your existing booking first before making another request for the same facility. Existing booking: ${new Date(existingBooking.startTime).toLocaleString()} - ${new Date(existingBooking.endTime).toLocaleString()}`,
-          existingBooking: {
-            id: existingBooking.id,
-            startTime: existingBooking.startTime,
-            endTime: existingBooking.endTime,
-            facilityId: existingBooking.facilityId,
-            status: existingBooking.status
-          }
-        });
+        if (userFacilityBookings.length > 0) {
+          const existingBooking = userFacilityBookings[0];
+          return res.status(409).json({ 
+            message: `You already have an active booking for this facility. Please cancel your existing booking first before making another request for the same facility. Existing booking: ${new Date(existingBooking.startTime).toLocaleString()} - ${new Date(existingBooking.endTime).toLocaleString()}`,
+            existingBooking: {
+              id: existingBooking.id,
+              startTime: existingBooking.startTime,
+              endTime: existingBooking.endTime,
+              facilityId: existingBooking.facilityId,
+              status: existingBooking.status
+            }
+          });
+        }
       }
 
       // Check for time conflicts with existing APPROVED bookings (excluding the current booking)
@@ -1086,6 +1268,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         updatedAt: new Date(),
       };
 
+      // Handle status if provided (for admin force-active testing)
+      if (req.body.status && ['pending', 'approved', 'denied', 'cancelled'].includes(req.body.status)) {
+        updatePayload.status = req.body.status;
+      }
+
+      // Handle arrivalConfirmed if provided (for admin force-active testing)
+      if (req.body.arrivalConfirmed !== undefined) {
+        updatePayload.arrivalConfirmed = Boolean(req.body.arrivalConfirmed);
+      }
+
+      // Handle arrivalConfirmationDeadline if provided (for admin force-active testing)
+      if (req.body.arrivalConfirmationDeadline) {
+        const deadline = new Date(req.body.arrivalConfirmationDeadline);
+        console.log(`[server][${reqId}] PUT /api/bookings/:bookingId - Setting arrivalConfirmationDeadline:`, deadline);
+        if (!isNaN(deadline.getTime())) {
+          updatePayload.arrivalConfirmationDeadline = deadline;
+        }
+      }
+
       // Normalize and include equipment if provided
       try {
         const incomingEquipment = req.body && req.body.equipment;
@@ -1113,6 +1314,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // DEBUG: log final payload being sent to storage
   try { console.log(`[server][${reqId}] PUT /api/bookings/:bookingId - updatePayload`, updatePayload); } catch (e) {}
   await storage.updateFacilityBooking(bookingId, updatePayload);
+
+  // DEBUG: Verify the update was saved correctly
+  try {
+    const verifyBooking = await storage.getFacilityBooking(bookingId);
+    console.log(`[server][${reqId}] PUT /api/bookings/:bookingId - AFTER UPDATE - arrivalConfirmationDeadline:`, verifyBooking?.arrivalConfirmationDeadline);
+    console.log(`[server][${reqId}] PUT /api/bookings/:bookingId - AFTER UPDATE - arrivalConfirmed:`, verifyBooking?.arrivalConfirmed);
+    console.log(`[server][${reqId}] PUT /api/bookings/:bookingId - AFTER UPDATE - startTime:`, verifyBooking?.startTime);
+  } catch (e) {
+    console.warn('[server] PUT /api/bookings/:bookingId - failed to verify update', e);
+  }
 
   // Fallback: if equipment present, perform an explicit DB write to the equipment column
   try {
@@ -1372,10 +1583,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/admin/alerts", isAuthenticated, requireAdmin, async (req: any, res) => {
     try {
-      // Fetch all alerts then return only the global/admin ones (userId == null)
+      // Fetch all alerts then return global alerts (userId == null) AND equipment/needs alerts (for admin visibility)
       const alerts = await storage.getSystemAlerts();
-      // Use explicit null/undefined check so falsy userId values (e.g. empty string) are not treated as global
-      const adminAlerts = Array.isArray(alerts) ? alerts.filter(a => a.userId == null) : [];
+      // Include: global alerts + equipment/needs requests (user-specific alerts that admins need to see)
+      const adminAlerts = Array.isArray(alerts) ? alerts.filter(a => {
+        // Include global alerts
+        if (a.userId == null) return true;
+        // Include equipment/needs alerts even if they have a userId (admins need to see these)
+        const title = String(a.title || '').toLowerCase();
+        const message = String(a.message || '').toLowerCase();
+        if (title.includes('equipment') || title.includes('needs') || 
+            message.includes('equipment') || message.includes('requested equipment')) return true;
+        return false;
+      }) : [];
 
       // Helper: extract JSON blocks and return parsed objects (best-effort)
       const extractJsonObjects = (text: string) => {
@@ -1463,23 +1683,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/admin/alerts/:alertId/read", isAuthenticated, requireAdmin, async (req: any, res) => {
     try {
       const { alertId } = req.params;
-      // Temporary debug: log the alert row before attempting admin mark-read
-      try {
-        const alerts = await storage.getSystemAlerts();
-        const matched = Array.isArray(alerts) ? alerts.find(a => a.id === alertId) : null;
-        console.warn(`[ADMIN READ ATTEMPT] alertId=${alertId} currentUserId=${matched?.userId ?? 'NULL'} isRead=${matched?.isRead}`);
-      } catch (e) {
-        console.warn('[ADMIN READ ATTEMPT] failed to fetch alert for debug', e);
-      }
-
-      // Only mark global/admin alerts as read via admin route
+      
+      // Mark the alert as read (works for both global and user-specific alerts)
       const affected = await storage.markAlertAsReadForAdmin(alertId);
       if (!affected) {
-        console.warn(`[ADMIN READ] No rows updated when marking alert ${alertId} as read via admin route`);
-        return res.status(404).json({ message: 'Alert not found or not an admin/global alert' });
+        console.warn(`[ADMIN READ] No rows updated when marking alert ${alertId} as read`);
+        return res.status(404).json({ message: 'Alert not found' });
       }
       res.json({ success: true });
     } catch (error) {
+      console.error('[ADMIN READ ERROR]', error);
       res.status(500).json({ message: "Failed to mark alert as read" });
     }
   });
@@ -1507,11 +1720,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const alerts = await storage.getSystemAlerts();
       const userAlerts = Array.isArray(alerts) ? alerts.filter(a => a.userId === userId) : [];
 
+      // Helper: extract JSON blocks and return parsed objects (best-effort) - same as admin endpoint
+      const extractJsonObjects = (text: string) => {
+        try {
+          const matches = Array.from(String(text || '').matchAll(/(\{[\s\S]*?\})/g)).map(m => m[1]);
+          const parsed: any[] = [];
+          for (let block of matches) {
+            try { block = block.replace(/\\"/g, '"').replace(/\\n/g, '\n'); } catch (e) {}
+            try { parsed.push(JSON.parse(block)); } catch (e) {
+              // fallback: extract quoted pairs
+              const obj: any = {};
+              const re = /"([^"}]+)"\s*:\s*"([^"}]+)"/g;
+              let mm;
+              while ((mm = re.exec(block)) !== null) obj[mm[1]] = mm[2];
+              if (Object.keys(obj).length > 0) parsed.push(obj);
+            }
+          }
+          return parsed;
+        } catch (e) { return []; }
+      };
+
+      const humanSummaryFromStructured = (note: any) => {
+        try {
+          if (!note) return null;
+          const parts: string[] = [];
+          if (note.items) {
+            if (Array.isArray(note.items)) parts.push(note.items.join(', '));
+            else if (typeof note.items === 'object') parts.push(Object.entries(note.items).map(([k, v]) => `${k}: ${v}`).join('\n'));
+          }
+          if (note.others) parts.push(`Other details: ${note.others}`);
+          return parts.join('\n\n');
+        } catch (e) { return null; }
+      };
+
+      // Sanitize equipment alerts to convert JSON to human-readable format (same as admin endpoint)
+      const sanitized = userAlerts.map((a: any) => {
+        try {
+          const objs = extractJsonObjects(a.message || '');
+          if (!objs || objs.length === 0) return a;
+          const humans = objs.map(o => humanSummaryFromStructured(o)).filter(Boolean);
+          if (humans.length === 0) return a;
+          // remove JSON blocks and append human summaries
+          const msg = String(a.message || '').replace(/(\{[\s\S]*?\})/g, '').trim();
+          const appended = '\n\n' + humans.join('\n\n');
+          // attach the first structured object so the client can render per-item statuses without needing raw JSON
+          const structured = objs[0] || null;
+          return { ...a, message: `${msg}${appended}`, structuredNote: structured };
+        } catch (e) { return a; }
+      });
+
       // Deduplicate similar equipment alerts so the user doesn't see multiple identical entries.
       // Strategy: group by title + first summary line (text before first newline) and keep the newest alert per group.
       try {
         const grouped: Record<string, any> = {};
-        for (const a of userAlerts) {
+        for (const a of sanitized) {
           try {
             // Normalize message for deduping: pick the first meaningful line and
             // ignore short admin timestamp prefixes like "An admin updated the equipment request at ...".
@@ -1548,8 +1810,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const deduped = Object.values(grouped).sort((x: any, y: any) => new Date(y.createdAt).getTime() - new Date(x.createdAt).getTime());
         return res.json(deduped);
       } catch (e) {
-        console.warn('[NOTIFICATIONS] Deduplication failed, returning raw user alerts', e);
-        return res.json(userAlerts);
+        console.warn('[NOTIFICATIONS] Deduplication failed, returning sanitized user alerts', e);
+        return res.json(sanitized);
       }
     } catch (error) {
       console.error('[NOTIFICATIONS] Failed to fetch notifications', error);
@@ -1822,6 +2084,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { bookingId } = req.params;
       const { status, note } = req.body; // status: 'prepared' | 'not_available'
 
+      // Get the admin user who is making this update
+      const adminUserId = req.user.claims.sub;
+      const adminUser = await storage.getUser(adminUserId);
+      const adminEmail = adminUser?.email || 'Admin';
+
       // function-scoped vars used across nested blocks; declared with var to ensure hoisting
       var bookingAfter: any = null;
       var ownerUser: any = null;
@@ -1885,23 +2152,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           } catch (e) { return [] as string[]; }
         })();
 
-        const summaryLine = `${requester} requested equipment: ${summaryItems.join(', ')} at ${baseWhen}`;
-
-        const itemLines: string[] = [];
-        if (structuredNote && structuredNote.items) {
-          if (Array.isArray(structuredNote.items)) {
-            for (const it of structuredNote.items) itemLines.push(`- ${String(it)}`);
-          } else if (typeof structuredNote.items === 'object') {
-            for (const k of Object.keys(structuredNote.items)) itemLines.push(`- ${k}`);
-          }
-        }
-
-        const othersLine = structuredNote && structuredNote.others ? `• Other details: ${String(structuredNote.others)}` : '';
-
-  const notifyTitle = 'Equipment or Needs Request';
-  const payloadJson = JSON.stringify(structuredNote || { items: {}, others: null });
-
-  notifyMessage = `${summaryLine}\n\n${itemLines.join('\n')}${othersLine ? '\n\n' + othersLine : ''}\n\n${payloadJson}`;
+        // Build clean readable message - JSON is wrapped for parsing but stripped in UI
+        const othersText = structuredNote && structuredNote.others ? ` Other details: ${String(structuredNote.others)}.` : '';
+        const equipmentJson = structuredNote ? ` [Equipment: ${JSON.stringify(structuredNote)}]` : '';
+        notifyMessage = `${adminEmail} updated ${requester}'s equipment request.${othersText}${equipmentJson}`;
+        const summaryLine = notifyMessage;
 
         // NOTE: per-user alert creation is handled later by the dedupe/ensure block to avoid duplicates
 
@@ -1919,53 +2174,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
             } catch (e) { return false; }
           }) : null;
 
-          // Build a human-friendly summary (no raw JSON) for admin/global alerts
-          const humanSummaryParts: string[] = [];
-          if (itemLines && itemLines.length > 0) humanSummaryParts.push(itemLines.join('\n'));
-          if (othersLine) humanSummaryParts.push(othersLine);
-          const payloadHumanSummary = humanSummaryParts.length > 0 ? `\n\n${humanSummaryParts.join('\n\n')}` : `\nStatus: ${needsStatusText}${note ? ` — ${note}` : ''}`;
-
-          // payloadJson stays available for per-user (owner) alerts if desired
-          const payloadJsonForOwner = payloadJson;
+          // Use the clean notifyMessage we already built
+          const readableMessage = notifyMessage;
 
           if (foundOriginal) {
-            // append human-friendly summary and include structured JSON so admins
-            // can parse the payload and render the prepared/not-available states
-            const extra = payloadHumanSummary;
-            const updatedMessage = `${foundOriginal.message}${extra}\n\n${payloadJsonForOwner}`;
-            await storage.updateSystemAlert(foundOriginal.id, { message: updatedMessage, isRead: false } as any);
+            // Update with clean human-readable format - REPLACE the old message completely
+            await storage.updateSystemAlert(foundOriginal.id, { message: readableMessage, isRead: false } as any);
 
             // NOTE: per-user alert creation is handled later by the dedupe/ensure block
           } else {
-            // create a booking-scoped alert (owner-facing). This message should include the human text and structured payload
+            // create a booking-scoped alert (owner-facing) with clean readable format
             await storage.createSystemAlert({
               id: randomUUID(),
               type: 'booking',
               severity: 'low',
               title: 'Equipment Needs Submitted',
-              message: `${notifyMessage}\n\n${payloadJsonForOwner}`,
+              message: readableMessage,
               userId: bookingAfter?.userId ?? null,
               isRead: false,
               createdAt: new Date(),
             });
 
-            // Also create an admin/global alert so admins see the request in their dashboard
-            try {
-              const adminMsg = `${summaryLine}\n\n${payloadHumanSummary}${payloadHumanSummary ? '\n\n' : ''}${payloadJsonForOwner}`;
-              await storage.createSystemAlert({
-                id: randomUUID(),
-                type: 'booking',
-                severity: 'low',
-                title: 'Equipment or Needs Request',
-                message: adminMsg,
-                userId: null,
-                isRead: false,
-                createdAt: new Date(),
-              });
-            } catch (e) {
-              // non-fatal: we still created the owner alert above
-              console.warn('[Needs] Failed to create admin/global alert', e);
-            }
+            // Note: Do NOT create a global booking alert here
+            // The per-user alert above is sufficient and will be visible in management alerts
           }
 
         // Ensure a consistent admin/global alert exists for admins to act on.
@@ -1982,39 +2213,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
             } catch (e) { return false; }
           }) : null;
 
-          const adminMsg = `${summaryLine}\n\n${payloadHumanSummary}${payloadHumanSummary ? '\n\n' : ''}${payloadJsonForOwner}`;
+          // Do NOT create global booking alerts for equipment requests
+          // They should only appear in management/user alerts
+          // Remove any existing global alerts for this request
           if (foundAdmin) {
-            await storage.updateSystemAlert(foundAdmin.id, { message: adminMsg, isRead: false } as any);
-          } else {
-            await storage.createSystemAlert({
-              id: randomUUID(),
-              type: 'booking',
-              severity: 'low',
-              title: 'Equipment or Needs Request',
-              message: adminMsg,
-              userId: null,
-              isRead: false,
-              createdAt: new Date(),
-            });
+            try {
+              await storage.updateSystemAlert(foundAdmin.id, { isRead: true } as any);
+            } catch (e) { /* ignore */ }
           }
         } catch (e) {
-          console.warn('[Needs] Failed to ensure admin/global alert', e);
+          console.warn('[Needs] Failed to cleanup admin/global alert', e);
         }
         } catch (e) {
-          // Fallback: create a new alert if update failed
+          // Fallback: Only create per-user alert, NOT global booking alert
           try {
-            await storage.createSystemAlert({
-              id: randomUUID(),
-              type: 'booking',
-              severity: 'low',
-              title: notifyTitle,
-              message: notifyMessage,
-              userId: bookingAfter?.userId ?? null,
-              isRead: false,
-              createdAt: new Date(),
-            });
+            if (bookingAfter?.userId) {
+              await storage.createSystemAlert({
+                id: randomUUID(),
+                type: 'booking',
+                severity: 'low',
+                title: 'Equipment Needs Submitted',
+                message: notifyMessage,
+                userId: bookingAfter.userId,
+                isRead: false,
+                createdAt: new Date(),
+              });
+            }
           } catch (ee) {
-            console.warn('[Needs] Failed to create/update notification alert', ee);
+            console.warn('[Needs] Failed to create/update per-user notification alert', ee);
           }
         }
       } catch (e) {
@@ -2093,32 +2319,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           } catch (e) { console.warn('[Needs] Failed to update related alert', e); }
         }
       } catch (e) { console.warn('[Needs] Failed to update related alert', e); }
-
-      // Activity log
-      try {
-        const adminUserId = req.user.claims.sub;
-        const adminUser = adminUserId ? await storage.getUser(adminUserId) : null;
-        const bookingOwner = booking ? await storage.getUser(booking.userId) : null;
-        const adminEmail = adminUser?.email || String(adminUserId || 'admin');
-        const ownerEmail = bookingOwner?.email || String(booking?.userId || 'unknown');
-
-        const eqText = formatEquipmentForDisplay((booking as any).equipment);
-        const when = new Date();
-        const whenText = when.toLocaleString();
-        const verb = status === 'prepared' ? 'marked the requested equipment as prepared for' : 'marked the requested equipment as not available for';
-        const itemsPart = eqText ? ` Items: ${eqText}.` : '';
-        const details = `${adminEmail} ${verb} ${ownerEmail} at ${whenText}.${itemsPart}`;
-
-        await storage.createActivityLog({
-          id: randomUUID(),
-          userId: adminUserId,
-          action: status === 'prepared' ? 'Equipment Prepared' : 'Equipment Not Available',
-          details,
-          ipAddress: req.ip,
-          userAgent: req.get('User-Agent'),
-          createdAt: when
-        } as any);
-      } catch (e) { console.warn('[Needs] Failed to create activity log', e); }
 
       // DEBUG: report how many alerts exist for the booking owner now
       try {
@@ -2671,11 +2871,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // -------------------------
   // 🏢 FACILITIES ROUTES
   // -------------------------
-  app.get("/api/facilities", async (req: any, res) => {
+  app.get("/api/facilities", isAuthenticated, async (req: any, res) => {
     try {
-      const facilities = await storage.getAllFacilities();
+      let facilities = await storage.getAllFacilities();
+      
+      // Get user information
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      
+      console.log(`[FACILITIES] User: ${user?.email}, Role: ${user?.role}, User ID: ${userId}`);
+      console.log(`[FACILITIES] All facilities before filter: ${facilities.map((f: any) => f.name).join(', ')}`);
+      
+      // Filter facilities for faculty role - only show Board Room and Lounge
+      if (user && user.role === 'faculty') {
+        console.log(`[FACILITIES] Faculty detected - Filtering facilities...`);
+        facilities = facilities.filter((f: any) => {
+          const nameLower = f.name.toLowerCase();
+          const isMatch = nameLower === 'board room' || nameLower === 'lounge';
+          console.log(`[FACILITIES] Checking "${f.name}" (${nameLower}): ${isMatch}`);
+          return isMatch;
+        });
+        console.log(`[FACILITIES] After filter: ${facilities.length} facilities - ${facilities.map((f: any) => f.name).join(', ')}`);
+      }
+      
       res.json(facilities);
     } catch (error) {
+      console.error('[FACILITIES] Error:', error);
       res.status(500).json({ message: "Failed to fetch facilities" });
     }
   });
@@ -2708,7 +2929,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/admin/facilities/:facilityId/availability", isAuthenticated, requireAdmin, async (req: any, res) => {
     try {
       const { facilityId } = req.params;
-  const { isActive, reason } = req.body;
+  const { isActive, reason, startDate, endDate } = req.body;
 
       if (typeof isActive !== 'boolean') {
         return res.status(400).json({ message: "isActive must be a boolean value." });
@@ -2730,9 +2951,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!isLibraryClosed) {
           return res.status(400).json({ message: 'Cannot mark facility unavailable during school open hours. Please perform this action after hours.' });
         }
+        
+        // If date range provided, add to unavailableDates array (keep facility isActive=true, just mark specific dates)
+        if (startDate && endDate) {
+          const existingDates = (facility as any).unavailableDates || [];
+          const newDateRange = { startDate, endDate, reason: reason || null };
+          const updatedDates = [...existingDates, newDateRange];
+          
+          await storage.updateFacility(parseInt(facilityId), { 
+            unavailableDates: updatedDates as any,
+            unavailableReason: reason || null 
+          });
+        } else {
+          // If no date range, set entire facility as unavailable
+          await storage.updateFacility(parseInt(facilityId), { isActive, unavailableReason: isActive ? null : reason || null });
+        }
+      } else {
+        // Making available - clear unavailableDates
+        await storage.updateFacility(parseInt(facilityId), { 
+          isActive, 
+          unavailableReason: null,
+          unavailableDates: [] as any
+        });
       }
-
-      await storage.updateFacility(parseInt(facilityId), { isActive, unavailableReason: isActive ? null : reason || null });
 
       // Get admin user data for logging
       const adminUser = await storage.getUser(req.user.claims.sub);

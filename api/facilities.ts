@@ -1,7 +1,9 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { db } from '../server/db-vercel';
-import { facilities } from '../shared/schema';
+import { facilities, users } from '../shared/schema';
+import { eq } from 'drizzle-orm';
 import * as cors from 'cors';
+import { supabaseAdmin } from '../server/supabaseAdmin';
 
 // Initialize CORS middleware
 const corsMiddleware = (cors as any)({
@@ -35,8 +37,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     if (req.method === 'GET') {
       try {
+        // Get user from authorization header
+        let userRole = null;
+        const authHeader = req.headers.authorization;
+        
+        if (authHeader && authHeader.startsWith('Bearer ')) {
+          const token = authHeader.substring(7);
+          try {
+            const { data: { user: supabaseUser }, error } = await supabaseAdmin.auth.getUser(token);
+            if (supabaseUser && !error) {
+              // Get user from database
+              const [dbUser] = await db.select().from(users).where(eq(users.id, supabaseUser.id)).limit(1);
+              if (dbUser) {
+                userRole = dbUser.role;
+                console.log(`[API FACILITIES] User: ${dbUser.email}, Role: ${userRole}`);
+              }
+            }
+          } catch (authError) {
+            console.log('[API FACILITIES] Auth check failed:', authError);
+          }
+        }
+        
         // Try to get from database first
-        const dbFacilities = await db.select().from(facilities);
+        let dbFacilities = await db.select().from(facilities);
+        
+        // Filter for faculty role - only show Board Room and Lounge
+        if (userRole === 'faculty') {
+          console.log(`[API FACILITIES] Filtering for faculty - Before: ${dbFacilities.length} facilities`);
+          dbFacilities = dbFacilities.filter((f: any) => 
+            f.name.toLowerCase() === 'board room' || f.name.toLowerCase() === 'lounge'
+          );
+          console.log(`[API FACILITIES] After filter: ${dbFacilities.length} facilities`);
+        }
         
         if (dbFacilities.length > 0) {
           return res.status(200).json(dbFacilities);

@@ -119,6 +119,14 @@ function parseEquipmentAlert(alert: any) {
       }
     }
 
+    // Try new '[Equipment: {...}]' format
+    if (!needsObj) {
+      const equipMatch = raw.match(/\[Equipment:\s*(\{[\s\S]*?\})\]/i);
+      if (equipMatch && equipMatch[1]) {
+        try { needsObj = JSON.parse(equipMatch[1]); raw = raw.replace(equipMatch[0], ''); } catch (e) { needsObj = null; }
+      }
+    }
+
     // Finally, strip any leftover quoted key:value fragments like "hdmi":"not_available" that are not in JSON blocks
     try {
       raw = raw.replace(/"[^\"]+"\s*:\s*"[^\"]+"\s*,?/g, '');
@@ -129,7 +137,7 @@ function parseEquipmentAlert(alert: any) {
   } catch (e) { needsObj = null; }
 
   // Legacy free-text
-  const eqMatch = raw.match(/Requested equipment:\s*([^\[]+)/i);
+  const eqMatch = raw.match(/(?:Requested equipment|equipment request):\s*([^\[]+)/i);
   let equipmentList: string[] = [];
   let othersText: string | null = null;
   let itemsWithStatus: Array<{ label: string, status: 'prepared' | 'not_available' | 'pending' }> | null = null;
@@ -265,6 +273,52 @@ function parseEquipmentAlert(alert: any) {
     // also capture 'Others: ...' trailing token if present
     const extrasMatch = eqMatch[1].match(/Others?:\s*(.*)$/i);
     othersText = othersFromParts || (extrasMatch && extrasMatch[1] ? String(extrasMatch[1]).trim() : null);
+    
+    // After extracting the equipment list, check if there's a JSON block with per-item statuses
+    // Pattern: {"items": {"Whiteboard & Markers": "prepared", "Projector": "not_available", ...}}
+    // or {"items": {"whiteboard": "prepared", "projector": "not_available", ...}}
+    try {
+      const jsonMatch = combinedMessage.match(/\{[^}]*"items"[^}]*:?\s*\{[^}]*\}[^}]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (parsed && parsed.items && typeof parsed.items === 'object') {
+          // Build a map from lowercase names to display names for matching
+          const displayNameMap = new Map<string, string>();
+          for (const item of equipmentList) {
+            displayNameMap.set(item.toLowerCase(), item);
+            // Also map common variations
+            if (item === 'Whiteboard & Markers') displayNameMap.set('whiteboard', item);
+            if (item === 'Projector') displayNameMap.set('projector', item);
+            if (item === 'Extension Cord') {
+              displayNameMap.set('extension cord', item);
+              displayNameMap.set('extension_cord', item);
+            }
+            if (item === 'HDMI Cable') {
+              displayNameMap.set('hdmi', item);
+              displayNameMap.set('hdmi cable', item);
+            }
+            if (item === 'Extra Chairs') {
+              displayNameMap.set('extra chairs', item);
+              displayNameMap.set('extra_chairs', item);
+            }
+          }
+          
+          itemsWithStatus = Object.keys(parsed.items).map((k) => {
+            const rawVal = parsed.items[k];
+            const val = String(rawVal || '').toLowerCase();
+            const status: 'prepared' | 'not_available' | 'pending' = val === 'prepared' || val === 'true' || val === 'yes' ? 'prepared' : (val === 'not available' || val === 'not_available' || val === 'false' || val === 'no' ? 'not_available' : 'pending');
+            
+            // Try to match the JSON key to a display name
+            const lowerKey = k.toLowerCase();
+            const displayName = displayNameMap.get(lowerKey) || mapToken(k) || String(k);
+            
+            return { label: displayName, status };
+          });
+        }
+      }
+    } catch (e) {
+      // JSON parsing failed, keep itemsWithStatus null
+    }
   }
 
   // If we have an others text or detected 'others' markers, show a placeholder in the inline list instead of raw 'Others: ...'
@@ -283,8 +337,13 @@ function parseEquipmentAlert(alert: any) {
     if (m && m[1]) visibleTitle = visibleTitle.replace(/[—–-]\s*[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\s*$/, '').trim();
   } catch (e) {}
 
-  // Clean raw snippet for brief display: remove booking tags, remove raw Needs JSON and stray 'Others:' fragments
-  let cleaned = raw.replace(/\s*\[booking:[^\]]+\]/, '').replace(/Needs:\s*\{[\s\S]*\}\s*/i, '').replace(/,?\s*Others?:\s*[^,\]]+/i, '').trim();
+  // Clean raw snippet for brief display: remove booking tags, equipment JSON tags, and stray fragments
+  let cleaned = raw
+    .replace(/\s*\[booking:[^\]]+\]/g, '')
+    .replace(/\s*\[Equipment:\s*\{[\s\S]*?\}\]/gi, '')
+    .replace(/Needs:\s*\{[\s\S]*\}\s*/i, '')
+    .replace(/,?\s*Others?:\s*[^,\]]+/i, '')
+    .trim();
   // Remove any leftover explicit "items" tokens or malformed fragments like '"items": "items":' that
   // may appear when JSON was embedded/printed multiple times. Also dedupe repeated JSON block copies.
   try {
@@ -377,7 +436,7 @@ function parseEquipmentAlert(alert: any) {
 
 // Helper to aggressively sanitize a message string for display in the bell.
 // Removes embedded JSON blocks, escaped JSON, stray '"items"' tokens, and duplicate lists.
-function sanitizeDisplayText(input: string) {
+function sanitizeDisplayText(input: string, keepEmails: boolean = false) {
   try {
     let s = String(input || '');
     // unescape common sequences
@@ -391,7 +450,10 @@ function sanitizeDisplayText(input: string) {
     }
 
     // remove email addresses - owner-facing messages should not display emails
-    s = s.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,}/g, '').trim();
+    // BUT keep emails for admin/global notifications (like "Booking Created") so admins can see who created bookings
+    if (!keepEmails) {
+      s = s.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,}/g, '').trim();
+    }
 
     // remove explicit "items" tokens and items": occurrences
     s = s.replace(/"items"\s*:\s*/gi, '').replace(/items"\s*:\s*/gi, '').replace(/"items"/gi, '').replace(/items":/gi, '');
@@ -532,7 +594,9 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
       try { return await res.json(); } catch { return []; }
     },
     enabled: isAdmin,
-    staleTime: 30_000,
+    staleTime: 5_000,
+    refetchInterval: 10_000, // Auto-refresh every 10 seconds
+    refetchOnWindowFocus: true, // Refresh when user returns to tab
   });
 
   const { data: userAlerts = [], isLoading: userLoading } = useQuery({
@@ -542,7 +606,9 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
       try { return await res.json(); } catch { return []; }
     },
     enabled: !!user && !isAdmin,
-    staleTime: 30_000,
+    staleTime: 5_000,
+    refetchInterval: 10_000, // Auto-refresh every 10 seconds
+    refetchOnWindowFocus: true, // Refresh when user returns to tab
   });
 
   // For convenience: try to fetch admin alerts for a non-admin user so we can surface any
@@ -560,7 +626,9 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
       }
     },
     enabled: !!user && !isAdmin,
-    staleTime: 30_000,
+    staleTime: 5_000,
+    refetchInterval: 10_000, // Auto-refresh every 10 seconds
+    refetchOnWindowFocus: true, // Refresh when user returns to tab
   });
 
   const markReadEndpoint = (id: string) => isAdmin ? `/api/admin/alerts/${id}/read` : `/api/notifications/${id}/read`;
@@ -782,9 +850,8 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
           </span>
         </div>
         <div className="flex items-center gap-3">
-          {/* Search - visible on md+ screens to keep header compact on mobile */}
-          {/* Constrain the search container so the header cannot overflow horizontally */}
-          <div className="hidden md:block relative max-w-[420px] w-full" ref={searchContainerRef}>
+          {/* Search bar removed */}
+          <div style={{display: 'none'}}>
             {user ? (
               <SearchBar
                 className="w-full"
@@ -972,11 +1039,75 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
                       // Compose a concise lead-in (who / what / when)
                       const when = alert.createdAt ? new Date(alert.createdAt).toLocaleString() : '';
                       const leadIn = (() => {
+                        // For admin users viewing UPDATES (not initial requests), show who updated what
+                        if (isAdmin && titleStr.includes('equipment or needs request')) {
+                          // This is an UPDATED notification (admin updated equipment status)
+                          try {
+                            const msgText = String(alert.message || '');
+                            const updateMatch = msgText.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,})\s+updated\s+([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,})'s\s+equipment\s+request/i);
+                            if (updateMatch && updateMatch[1] && updateMatch[2]) {
+                              const adminEmail = updateMatch[1];
+                              const userEmail = updateMatch[2];
+                              if (parsed.itemsWithStatus && parsed.itemsWithStatus.length > 0) {
+                                const allPrepared = parsed.itemsWithStatus.every((it: any) => it.status === 'prepared');
+                                const allNotAvailable = parsed.itemsWithStatus.every((it: any) => it.status === 'not_available');
+                                if (allPrepared) return `${adminEmail} marked ${userEmail}'s equipment as prepared`;
+                                if (allNotAvailable) return `${adminEmail} marked ${userEmail}'s equipment as not available`;
+                                return `${adminEmail} updated ${userEmail}'s equipment request`;
+                              }
+                              return `${adminEmail} updated ${userEmail}'s equipment request`;
+                            }
+                          } catch (e) {}
+                        }
+                        
+                        // For admin users viewing INITIAL requests, show the full message from backend
+                        if (isAdmin && parsed.cleaned && parsed.cleaned.length > 0) {
+                          // Admin view: show the detailed message with emails
+                          return sanitizeDisplayText(parsed.cleaned, true).slice(0, 200);
+                        }
+                        
+                        // For equipment updates, extract the admin email from the message and show it
+                        // Message format: "admin@email.com updated user@email.com's equipment request: ..."
+                        // Check BOTH alert.message AND parsed.cleaned for the pattern
+                        try {
+                          const msgText = String(alert.message || '');
+                          const cleanedText = String(parsed.cleaned || '');
+                          const combinedText = msgText + ' ' + cleanedText;
+                          
+                          const updateMatch = combinedText.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,})\s+updated\s+(?:([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,})'s\s+)?equipment\s+request/i);
+                          if (updateMatch && updateMatch[1]) {
+                            const adminEmail = updateMatch[1];
+                            if (parsed.itemsWithStatus && parsed.itemsWithStatus.length > 0) {
+                              const allPrepared = parsed.itemsWithStatus.every((it: any) => it.status === 'prepared');
+                              const allNotAvailable = parsed.itemsWithStatus.every((it: any) => it.status === 'not_available');
+                              if (allPrepared) return `${adminEmail} marked your equipment as prepared`;
+                              if (allNotAvailable) return `${adminEmail} marked your equipment as not available`;
+                              return `${adminEmail} updated your equipment request`;
+                            }
+                            return `${adminEmail} updated your equipment request`;
+                          }
+                        } catch (e) {}
+                        
                         // Prefer structured parsed results to avoid raw duplicated fragments.
                         // Use owner-focused phrasing when this alert is for the signed-in user.
-                        const actorLabel = isOwnerAlert ? 'You' : 'An admin';
+                        // Check if this is an INITIAL submission vs an admin UPDATE
+                        const msgLower = String(alert.message || '').toLowerCase();
+                        const isInitialSubmission = msgLower.includes('submitted') && !msgLower.includes('updated');
+                        
+                        const actorLabel = isOwnerAlert ? 'An admin' : 'An admin';
                         try {
-                          if (parsed.itemsWithStatus && parsed.itemsWithStatus.length > 0) {
+                          // For INITIAL submissions (user created booking), show "You submitted..." message
+                          if (isInitialSubmission && isOwnerAlert) {
+                            // Extract facility and time from message
+                            const facilityMatch = String(alert.message || '').match(/equipment request for\s+([^on]+?)\s+on\s+(.+?)\./i);
+                            if (facilityMatch && facilityMatch[1] && facilityMatch[2]) {
+                              return `You submitted an equipment request for ${facilityMatch[1].trim()} on ${facilityMatch[2].trim()}`;
+                            }
+                            return `You submitted an equipment request`;
+                          }
+                          
+                          // For UPDATES (admin marked equipment), show status
+                          if (parsed.itemsWithStatus && parsed.itemsWithStatus.length > 0 && !isInitialSubmission) {
                             const allPrepared = parsed.itemsWithStatus.every((it: any) => it.status === 'prepared');
                             const allNotAvailable = parsed.itemsWithStatus.every((it: any) => it.status === 'not_available');
                             if (allPrepared) return `${actorLabel} marked requested equipment as prepared`;
@@ -986,14 +1117,16 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
                           }
 
                           if (parsed.equipmentList && parsed.equipmentList.length > 0) {
+                            if (isOwnerAlert && isInitialSubmission) return `You requested equipment: ${parsed.equipmentList.join(', ')}`;
                             if (isOwnerAlert) return `Your equipment request: ${parsed.equipmentList.join(', ')}`;
                             return `Equipment requested: ${parsed.equipmentList.join(', ')}`;
                           }
                         } catch (e) {}
 
                         // Fallbacks: prefer a short cleaned message, otherwise sanitized raw message slice
-                        if (parsed.cleaned && parsed.cleaned.length > 0) return sanitizeDisplayText(parsed.cleaned).slice(0, 200);
-                        return sanitizeDisplayText(String(alert.message || alert.details || '')).slice(0, 200);
+                        // For admin users, keep emails in the message so they can see who created bookings
+                        if (parsed.cleaned && parsed.cleaned.length > 0) return sanitizeDisplayText(parsed.cleaned, isAdmin).slice(0, 200);
+                        return sanitizeDisplayText(String(alert.message || alert.details || ''), isAdmin).slice(0, 200);
                       })();
 
                       // Build items display if we have parsed items or can infer them from bookings
@@ -1187,7 +1320,8 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
                       // Only append the createdAt timestamp for equipment-related alerts (where items are shown).
                       const shouldAppendWhen = Boolean((parsed.itemsWithStatus && parsed.itemsWithStatus.length > 0) || (parsed.equipmentList && parsed.equipmentList.length > 0));
                       // final smallMessage to display above the items list
-                      const fallbackShort = sanitizeDisplayText(parsed.cleaned || String(alert.message || alert.details || ''));
+                      // Keep emails in admin notifications
+                      const fallbackShort = sanitizeDisplayText(parsed.cleaned || String(alert.message || alert.details || ''), isAdmin);
                       const smallMessage = `${readPrefix}${leadIn}${shouldAppendWhen && when ? ` at ${when}` : ''}${(!leadIn || leadIn.length === 0) ? ` ${fallbackShort}` : ''}`.trim();
 
                       // Keep timestamps in the notifications dropdown (they are appended inline above).

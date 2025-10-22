@@ -16,6 +16,8 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [domainBlockMsg, setDomainBlockMsg] = useState("");
+  const [showDomainBlockModal, setShowDomainBlockModal] = useState(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -39,6 +41,15 @@ export default function Login() {
   }, [showConfirmModal]);
 
   useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('domain_block') || params.get('error') === 'domain_restricted') {
+        setDomainBlockMsg('Access restricted: Please use your UIC email account (@uic.edu.ph) to sign in.');
+        setShowDomainBlockModal(true);
+        // Clean query string so message isn't persistent on refresh
+        try { window.history.replaceState({}, '', window.location.pathname); } catch (_) {}
+      }
+    } catch (e) {}
     // Redirect authenticated users to the appropriate dashboard.
     if (isAuthenticated && user) {
       try {
@@ -340,7 +351,38 @@ export default function Login() {
         </DialogContent>
       </Dialog>
       
-      
+      {/* Domain Block Modal */}
+      <Dialog open={showDomainBlockModal} onOpenChange={setShowDomainBlockModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold text-center mb-2 text-red-600">Access Restricted</DialogTitle>
+          </DialogHeader>
+
+          <div className="p-4">
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 text-center">
+              <div className="flex items-center justify-center mb-4">
+                <div className="bg-white rounded-full p-4 shadow-sm border border-yellow-100">
+                  <Mail className="h-8 w-8 text-yellow-600" />
+                </div>
+              </div>
+              <h4 className="font-semibold text-lg text-gray-900 mb-2">UIC Email Required</h4>
+              <p className="text-sm text-gray-700 mb-4">{domainBlockMsg}</p>
+              <p className="text-sm text-gray-600">Please sign in using your @uic.edu.ph email account to access ORBIT.</p>
+            </div>
+          </div>
+
+          <div className="flex justify-center pb-4">
+            <Button
+              onClick={() => setShowDomainBlockModal(false)}
+              className="bg-pink-600 hover:bg-pink-700 text-white px-8"
+            >
+              OK, I Understand
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+
     </>
   );
 }

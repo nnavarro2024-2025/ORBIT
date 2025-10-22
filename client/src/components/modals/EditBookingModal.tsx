@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 // select/calendar/popover UI are unused in this read-only edit modal
 import { format } from "date-fns";
-import { Plus, Minus } from "lucide-react";
+import { Plus, Minus, Loader2 } from "lucide-react";
 // cn utility no longer used in this file
 import { useToast } from "@/hooks/use-toast";
 import { CustomTextarea } from "@/components/ui/custom-textarea";
@@ -715,20 +715,27 @@ export default function EditBookingModal({
         )}
 
         <DialogFooter>
-          <div className="w-full flex items-center justify-between gap-4">
-            <div className="flex gap-3 w-1/2">
+          <div className="w-full space-y-3">
+            <div className="flex gap-3">
               <div className="flex-1">
                 <Button variant="outline" onClick={onClose} className="w-full">Cancel</Button>
               </div>
               <div className="flex-1">
                 <Button onClick={() => setShowConfirmDialog(true)} disabled={isSubmitting || !isDurationValid(startTime, endTime)} className="w-full">
-                  {isSubmitting ? "Saving..." : "Save Changes"}
+                  {isSubmitting ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Saving...
+                    </span>
+                  ) : (
+                    "Save Changes"
+                  )}
                 </Button>
               </div>
             </div>
 
-            <div className="w-1/2 text-right text-sm text-gray-500">
-              {(!isDurationValid(startTime, endTime)) ? <span className="text-red-600">⚠️ Bookings must be at least 30 minutes long.</span> : <span>Validation or submission errors will appear below.</span>}
+            <div className="text-center text-sm text-gray-500">
+              {(!isDurationValid(startTime, endTime)) ? <span className="text-red-600">⚠️ Bookings must be at least 30 minutes long.</span> : <span>Any validation or submission errors will appear below.</span>}
             </div>
           </div>
 
@@ -739,8 +746,20 @@ export default function EditBookingModal({
                 <AlertDialogDescription>Are you sure you want to save changes to this booking?</AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={() => { setShowConfirmDialog(false); handleSave(); }}>Confirm</AlertDialogAction>
+                <AlertDialogCancel disabled={isSubmitting}>Cancel</AlertDialogCancel>
+                <AlertDialogAction 
+                  onClick={() => { setShowConfirmDialog(false); handleSave(); }}
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Saving...
+                    </span>
+                  ) : (
+                    "Confirm"
+                  )}
+                </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>

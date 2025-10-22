@@ -7,7 +7,7 @@ import { z } from "zod";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
-import { Calendar as CalendarIcon, Plus, Minus, Send } from "lucide-react"; // Added Plus, Minus, Send icons
+import { Calendar as CalendarIcon, Plus, Minus, Send, X, Loader2 } from "lucide-react"; // Added Plus, Minus, Send, X, Loader2 icons
 import type { Facility } from "../../../../shared/schema";
 import {
   Dialog,
@@ -46,6 +46,7 @@ import {
   AlertDialogCancel,
 } from "@/components/ui/alert-dialog";
 import { Calendar } from "@/components/ui/calendar";
+import { Checkbox } from "@/components/ui/checkbox";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 
@@ -54,12 +55,12 @@ const getFacilityDescriptionByName = (name?: string) => {
   if (!name) return '';
   const lower = name.toLowerCase();
   if (lower.includes('collaborative learning room 1') || lower.includes('collaborative learning room 2') || lower.includes('collaborative learning')) {
-    return 'Collaborative space for group study and small projects (up to 8 people).';
+    return 'Group study space (up to 8 people)';
   }
   if (lower.includes('board room') || lower.includes('boardroom')) {
-    return 'Formal boardroom for meetings and presentations (up to 12 people).';
+    return 'Meeting room (up to 12 people)';
   }
-  return 'Comfortable study space suitable for individual or small group use.';
+  return 'Study space for individual or small groups';
 };
 
 const PREVIEW_LIMIT = 10; // upper bound for small previews inside modals
@@ -180,7 +181,14 @@ export default function BookingModal({
   ];
 
   const allFacilities = facilities.length > 0 ? facilities : predefinedFacilities;
-  const fallbackFacilities = allFacilities.filter(facility => facility.isActive);
+  // Filter out restricted facilities for non-faculty/admin users
+  const visibleFacilities = allFacilities.filter(facility => {
+    const name = String(facility.name || '').toLowerCase();
+    const restricted = /board room|boardroom|lounge/.test(name);
+    const allowedByRole = (user?.role === 'faculty' || user?.role === 'admin');
+    return facility.isActive && !(restricted && !allowedByRole);
+  });
+  const fallbackFacilities = visibleFacilities;
 
   const getFacilityMaxCapacity = (facility?: Facility | { id: number; name: string; isActive: boolean; capacity: number; } | null) => {
     if (!facility) return 8; // Default fallback for unknown facilities
@@ -192,15 +200,17 @@ export default function BookingModal({
   const getFacilityCurrentStatus = (facilityId: number) => {
     const now = new Date();
     
+    // Check for both pending and approved bookings to show accurate facility status
+    const blockingStatuses = ["approved", "pending"];
     const facilityBookings = allBookings.filter((booking: any) => 
       booking.facilityId === facilityId && 
-      booking.status === "approved" &&
+      blockingStatuses.includes(booking.status) &&
       new Date(booking.endTime) > now
     ).sort((a: any, b: any) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
 
     if (facilityBookings.length === 0) return null;
 
-    // Check for currently active booking
+    // Check for currently active booking (only approved bookings can be "active")
     const activeBooking = facilityBookings.find((booking: any) => {
       const start = new Date(booking.startTime);
       const end = new Date(booking.endTime);
@@ -219,9 +229,9 @@ export default function BookingModal({
       };
     }
 
-    // Check for upcoming bookings
+    // Check for upcoming bookings (both pending and approved)
     const upcomingBookings = facilityBookings.filter((booking: any) => 
-      booking.status === "approved" && new Date(booking.startTime) > now
+      blockingStatuses.includes(booking.status) && new Date(booking.startTime) > now
     );
 
     if (upcomingBookings.length > 0) {
@@ -290,7 +300,7 @@ export default function BookingModal({
     { key: 'extension_cord', label: 'Extension Cord' },
     { key: 'hdmi', label: 'HDMI Cable' },
     { key: 'extra_chairs', label: 'Extra Chairs' },
-    { key: 'others', label: 'Others' },
+    // NOTE: 'others' removed from options array - it's handled separately via equipmentOtherText field
   ];
   // equipmentState values: 'prepared' | 'not_available' | false
   type EquipmentStateValue = 'prepared' | 'not_available' | false;
@@ -335,7 +345,7 @@ export default function BookingModal({
         // Also update the form field
         form.setValue('facilityId', facility.id.toString());
       }
-    } else if (isOpen && !selectedFacilityId) {
+      } else if (isOpen && !selectedFacilityId) {
       // Reset selection when modal opens without a specific facility
       setSelectedFacility(null);
       // Only auto-select first facility if no specific facility was requested
@@ -414,7 +424,14 @@ export default function BookingModal({
         throw new Error("Selected facility is currently unavailable for booking. Please choose another facility.");
       }
 
-      const preparedItems = Object.keys(equipmentState).filter(k => equipmentState[k] === 'prepared');
+      const preparedItems = Object.keys(equipmentState).filter(k => k !== 'others' && equipmentState[k] === 'prepared');
+      
+      // DEBUG: Log equipment state
+      console.log('=== BOOKING FORM DEBUG ===');
+      console.log('equipmentState:', equipmentState);
+      console.log('preparedItems:', preparedItems);
+      console.log('equipmentOtherText:', equipmentOtherText);
+      
       const bookingData = {
         ...data,
         facilityId: parseInt(data.facilityId),
@@ -425,13 +442,21 @@ export default function BookingModal({
           others: equipmentOtherText.trim() || null,
         },
       };
+      
+      console.log('Final equipment payload:', bookingData.equipment);
+      console.log('=== END DEBUG ===');
       const response = await apiRequest("POST", "/api/bookings", bookingData);
       return response.json();
     },
-    onSuccess: () => {
+    onSuccess: async () => {
+      // Wait for all cache invalidations to complete before hiding loading state
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["/api/bookings"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/notifications"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/admin/alerts"] }),
+      ]);
       setIsSubmitting(false);
       setLastSubmissionTime(Date.now());
-      queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
       toast({
         title: "Booking Scheduled",
         description: "Your booking has been scheduled successfully.",
@@ -545,7 +570,7 @@ export default function BookingModal({
     try {
       setIsSubmitting(true);
       // Send the same payload with forceCancelConflicts flag so server will cancel user's existing bookings
-      const preparedItems = Object.keys(equipmentState).filter(k => equipmentState[k] === 'prepared');
+      const preparedItems = Object.keys(equipmentState).filter(k => k !== 'others' && equipmentState[k] === 'prepared');
       const payload = {
         ...confirmPendingData,
         facilityId: parseInt(confirmPendingData.facilityId),
@@ -559,8 +584,9 @@ export default function BookingModal({
       };
       const response = await apiRequest('POST', '/api/bookings', payload);
       await response.json();
-  toast({ title: 'Booking Scheduled', description: 'Existing conflicting bookings were cancelled and your booking was scheduled.', variant: 'default' });
-      queryClient.invalidateQueries({ queryKey: ['/api/bookings'] });
+      // Wait for cache to update before hiding loading
+      await queryClient.invalidateQueries({ queryKey: ['/api/bookings'] });
+      toast({ title: 'Booking Scheduled', description: 'Existing conflicting bookings were cancelled and your booking was scheduled.', variant: 'default' });
       form.reset();
       setShowServerConflictDialog(false);
       setServerConflictPayload(null);
@@ -759,16 +785,19 @@ export default function BookingModal({
         // If availability API fails, fall back to the client-side search below
       }
 
-      // Fallback to client-side search (checks approved bookings only) if availability API not usable
+      // Fallback to client-side search (checks pending and approved bookings) if availability API not usable
       let cursor = dayOffset === 0 ? roundUpToNext30(new Date(Math.max(fromDate.getTime(), Date.now()))) : new Date(startWindow);
       if (cursor < startWindow) cursor = new Date(startWindow);
       while (cursor.getTime() + SLOT_MS <= endWindow.getTime()) {
         const slotStart = new Date(cursor);
         const slotEnd = new Date(cursor.getTime() + SLOT_MS);
 
-        // check conflicts against approved bookings for this facility
-        const facilityApproved = (allBookings || []).filter((b: any) => b.facilityId === facilityId && b.status === 'approved');
-        const conflict = facilityApproved.some((b: any) => {
+        // check conflicts against pending AND approved bookings for this facility
+        const blockingStatuses = ['approved', 'pending'];
+        const facilityBookings = (allBookings || []).filter((b: any) => 
+          b.facilityId === facilityId && blockingStatuses.includes(b.status)
+        );
+        const conflict = facilityBookings.some((b: any) => {
           const s = new Date(b.startTime).getTime();
           const e = new Date(b.endTime).getTime();
           return slotStart.getTime() < e && slotEnd.getTime() > s;
@@ -919,87 +948,6 @@ export default function BookingModal({
         </DialogHeader>
 
         <Form {...form}>
-          {/* Quick action: use suggested slot from availability grid */}
-          {(initialStartTime && initialEndTime && showSuggestedSlot) && (
-            <div className="mb-4 p-3 bg-yellow-50 border border-yellow-100 rounded">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-sm font-medium text-yellow-800">Suggested slot from availability</div>
-                  <div className="text-xs text-yellow-700">{format(initialStartTime, 'EEE, MMM d')} • {format(initialStartTime, 'hh:mm a')} - {format(initialEndTime, 'hh:mm a')}</div>
-                </div>
-                <div>
-                  <Button
-                    onClick={async () => {
-                      try {
-                        if (!initialStartTime || !initialEndTime) return;
-
-                        // determine facility id to validate against
-                        const facId = selectedFacilityId ?? (form.getValues('facilityId') ? parseInt(form.getValues('facilityId')) : (fallbackFacilities[0]?.id ?? null));
-
-                        // check library hours
-                        const startOk = isWithinLibraryHours(initialStartTime);
-                        const endOk = isWithinLibraryHours(initialEndTime);
-
-                        if (!startOk || !endOk) {
-                          toast({ title: 'Time Outside Hours', description: `The suggested slot is outside operating hours (${formatLibraryHours()}). Please choose another slot.`, variant: 'destructive' });
-                          return;
-                        }
-
-                        // check for booking conflicts on that facility (treat scheduled/pending/approved as blocking)
-                        const blockingStatuses = new Set(['approved', 'scheduled', 'pending']);
-                        const hasConflict = (allBookings || []).filter((b: any) => b.facilityId === facId && blockingStatuses.has(b.status))
-                          .some((b: any) => initialStartTime < new Date(b.endTime) && initialEndTime > new Date(b.startTime));
-
-                        if (hasConflict) {
-                          toast({ title: 'Slot Unavailable', description: 'The suggested slot overlaps an existing scheduled booking. Please choose an available slot.', variant: 'destructive' });
-                          return;
-                        }
-
-                        // check availability API for other accounts' scheduled slots
-                        const dateStr = initialStartTime.toISOString().slice(0,10);
-                        try {
-                          const availResp = await apiRequest('GET', `/api/availability?date=${dateStr}`);
-                          const availJson = await availResp.json();
-                          const facilityEntry = Array.isArray(availJson?.data) ? (availJson.data.find((d: any) => d.facility && d.facility.id === facId)) : null;
-                          if (facilityEntry) {
-                            const overlappingSlots = (facilityEntry.slots || []).filter((slot: any) => {
-                              try {
-                                if (slot.status === 'available') return false; // available is ok
-                                const slotStart = new Date(slot.start);
-                                const slotEnd = new Date(slot.end);
-                                return initialStartTime < slotEnd && initialEndTime > slotStart;
-                              } catch (e) { return false; }
-                            });
-                            if (overlappingSlots.length > 0) {
-                              toast({ title: 'Slot Unavailable', description: 'The suggested slot overlaps a scheduled slot on the server. Please choose an available slot.', variant: 'destructive' });
-                              return;
-                            }
-                          }
-                        } catch (e) {
-                          // network or parsing error - fall back to local checks
-                        }
-
-                        // ok to use suggested slot
-                        form.setValue('startTime', initialStartTime);
-                        form.setValue('endTime', initialEndTime);
-                        // set facility if preselected
-                        if (selectedFacilityId) {
-                          form.setValue('facilityId', String(selectedFacilityId));
-                          const fac = facilities.find(f => f.id === selectedFacilityId);
-                          if (fac) setSelectedFacility(fac);
-                        }
-                      } catch (e) {
-                        // ignore
-                      }
-                    }}
-                    className="bg-yellow-600 text-white"
-                  >
-                    Use suggested slot
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
           {fallbackFacilities.length === 0 ? (
             <div className="text-center py-8">
               <div className="bg-gray-100 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
@@ -1042,7 +990,7 @@ export default function BookingModal({
                             <SelectItem
                               key={f.id}
                               value={f.id.toString()}
-                              description={getFacilityDescriptionByName(f.name)}
+                              description={(f as any).description || getFacilityDescriptionByName(f.name)}
                               available={!!(f.isActive && !getFacilityCurrentStatus(f.id))}
                             >
                               {f.name}
@@ -1053,57 +1001,6 @@ export default function BookingModal({
                     </FormItem>
                   )}
                 />
-
-                {/* Show current facility status */}
-                {selectedFacility && (() => {
-                  const status = getFacilityCurrentStatus(selectedFacility.id);
-                  if (!status) return null;
-                  
-                  return (
-                    <div className={`p-3 rounded-lg border ${
-                      status.type === 'active' ? 'bg-red-50 border-red-200' : 'bg-yellow-50 border-yellow-200'
-                    }`}>
-                      <div className="flex items-center gap-2">
-                        <div className={`w-2 h-2 rounded-full ${
-                          status.type === 'active' ? 'bg-red-500' : 'bg-yellow-500'
-                        }`}></div>
-                        <div className="flex-1">
-                          <p className={`text-sm font-medium ${
-                            status.type === 'active' ? 'text-red-800' : 'text-yellow-800'
-                          }`}>
-                            {status.message}
-                          </p>
-                          {status.type === 'upcoming' && (status as any).bookings && (
-                            <div className="mt-1 space-y-1">
-                              {(status as any).bookings.slice(0, Math.min(PREVIEW_LIMIT, (status as any).bookings.length)).map((booking: any, index: number) => (
-                                <p key={index} className="text-xs text-yellow-700">
-                                  {new Date(booking.startTime).toLocaleDateString('en-US', {
-                                    weekday: 'short',
-                                    month: 'short', 
-                                    day: 'numeric'
-                                  })} • {new Date(booking.startTime).toLocaleTimeString('en-US', {
-                                    hour: 'numeric',
-                                    minute: '2-digit',
-                                    hour12: true
-                                  })} - {new Date(booking.endTime).toLocaleTimeString('en-US', {
-                                    hour: 'numeric',
-                                    minute: '2-digit',
-                                    hour12: true
-                                  })}
-                                </p>
-                              ))}
-                              {(status as any).bookings.length > PREVIEW_LIMIT && (
-                                <p className="text-xs text-yellow-600">
-                                  +{(status as any).bookings.length - PREVIEW_LIMIT} more booking{(status as any).bookings.length - PREVIEW_LIMIT > 1 ? 's' : ''}
-                                </p>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
 
                 {/* Facility booking limit UI intentionally removed; server-side errors will be shown after submit */}
 
@@ -1147,13 +1044,13 @@ export default function BookingModal({
                   <div className="space-y-3">
                     <label className="flex items-center gap-3">
                       {equipmentState['whiteboard'] === 'not_available' ? (
-                        <div className="h-4 w-4 flex items-center justify-center text-red-600 font-bold">X</div>
+                        <div className="h-4 w-4 flex items-center justify-center rounded-sm border border-red-500 bg-red-50">
+                          <X className="h-3 w-3 text-red-600" />
+                        </div>
                       ) : (
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           checked={equipmentState['whiteboard'] === 'prepared'}
-                          onChange={(e) => setEquipmentState(prev => ({ ...prev, ['whiteboard']: e.target.checked ? 'prepared' : false }))}
-                          className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                          onCheckedChange={(checked) => setEquipmentState(prev => ({ ...prev, ['whiteboard']: checked ? 'prepared' : false }))}
                         />
                       )}
                       <span className="text-sm text-gray-700">Whiteboard &amp; Markers</span>
@@ -1161,13 +1058,13 @@ export default function BookingModal({
 
                     <label className="flex items-center gap-3">
                       {equipmentState['projector'] === 'not_available' ? (
-                        <div className="h-4 w-4 flex items-center justify-center text-red-600 font-bold">X</div>
+                        <div className="h-4 w-4 flex items-center justify-center rounded-sm border border-red-500 bg-red-50">
+                          <X className="h-3 w-3 text-red-600" />
+                        </div>
                       ) : (
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           checked={equipmentState['projector'] === 'prepared'}
-                          onChange={(e) => setEquipmentState(prev => ({ ...prev, ['projector']: e.target.checked ? 'prepared' : false }))}
-                          className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                          onCheckedChange={(checked) => setEquipmentState(prev => ({ ...prev, ['projector']: checked ? 'prepared' : false }))}
                         />
                       )}
                       <span className="text-sm text-gray-700">Projector</span>
@@ -1175,13 +1072,13 @@ export default function BookingModal({
 
                     <label className="flex items-center gap-3">
                       {equipmentState['extension_cord'] === 'not_available' ? (
-                        <div className="h-4 w-4 flex items-center justify-center text-red-600 font-bold">X</div>
+                        <div className="h-4 w-4 flex items-center justify-center rounded-sm border border-red-500 bg-red-50">
+                          <X className="h-3 w-3 text-red-600" />
+                        </div>
                       ) : (
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           checked={equipmentState['extension_cord'] === 'prepared'}
-                          onChange={(e) => setEquipmentState(prev => ({ ...prev, ['extension_cord']: e.target.checked ? 'prepared' : false }))}
-                          className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                          onCheckedChange={(checked) => setEquipmentState(prev => ({ ...prev, ['extension_cord']: checked ? 'prepared' : false }))}
                         />
                       )}
                       <span className="text-sm text-gray-700">Extension Cord</span>
@@ -1192,13 +1089,13 @@ export default function BookingModal({
                   <div className="space-y-3">
                     <label className="flex items-center gap-3">
                       {equipmentState['hdmi'] === 'not_available' ? (
-                        <div className="h-4 w-4 flex items-center justify-center text-red-600 font-bold">X</div>
+                        <div className="h-4 w-4 flex items-center justify-center rounded-sm border border-red-500 bg-red-50">
+                          <X className="h-3 w-3 text-red-600" />
+                        </div>
                       ) : (
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           checked={equipmentState['hdmi'] === 'prepared'}
-                          onChange={(e) => setEquipmentState(prev => ({ ...prev, ['hdmi']: e.target.checked ? 'prepared' : false }))}
-                          className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                          onCheckedChange={(checked) => setEquipmentState(prev => ({ ...prev, ['hdmi']: checked ? 'prepared' : false }))}
                         />
                       )}
                       <span className="text-sm text-gray-700">HDMI Cable</span>
@@ -1206,45 +1103,29 @@ export default function BookingModal({
 
                     <label className="flex items-center gap-3">
                       {equipmentState['extra_chairs'] === 'not_available' ? (
-                        <div className="h-4 w-4 flex items-center justify-center text-red-600 font-bold">X</div>
+                        <div className="h-4 w-4 flex items-center justify-center rounded-sm border border-red-500 bg-red-50">
+                          <X className="h-3 w-3 text-red-600" />
+                        </div>
                       ) : (
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           checked={equipmentState['extra_chairs'] === 'prepared'}
-                          onChange={(e) => setEquipmentState(prev => ({ ...prev, ['extra_chairs']: e.target.checked ? 'prepared' : false }))}
-                          className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                          onCheckedChange={(checked) => setEquipmentState(prev => ({ ...prev, ['extra_chairs']: checked ? 'prepared' : false }))}
                         />
                       )}
                       <span className="text-sm text-gray-700">Extra Chairs</span>
                     </label>
                   </div>
 
-                  {/* Column 3 - Right (Others + textarea always present) */}
+                  {/* Column 3 - Right (Others textarea always present) */}
                   <div className="space-y-2">
-                    <div className="flex items-center gap-3">
-                      {equipmentState['others'] === 'not_available' ? (
-                        <div className="h-4 w-4 flex items-center justify-center text-red-600 font-bold">X</div>
-                      ) : (
-                        <input
-                          type="checkbox"
-                          checked={equipmentState['others'] === 'prepared'}
-                          onChange={(e) => setEquipmentState(prev => ({ ...prev, ['others']: e.target.checked ? 'prepared' : false }))}
-                          className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                        />
-                      )}
-                      <span className="text-sm text-gray-700">Others</span>
-                    </div>
-
                     <div className="mt-2 md:mt-1">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Others</label>
                       <Input
                         value={equipmentOtherText}
                           onChange={(e: any) => {
                           let val = e.target.value;
                           if (val.length > OTHERS_MAX) val = val.slice(0, OTHERS_MAX);
                           setEquipmentOtherText(val);
-
-                          // Auto-toggle the 'others' checkbox based on input content
-                          setEquipmentState(prev => ({ ...prev, ['others']: val.trim().length > 0 ? (prev['others'] === 'not_available' ? 'not_available' : 'prepared') : false }));
 
                           // Best-effort: if the user pasted JSON-like payload (common in notifications),
                           // try to parse and map statuses for known equipment keys. This prevents raw JSON
@@ -1614,19 +1495,22 @@ export default function BookingModal({
             )}
 
             <DialogFooter>
-              <div className="w-full flex items-center justify-between gap-4">
-                <div className="flex gap-3 w-1/2">
+              <div className="w-full flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex gap-3 w-full sm:w-1/2">
                   <div className="flex-1">
                     <Button
                       type="submit"
-                      className="w-full h-10 flex items-center justify-center gap-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg"
+                      className="w-full h-10 flex items-center justify-center gap-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm"
                       disabled={
                         createBookingMutation.isPending ||
                         isSubmitting
                       }
                     >
                       {createBookingMutation.isPending || isSubmitting ? (
-                          "Submitting..."
+                          <span className="flex items-center gap-2">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Submitting...
+                          </span>
                         ) : (
                           <span className="flex items-center">
                             <Send className="h-4 w-4 mr-2 text-white" />
@@ -1640,7 +1524,7 @@ export default function BookingModal({
                     <Button
                       variant="outline"
                       onClick={onClose}
-                      className="w-full h-10 flex items-center justify-center text-gray-900 bg-white border border-gray-300 rounded-lg"
+                      className="w-full h-10 flex items-center justify-center text-gray-900 bg-white border border-gray-300 rounded-lg text-sm"
                     >
                       Cancel
                     </Button>
@@ -1648,8 +1532,8 @@ export default function BookingModal({
                 </div>
 
                 {/* Right-aligned helper: shows default message or an error indicator when issues exist */}
-                <div className="w-1/2 flex justify-end">
-                  <div className="w-full max-w-md text-right text-sm">
+                <div className="w-full sm:w-1/2 flex justify-start sm:justify-end">
+                  <div className="w-full max-w-md text-left sm:text-right text-sm">
                     {(() => {
                       const durationWarning = !isDurationValid(form.watch('startTime'), form.watch('endTime'))
                         ? [{ title: 'Bookings must be at least 30 minutes long', description: 'Please adjust the times before saving.' }]
@@ -1659,17 +1543,17 @@ export default function BookingModal({
 
                       if (warnings.length || serverError) {
                         return (
-                          <div className="inline-flex items-start gap-2 text-right">
+                          <div className="inline-flex items-start gap-2 text-left sm:text-right">
                             <div className="text-red-600 mt-0.5">⚠️</div>
-                            <div className="text-right">
-                              <div className="font-medium text-red-700">Errors detected</div>
+                            <div className="text-left sm:text-right">
+                              <div className="font-medium text-red-700 text-xs sm:text-sm">Errors detected</div>
                               <div className="text-red-600 text-xs">See details below</div>
                             </div>
                           </div>
                         );
                       }
 
-                      return <div className="text-gray-500">Validation or submission errors will appear below this area after you attempt to submit.</div>;
+                      return <div className="text-gray-500 text-xs sm:text-sm break-words">Validation errors will appear below after submission.</div>;
                     })()}
                   </div>
                 </div>
