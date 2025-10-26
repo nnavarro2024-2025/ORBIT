@@ -70,7 +70,7 @@ export const facilities = pgTable("facilities", {
   name: varchar("name").notNull(),
   description: text("description"),
   capacity: integer("capacity").notNull(),
-  imageUrl: varchar("image_url"),
+  image: varchar("image", { length: 255 }), // Path or filename for facility image
   isActive: boolean("is_active").default(true).notNull(),
   unavailableReason: text("unavailable_reason"),
   unavailableDates: jsonb("unavailable_dates").$type<Array<{ startDate: string; endDate: string; reason?: string }>>(),
@@ -85,6 +85,7 @@ export const facilityBookings = pgTable("facility_bookings", {
   startTime: timestamp("start_time").notNull(),
   endTime: timestamp("end_time").notNull(),
   purpose: text("purpose").notNull(),
+  courseYearDept: text("course_year_dept"),
   participants: integer("participants").notNull(),
   equipment: jsonb("equipment"),
   // Arrival confirmation: when an approved booking requires admin confirmation after start
@@ -193,6 +194,7 @@ export const insertFacilityBookingSchema = z.object({
   startTime: z.date(),
   endTime: z.date(),
   purpose: z.string(),
+  courseYearDept: z.string().optional(),
   participants: z.number().positive(),
   equipment: z.any().optional(),
   status: z.enum(["pending", "approved", "denied", "cancelled"]).default("pending"),
@@ -229,6 +231,16 @@ export type TimeExtensionRequest = any;
 export type InsertFacilityBooking = z.infer<typeof insertFacilityBookingSchema>;
 export type FacilityBooking = typeof facilityBookings.$inferSelect;
 export type Facility = typeof facilities.$inferSelect;
+// Add Zod schema for facility insert/update with image
+export const insertFacilitySchema = z.object({
+  name: z.string(),
+  description: z.string().optional(),
+  capacity: z.number().positive(),
+  image: z.string().optional(),
+  isActive: z.boolean().optional(),
+  unavailableReason: z.string().optional(),
+  unavailableDates: z.any().optional(),
+});
 export type ComputerStation = typeof computerStations.$inferSelect;
 export type SystemAlert = typeof systemAlerts.$inferSelect;
 export type ActivityLog = typeof activityLogs.$inferSelect;

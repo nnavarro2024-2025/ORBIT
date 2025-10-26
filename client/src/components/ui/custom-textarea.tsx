@@ -6,14 +6,18 @@ interface CustomTextareaProps {
   placeholder?: string;
   maxLength?: number;
   isInvalid?: boolean;
+  className?: string;
+  rows?: number;
 }
 
 export const CustomTextarea: React.FC<CustomTextareaProps> = ({
   value,
   onChange,
-  placeholder = "Enter text here..."
-  , maxLength
-  , isInvalid = false
+  placeholder = "Enter text here...",
+  maxLength,
+  isInvalid = false,
+  className = "",
+  rows = 4
 }) => {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
@@ -56,7 +60,7 @@ export const CustomTextarea: React.FC<CustomTextareaProps> = ({
         placeholder={placeholder}
         maxLength={maxLength}
         data-testid="purpose-textarea"
-        className={`block w-full min-h-24 p-3 border rounded-md resize-none focus:outline-none ${isInvalid ? 'border-red-500 focus:ring-2 focus:ring-red-200' : 'border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500'}`}
+        className={`block w-full min-h-24 p-3 border rounded-md resize-none focus:outline-none ${isInvalid ? 'border-red-500 focus:ring-2 focus:ring-red-200' : 'border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500'} ${className}`}
         style={{
           width: '100%',
           maxWidth: '100%',
@@ -83,7 +87,7 @@ export const CustomTextarea: React.FC<CustomTextareaProps> = ({
         }}
         wrap="soft"
         cols={35}
-        rows={4}
+        rows={rows}
       />
       {typeof maxLength === 'number' && (
         <div style={{ position: 'absolute', right: 8, bottom: 8, fontSize: 12, color: isInvalid ? '#b91c1c' : '#6b7280' }}>

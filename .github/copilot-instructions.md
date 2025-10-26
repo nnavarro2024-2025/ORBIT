@@ -1,5 +1,53 @@
 ## ORBIT — AI coding assistant instructions
 
+Short: these notes get an AI coding agent productive fast in ORBIT (full-stack TypeScript: Vite + React client, Express-style server).
+
+Key architecture (what to know fast)
+
+- Frontend: `client/` (Vite + React). Auth uses `@supabase/supabase-js`. Look at `client/src/lib/supabase.ts` and `client/src/lib/api.ts` (see `authenticatedFetch`).
+- Backend: `server/` (entry: `server/index.ts`, routes: `server/routes.ts`). Business logic and DB access live in `server/services/` and `server/storage.ts` (IStorage / DatabaseStorage).
+- DB & types: Drizzle ORM tables and Zod validation live in `shared/schema.ts`. Use those types and Zod schemas as the canonical contract.
+
+Essential workflows (commands & scripts)
+
+- Install (root): `npm install` — root `postinstall` runs client install automatically.
+- Dev (both): `npm run dev` (runs `dev:server` + `dev:client`).
+  - Backend only: `npm run dev:server` (runs `tsx server/index.ts`, reads `.env`).
+  - Frontend only: `npm run dev:client` (Vite in `client/`).
+- DB migrations/push: `npm run db:push` (drizzle-kit). Check `drizzle.config.ts` and `migrations/`.
+- Build: `npm run build` (bundles via `build.js` + esbuild). Vercel-specific build details: `vercel.json` and `vite.config.vercel.ts`.
+- Tests/integration: review `scripts/` (e.g. `scripts/system-test.mjs`, `scripts/test-api.mjs`) — run direct Node scripts for system tests.
+
+Project-specific conventions (follow these exactly)
+
+- Centralize data access in `server/storage.ts`. Add new DB accessors there and call them from `server/routes.ts` or `server/services/*`.
+- Use the Zod schemas and exported TypeScript types in `shared/schema.ts` for all API request/response shapes and internal data contracts.
+- Auth flow: Supabase is the authority. The server uses `server/supabaseAdmin.ts` to reconcile roles; keep `/api/auth/sync` consistent with `client/src/hooks/useAuth.tsx`.
+- Frontend API addressing: `client/src/lib/api.ts` (`authenticatedFetch`) toggles between `VITE_API_BASE_URL` and relative `/api` — update it when changing endpoint shapes.
+
+Examples / copyable patterns
+
+- Add an API route: add handler in `server/routes.ts` (or add a serverless file under `api/`), validate payload with a Zod schema from `shared/schema.ts`, then call `await storage.someHelper(...)` (defined in `server/storage.ts`) to persist.
+- Add DB accessor: add method signature to IStorage near other methods in `server/storage.ts`, implement in `DatabaseStorage` using `db` + Drizzle helpers, and reuse types from `shared/schema.ts`.
+
+Warnings & gotchas
+
+- Do not change `authenticatedFetch` 401/403 behavior lightly — it triggers global sign-out and affects UX across the app.
+- There are leftover ORZ session stubs (search "ORZ"). If you modify related schemas, update `shared/schema.ts`, `server/storage.ts`, and route logic accordingly.
+- Development-only schema tweaks may run in `server/index.ts` — do not rely on those in production; prefer drizzle migrations.
+
+Where to look first (fast triage)
+
+- `shared/schema.ts` — canonical data shapes and Zod validators.
+- `server/storage.ts` — central DB access and where to add helpers.
+- `server/routes.ts` — routing, auth middleware, and background tasks.
+- `client/src/lib/api.ts` & `client/src/lib/supabase.ts` — API + auth usage patterns.
+- `scripts/` — integration/system test examples and utility scripts.
+
+If you want an expanded example (full diff) for: schema change, adding an API route, or auth sync flow, say which and I'll produce a patch + quick tests.
+
+## ORBIT — AI coding assistant instructions
+
 These notes help an AI agent (Copilot / assistant) be productive in the ORBIT repository.
 Be concise, reference code locations, and follow the project's conventions.
 

@@ -81,7 +81,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const schoolFacilities = [
         {
           id: 1,
-          name: "Collaraborative Learning Room 1",
+          name: "Collaborative Learning Room 1",
           description: "Perfect for group study sessions and collaborative projects. Equipped with modern technology and comfortable seating.",
           capacity: 8,
           imageUrl: "https://images.unsplash.com/photo-1522202176988-66273c2fd55f?w=400&h=250&fit=crop",
@@ -90,7 +90,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         },
         {
           id: 2,
-          name: "Collaraborative Learning Room 2",
+          name: "Collaborative Learning Room 2",
           description: "Ideal for team meetings and study groups. Features whiteboards and presentation equipment.",
           capacity: 10,
           imageUrl: "https://images.unsplash.com/photo-1497486751825-1233686d5d80?w=400&h=250&fit=crop",

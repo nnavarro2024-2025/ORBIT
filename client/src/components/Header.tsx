@@ -595,8 +595,8 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
     },
     enabled: isAdmin,
     staleTime: 5_000,
-    refetchInterval: 10_000, // Auto-refresh every 10 seconds
-    refetchOnWindowFocus: true, // Refresh when user returns to tab
+  // refetchInterval removed to stop auto-refresh
+  refetchOnWindowFocus: false, // Don't refresh when user returns to tab (only refresh on reload)
   });
 
   const { data: userAlerts = [], isLoading: userLoading } = useQuery({
@@ -607,8 +607,8 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
     },
     enabled: !!user && !isAdmin,
     staleTime: 5_000,
-    refetchInterval: 10_000, // Auto-refresh every 10 seconds
-    refetchOnWindowFocus: true, // Refresh when user returns to tab
+  // refetchInterval removed to stop auto-refresh
+  refetchOnWindowFocus: false, // Don't refresh when user returns to tab (only refresh on reload)
   });
 
   // For convenience: try to fetch admin alerts for a non-admin user so we can surface any
@@ -627,8 +627,8 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
     },
     enabled: !!user && !isAdmin,
     staleTime: 5_000,
-    refetchInterval: 10_000, // Auto-refresh every 10 seconds
-    refetchOnWindowFocus: true, // Refresh when user returns to tab
+  // refetchInterval removed to stop auto-refresh
+  refetchOnWindowFocus: false, // Don't refresh when user returns to tab (only refresh on reload)
   });
 
   const markReadEndpoint = (id: string) => isAdmin ? `/api/admin/alerts/${id}/read` : `/api/notifications/${id}/read`;

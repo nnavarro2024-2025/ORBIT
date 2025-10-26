@@ -5,6 +5,7 @@ import path from "path";
 import { createServer, Server } from "http";
 import { registerRoutes } from "./routes"; // your routes
 import { pool } from "./db";
+import cors from "cors";
 
 async function startServer() {
   // Dynamic imports for CommonJS modules in ES module environment

@@ -64,8 +64,12 @@ export async function authenticatedFetch(url: string, options: RequestInit = {})
       console.error("🚨 403 Forbidden received. User is banned or suspended. Signing out.");
       console.error("403 Response:", response);
       await supabase.auth.signOut();
-      window.location.reload(); // Force reload to trigger useAuth to refetch user data
-      // This will cause the Router to show the BannedUser component
+      // Dispatch silent refresh instead of forcing reload to avoid tab switch issues
+      try {
+        window.dispatchEvent(new Event('orbit:auth:refresh'));
+      } catch (e) {
+        // ignore
+      }
     }
     
     // Try to parse the error message from the server for better debugging

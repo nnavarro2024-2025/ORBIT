@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest } from "@/lib/queryClient";
@@ -7,7 +7,7 @@ import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
 import BookingModal from "@/components/modals/BookingModal";
 import EditBookingModal from "@/components/modals/EditBookingModal";
-import { Plus, Calendar, Home, Eye, AlertTriangle, BarChart3, Settings, Clock, CheckCircle, Loader2, Menu, X } from "lucide-react";
+import { Plus, Calendar, Home, Eye, AlertTriangle, BarChart3, Settings, Clock, CheckCircle, Loader2 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { useLocation } from 'wouter';
@@ -579,6 +579,30 @@ export default function BookingDashboard() {
     },
   });
 
+  // Build unavailableDatesByFacility: { [facilityId]: [YYYY-MM-DD, ...] }
+  const unavailableDatesByFacility: Record<string, string[]> = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    for (const f of facilities) {
+      if (Array.isArray(f.unavailableDates)) {
+        // Flatten all date ranges to individual days (YYYY-MM-DD)
+        const days: string[] = [];
+        for (const range of f.unavailableDates) {
+          if (range && range.startDate && range.endDate) {
+            const start = new Date(range.startDate);
+            const end = new Date(range.endDate);
+            for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+              days.push(d.toISOString().slice(0, 10));
+            }
+          }
+        }
+        map[f.id] = days;
+      } else {
+        map[f.id] = [];
+      }
+    }
+    return map;
+  }, [facilities]);
+
   // Build availabilityMap using server data when available; otherwise generate mock slots
   const availabilityMap = (availabilityDataRaw && availabilityDataRaw.data && availabilityDataRaw.data.length > 0)
     ? new Map<number, any>((availabilityDataRaw.data || []).map((d: any) => [d.facility.id, d]))
@@ -1025,20 +1049,8 @@ export default function BookingDashboard() {
   };
 
   const getFacilityImageByName = (name?: string) => {
-    if (!name) return null;
-    const lower = name.toLowerCase();
-    
-    // For now, we'll use your uploaded facility image for all rooms
-    // You can add more specific images later for different room types
-    if (lower.includes('collaborative learning') || 
-        lower.includes('collaraborative learning') || // Handle the typo in facility names
-        lower.includes('board room') || 
-        lower.includes('boardroom') ||
-        lower.includes('lounge')) {
-      return '/images/facility-overview.jpg';
-    }
-    
-    return null; // Fallback to default placeholder
+    // Fallback to facility-overview.jpg if no image is set
+    return '/images/facility-overview.jpg';
   };
 
   const getBookingStatus = (booking: any): { label: string; badgeClass: string } => {
@@ -1259,45 +1271,85 @@ export default function BookingDashboard() {
                           </div>
 
                           <div className="bg-gray-50 rounded-lg p-3 sm:p-4">
+                            {/* Purpose Box */}
                             <p className="text-xs sm:text-sm font-medium text-gray-600 mb-1">Purpose</p>
-                              {(booking.purpose || '').length > 30 ? (
-                                <TooltipProvider>
-                                  <Tooltip>
-                                    <Popover>
-                                      <TooltipTrigger asChild>
-                                        <PopoverTrigger asChild>
-                                          <div className="flex items-center gap-2 cursor-help">
-                                            <Eye className="h-3 w-3 sm:h-4 sm:w-4 text-pink-600 flex-shrink-0" />
-                                            <p className="text-gray-900 text-xs sm:text-sm">
-                                              <span className="font-medium">View full purpose</span>
-                                            </p>
-                                          </div>
-                                        </PopoverTrigger>
-                                      </TooltipTrigger>
-                                      <TooltipContent side="top" className="max-w-[90vw] sm:max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
-                                        <div className="bg-gray-50 px-3 sm:px-4 py-2 border-b border-gray-200">
-                                          <p className="font-medium text-xs sm:text-sm text-gray-800">Full Purpose</p>
+                            {booking.purpose ? (
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <Popover>
+                                    <TooltipTrigger asChild>
+                                      <PopoverTrigger asChild>
+                                        <div className="flex items-center gap-2 cursor-help">
+                                          <Eye className="h-3 w-3 sm:h-4 sm:w-4 text-pink-600 flex-shrink-0" />
+                                          <p className="text-gray-900 text-xs sm:text-sm">
+                                            <span className="font-medium">View details</span>
+                                          </p>
                                         </div>
-                                        <div className="p-3 max-h-48 overflow-y-auto">
-                                          <p className="text-xs sm:text-sm text-gray-900 leading-5 break-words font-normal">{booking.purpose || 'No purpose specified'}</p>
+                                      </PopoverTrigger>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top" className="max-w-[90vw] sm:max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
+                                      <div className="bg-gray-50 px-3 sm:px-4 py-2 border-b border-gray-200">
+                                        <p className="font-medium text-xs sm:text-sm text-gray-800">Purpose</p>
+                                      </div>
+                                      <div className="p-3 max-h-48 overflow-y-auto">
+                                        <p className="text-xs sm:text-sm text-gray-900 leading-5 break-words font-normal">{booking.purpose}</p>
+                                      </div>
+                                    </TooltipContent>
+                                    <PopoverContent side="top" className="max-w-[90vw] sm:max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50 origin-top-left">
+                                      <div className="bg-gray-50 px-3 sm:px-4 py-2 border-b border-gray-200">
+                                        <p className="font-medium text-xs sm:text-sm text-gray-800">Purpose</p>
+                                      </div>
+                                      <div className="p-3 max-h-48 overflow-y-auto">
+                                        <p className="text-xs sm:text-sm text-gray-900 leading-5 break-words font-normal">{booking.purpose}</p>
+                                      </div>
+                                    </PopoverContent>
+                                  </Popover>
+                                </Tooltip>
+                              </TooltipProvider>
+                            ) : (
+                              <p className="text-gray-900 text-xs sm:text-sm break-words">No purpose specified</p>
+                            )}
+                          </div>
+
+                          {/* Course/Year/Department Box */}
+                          <div className="bg-gray-50 rounded-lg p-3 sm:p-4 mt-2">
+                            <p className="text-xs sm:text-sm font-medium text-gray-600 mb-1">Course/Year/Department</p>
+                            {booking.courseYearDept ? (
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <Popover>
+                                    <TooltipTrigger asChild>
+                                      <PopoverTrigger asChild>
+                                        <div className="flex items-center gap-2 cursor-help">
+                                          <Eye className="h-3 w-3 sm:h-4 sm:w-4 text-pink-600 flex-shrink-0" />
+                                          <p className="text-gray-900 text-xs sm:text-sm">
+                                            <span className="font-medium">View details</span>
+                                          </p>
                                         </div>
-                                      </TooltipContent>
-                                      <PopoverContent side="top" className="max-w-[90vw] sm:max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50 origin-top-left">
-                                        <div className="bg-gray-50 px-3 sm:px-4 py-2 border-b border-gray-200">
-                                          <p className="font-medium text-xs sm:text-sm text-gray-800">Full Purpose</p>
-                                        </div>
-                                        <div className="p-3 max-h-48 overflow-y-auto">
-                                          <p className="text-xs sm:text-sm text-gray-900 leading-5 break-words font-normal">{booking.purpose || 'No purpose specified'}</p>
-                                        </div>
-                                      </PopoverContent>
-                                    </Popover>
-                                  </Tooltip>
-                                </TooltipProvider>
-                              ) : (
-                                <p className="text-gray-900 text-xs sm:text-sm break-words">
-                                  {booking.purpose || 'No purpose specified'}
-                                </p>
-                              )}
+                                      </PopoverTrigger>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top" className="max-w-[90vw] sm:max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
+                                      <div className="bg-gray-50 px-3 sm:px-4 py-2 border-b border-gray-200">
+                                        <p className="font-medium text-xs sm:text-sm text-gray-800">Course/Year/Department</p>
+                                      </div>
+                                      <div className="p-3 max-h-48 overflow-y-auto">
+                                        <p className="text-xs sm:text-sm text-gray-900 leading-5 break-words font-normal">{booking.courseYearDept}</p>
+                                      </div>
+                                    </TooltipContent>
+                                    <PopoverContent side="top" className="max-w-[90vw] sm:max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50 origin-top-left">
+                                      <div className="bg-gray-50 px-3 sm:px-4 py-2 border-b border-gray-200">
+                                        <p className="font-medium text-xs sm:text-sm text-gray-800">Course/Year/Department</p>
+                                      </div>
+                                      <div className="p-3 max-h-48 overflow-y-auto">
+                                        <p className="text-xs sm:text-sm text-gray-900 leading-5 break-words font-normal">{booking.courseYearDept}</p>
+                                      </div>
+                                    </PopoverContent>
+                                  </Popover>
+                                </Tooltip>
+                              </TooltipProvider>
+                            ) : (
+                              <p className="text-gray-900 text-xs sm:text-sm break-words">No course/year/department specified</p>
+                            )}
                           </div>
 
                           <div className="bg-gray-50 rounded-lg p-3 sm:p-4">
@@ -1892,13 +1944,7 @@ export default function BookingDashboard() {
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    onClick={() => openBookingModal()}
-                    className="bg-pink-600 hover:bg-pink-700 text-white px-4 sm:px-6 py-2 sm:py-3 rounded-lg font-medium transition-colors duration-200 flex items-center gap-2 shadow-sm text-sm sm:text-base"
-                  >
-                    <Plus className="h-4 w-4 sm:h-5 sm:w-5" />
-                    Book Room
-                  </button>
+                  {/* Book Room button removed as requested */}
                   {/* Dev-only: temporary toggle to force library open for debugging availability UI */}
                   {process.env.NODE_ENV !== 'production' && (
                     <div className="flex items-center gap-2">
@@ -1946,29 +1992,42 @@ export default function BookingDashboard() {
                                   End/cancel actions remain available in the booking details area and confirm dialogs. */}
                             </div>
                           ) : null}
-                        {(facility.imageUrl || getFacilityImageByName(facility.name)) ? (
+                        {facility.image ? (
                           <img
-                            src={facility.imageUrl || getFacilityImageByName(facility.name)}
+                            src={`/images/${facility.image}`}
                             alt={facility.name}
                             className={`w-full h-full object-cover transition-transform duration-300 ${
                               isAvailableForBooking ? 'group-hover:scale-105' : 'grayscale'
                             }`}
                             onError={(e) => {
-                              // Fallback to placeholder if image fails to load
-                              e.currentTarget.style.display = 'none';
-                              e.currentTarget.nextElementSibling?.classList?.remove('hidden');
+                              // Fallback to imageUrl or default if image fails
+                              if (facility.imageUrl) {
+                                e.currentTarget.src = facility.imageUrl;
+                              } else {
+                                e.currentTarget.src = getFacilityImageByName(facility.name);
+                              }
                             }}
                           />
-                        ) : null}
-                        {!(facility.imageUrl || getFacilityImageByName(facility.name)) && (
-                          <div className="text-center">
-                            <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mx-auto mb-2 shadow-sm">
-                              <Calendar className={`h-8 w-8 ${isAvailableForBooking ? 'text-gray-400' : 'text-gray-300'}`} />
-                            </div>
-                            <p className={`text-sm ${isAvailableForBooking ? 'text-gray-500' : 'text-gray-400'}`}>
-                              No image available
-                            </p>
-                          </div>
+                        ) : facility.imageUrl ? (
+                          <img
+                            src={facility.imageUrl}
+                            alt={facility.name}
+                            className={`w-full h-full object-cover transition-transform duration-300 ${
+                              isAvailableForBooking ? 'group-hover:scale-105' : 'grayscale'
+                            }`}
+                            onError={(e) => {
+                              e.currentTarget.src = getFacilityImageByName(facility.name);
+                            }}
+                          />
+                        ) : (
+                          <img
+                            src={getFacilityImageByName(facility.name)}
+                            alt={facility.name}
+                            className={`w-full h-full object-cover transition-transform duration-300 ${
+                              isAvailableForBooking ? 'group-hover:scale-105' : 'grayscale'
+                            }`}
+                          />
+                        
                         )}
                       </div>
 
@@ -2019,7 +2078,7 @@ export default function BookingDashboard() {
                                   <div className="text-sm font-semibold text-gray-900">{format(new Date(nextAvailable.start), 'EEE, MMM d')} • {format(new Date(nextAvailable.start), 'hh:mm a')} - {format(new Date(nextAvailable.end), 'hh:mm a')}</div>
                                 </div>
                                 <div>
-                                  <button onClick={(e) => { e.stopPropagation(); const start = new Date(nextAvailable.start); const end = new Date(nextAvailable.end); const restricted = isRestrictedFacility(facility); const userRole = user?.role || 'student'; const allowed = userRole === 'faculty' || userRole === 'admin'; if (restricted && !allowed) { toast({ title: 'Access Restricted', description: 'Only faculty members may book this facility. Contact an administrator for access.', variant: 'destructive' }); return; } setSelectedFacilityForBooking(facility.id); setInitialStartForBooking(start); setInitialEndForBooking(end); setInitialTimesAreSuggested(true); openBookingModal(facility.id, start, end); }} className="bg-pink-600 text-white px-3 py-1 rounded-lg text-sm">Book Now</button>
+                                  <button onClick={(e) => { e.stopPropagation(); const start = new Date(nextAvailable.start); const end = new Date(start.getTime() + 30 * 60000); const restricted = isRestrictedFacility(facility); const userRole = user?.role || 'student'; const allowed = userRole === 'faculty' || userRole === 'admin'; if (restricted && !allowed) { toast({ title: 'Access Restricted', description: 'Only faculty members may book this facility. Contact an administrator for access.', variant: 'destructive' }); return; } setSelectedFacilityForBooking(facility.id); setInitialStartForBooking(start); setInitialEndForBooking(end); setInitialTimesAreSuggested(true); openBookingModal(facility.id, start, end); }} className="bg-pink-600 text-white px-3 py-1 rounded-lg text-sm">Book Now</button>
                                 </div>
                               </div>
                             );
@@ -2194,14 +2253,17 @@ export default function BookingDashboard() {
               })()}
 
               {/* Availability grid (per-date slot view) */}
-              <AvailabilityGrid onSelectRange={(fid: number, s: string, e: string) => {
-                const start = new Date(s);
-                const end = new Date(e);
-                setSelectedFacilityForBooking(fid);
-                setInitialStartForBooking(start);
-                setInitialEndForBooking(end);
-                openBookingModal(fid, start, end);
-              }} />
+              <AvailabilityGrid
+                onSelectRange={(fid: number, s: string, e: string) => {
+                  const start = new Date(s);
+                  const end = new Date(e);
+                  setSelectedFacilityForBooking(fid);
+                  setInitialStartForBooking(start);
+                  setInitialEndForBooking(end);
+                  openBookingModal(fid, start, end);
+                }}
+                unavailableDatesByFacility={unavailableDatesByFacility}
+              />
             </div>
         );
 
@@ -2326,13 +2388,7 @@ export default function BookingDashboard() {
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    onClick={() => openBookingModal()}
-                    className="bg-pink-600 hover:bg-pink-700 text-white px-4 sm:px-6 py-2 sm:py-3 rounded-lg font-medium transition-colors duration-200 flex items-center gap-2 shadow-sm text-sm sm:text-base"
-                  >
-                    <Plus className="h-4 w-4 sm:h-5 sm:w-5" />
-                    Book Room
-                  </button>
+                  {/* Book Room button removed as requested */}
                   {process.env.NODE_ENV !== 'production' && (
                     <div className="flex items-center gap-2">
                       <label className="text-xs text-gray-600">Dev: Force Open</label>
@@ -2375,9 +2431,9 @@ export default function BookingDashboard() {
                                   End/cancel actions remain available in the booking details area and confirm dialogs. */}
                             </div>
                           ) : null}
-                        {(facility.imageUrl || getFacilityImageByName(facility.name)) ? (
+                        {(facility.image || facility.imageUrl || getFacilityImageByName(facility.name)) ? (
                           <img
-                            src={facility.imageUrl || getFacilityImageByName(facility.name)}
+                            src={facility.image ? `/images/${facility.image}` : (facility.imageUrl || getFacilityImageByName(facility.name))}
                             alt={facility.name}
                             className={`w-full h-full object-cover transition-transform duration-300 ${
                               isAvailableForBooking ? 'group-hover:scale-105' : 'grayscale'
@@ -2388,7 +2444,7 @@ export default function BookingDashboard() {
                             }}
                           />
                         ) : null}
-                        {!(facility.imageUrl || getFacilityImageByName(facility.name)) && (
+                        {!(facility.image || facility.imageUrl || getFacilityImageByName(facility.name)) && (
                           <div className="text-center">
                             <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mx-auto mb-2 shadow-sm">
                               <Calendar className={`h-8 w-8 ${isAvailableForBooking ? 'text-gray-400' : 'text-gray-300'}`} />
@@ -2443,7 +2499,7 @@ export default function BookingDashboard() {
                                   <div className="text-sm font-semibold text-gray-900">{format(new Date(nextAvailable.start), 'EEE, MMM d')} • {format(new Date(nextAvailable.start), 'hh:mm a')} - {format(new Date(nextAvailable.end), 'hh:mm a')}</div>
                                 </div>
                                 <div>
-                                  <button onClick={(e) => { e.stopPropagation(); const start = new Date(nextAvailable.start); const end = new Date(nextAvailable.end); setSelectedFacilityForBooking(facility.id); setInitialStartForBooking(start); setInitialEndForBooking(end); setInitialTimesAreSuggested(true); openBookingModal(facility.id, start, end); }} className="bg-pink-600 text-white px-3 py-1 rounded-lg text-sm">Book Now</button>
+                                  <button onClick={(e) => { e.stopPropagation(); const start = new Date(nextAvailable.start); const end = new Date(start.getTime() + 30 * 60000); setSelectedFacilityForBooking(facility.id); setInitialStartForBooking(start); setInitialEndForBooking(end); setInitialTimesAreSuggested(true); openBookingModal(facility.id, start, end); }} className="bg-pink-600 text-white px-3 py-1 rounded-lg text-sm">Book Now</button>
                                 </div>
                               </div>
                             );
@@ -2617,14 +2673,17 @@ export default function BookingDashboard() {
               })()}
 
               {/* Availability grid (per-date slot view) */}
-              <AvailabilityGrid onSelectRange={(fid: number, s: string, e: string) => {
-                const start = new Date(s);
-                const end = new Date(e);
-                setSelectedFacilityForBooking(fid);
-                setInitialStartForBooking(start);
-                setInitialEndForBooking(end);
-                openBookingModal(fid, start, end);
-              }} />
+              <AvailabilityGrid
+                onSelectRange={(fid: number, s: string, e: string) => {
+                  const start = new Date(s);
+                  const end = new Date(e);
+                  setSelectedFacilityForBooking(fid);
+                  setInitialStartForBooking(start);
+                  setInitialEndForBooking(end);
+                  openBookingModal(fid, start, end);
+                }}
+                unavailableDatesByFacility={unavailableDatesByFacility}
+              />
             </div>
 
             {/* Recent Booking */}
@@ -3011,6 +3070,9 @@ export default function BookingDashboard() {
                     minute: '2-digit',
                     hour12: true
                   })}</p>
+                  {bookingToCancel.courseYearDept && (
+                    <p><span className="font-medium">Course & Year/Department:</span> {bookingToCancel.courseYearDept}</p>
+                  )}
                 </div>
               </div>
               {/* Purpose */}

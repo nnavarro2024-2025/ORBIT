@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useAuth } from '@/hooks/useAuth';
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { format } from 'date-fns';
@@ -27,10 +28,15 @@ const formatFacilityName = (name: string) => {
   return name;
 };
 
-export default function AvailabilityGrid({ date, onSelectRange }: { date?: Date; onSelectRange?: (facilityId: number, startIso: string, endIso: string) => void }) {
-  const now = new Date();
-  // selectedDate is writable so users can toggle between today / next day
-  const [selectedDate, setSelectedDate] = useState<Date>(() => {
+export default function AvailabilityGrid({ date, onSelectRange, unavailableDatesByFacility }: { date?: Date; onSelectRange?: (facilityId: number, startIso: string, endIso: string) => void, unavailableDatesByFacility?: Record<string, string[]> }) {
+  // --- Always call hooks at the top level ---
+  const { user } = useAuth();
+  const [selectedRoomId, setSelectedRoomId] = useState<number|null>(null);
+  const [showAvailable, setShowAvailable] = useState(true);
+  const [showUnavailable, setShowUnavailable] = useState(true);
+  const [showScheduled, setShowScheduled] = useState(true);
+  // selectedDate is writable so users can toggle between days/months
+  const [selectedDate, _setSelectedDate] = useState<Date>(() => {
     if (date) return date;
     const now = new Date();
     // If current time is 7:00 PM (19:00) or later, default to the next day
@@ -47,28 +53,12 @@ export default function AvailabilityGrid({ date, onSelectRange }: { date?: Date;
     t.setHours(0, 0, 0, 0);
     return t;
   });
-  const dateStr = useMemo(() => format(selectedDate, 'yyyy-MM-dd'), [selectedDate]);
-  const isShiftedToNextDay = useMemo(() => {
-    if (date) return false;
-    const now = new Date();
-    const minutes = now.getHours() * 60 + now.getMinutes();
-    return minutes >= 19 * 60;
-  }, [date]);
-
-  // Helper to create a midnight-local Date for today or next day
-  const dateForMode = (mode: 'today' | 'next') => {
-    const now = new Date();
-    const t = new Date(now);
-    if (mode === 'next') {
-      t.setDate(t.getDate() + 1);
-    }
-    t.setHours(0, 0, 0, 0);
-    return t;
+  // When date changes, reset selectedRoomId to force user to reselect and avoid white screen
+  const setSelectedDate = (d: Date) => {
+    _setSelectedDate(d);
+    setSelectedRoomId(null);
   };
-
-  // Track which facility's full list is open. Keep hooks at the top-level
-  // so they are always called in the same order across renders.
-  const [openMap, setOpenMap] = useState<Record<number, boolean>>({});
+  const dateStr = useMemo(() => format(selectedDate, 'yyyy-MM-dd'), [selectedDate]);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['/api/availability', dateStr],
@@ -93,262 +83,313 @@ export default function AvailabilityGrid({ date, onSelectRange }: { date?: Date;
   const facilities: FacilityAvailability[] = (data && data.data) || [];
 
 
-  // Helper: merge contiguous slots with same status into readable ranges
-    const mergeSlotsToRanges = (slots: SlotItem[]) => {
-    const ranges: Array<{ start: string; end: string; status: string; bookings?: any[] }> = [];
-    if (!slots || slots.length === 0) return ranges;
-    // Treat past slots as 'unavailable' for the purpose of merging, 
-    // but preserve 'scheduled' status if there are active/future bookings
-    const now = new Date();
-    const normalized = slots.map(s => {
-      try {
-        const slotEnd = new Date(s.end).getTime();
-        // Only mark as unavailable if the slot has ended AND it doesn't have scheduled bookings
-        if (slotEnd <= now.getTime() && s.status !== 'scheduled') {
-          return { ...s, status: 'unavailable' };
-        }
-        return s;
-      } catch (e) { return s; }
-    });
-    let cur = { start: normalized[0].start, end: normalized[0].end, status: normalized[0].status, bookings: normalized[0].bookings || [] };
-    for (let i = 1; i < slots.length; i++) {
-      const s = normalized[i];
-      if (s.status === cur.status) {
-        // extend
-        cur.end = s.end;
-        if (s.bookings && s.bookings.length > 0) cur.bookings = (cur.bookings || []).concat(s.bookings);
-      } else {
-        ranges.push(cur);
-        cur = { start: s.start, end: s.end, status: s.status, bookings: s.bookings || [] };
-      }
-    }
-    ranges.push(cur);
-    // Convert any ranges that end in the past to 'unavailable' so they don't show as 'Scheduled'
-      // reuse existing now variable from outer scope if available
-      // const now = (typeof window !== 'undefined') ? new Date() : new Date();
-    for (const r of ranges) {
-      try {
-        if (new Date(r.end).getTime() <= now.getTime()) {
-          r.status = 'unavailable';
-        }
-      } catch (e) {
-        // ignore parsing errors
-      }
-    }
-    // Deduplicate bookings inside each merged range. Sometimes the same booking
-    // appears in multiple contiguous 30-min slots and gets concatenated; remove
-    // duplicates by booking id or by a start/end/status signature.
-    // Also filter out active bookings from 'unavailable' ranges - they should only appear in 'scheduled' ranges.
-    for (const r of ranges) {
-      try {
-        if (!r.bookings || !Array.isArray(r.bookings) || r.bookings.length === 0) continue;
-        const seen = new Set();
-        const dedup: any[] = [];
-        for (const b of r.bookings) {
-          if (!b) continue;
-          const key = b.id ? String(b.id) : `${b.startTime || b.start}-${b.endTime || b.end}-${b.status || ''}`;
-          if (!seen.has(key)) {
-            // Don't show approved/pending bookings in unavailable ranges - they belong in scheduled ranges only
-            const bookingStatus = String(b.status || '').toLowerCase();
-            if (r.status === 'unavailable' && (bookingStatus === 'approved' || bookingStatus === 'pending')) {
-              continue;
-            }
-            seen.add(key);
-            dedup.push(b);
-          }
-        }
-        r.bookings = dedup;
-      } catch (e) {
-        // ignore dedupe errors
-      }
-    }
-    // If a merged 'scheduled' range contains explicit bookings, snap the
-    // displayed range to the min start / max end across those bookings so the
-    // human-facing 'Scheduled' time doesn't extend beyond the actual bookings.
-    for (const r of ranges) {
-      try {
-        if (r.status !== 'scheduled') continue;
-        if (!r.bookings || !Array.isArray(r.bookings) || r.bookings.length === 0) continue;
-        let minStart: number | null = null;
-        let maxEnd: number | null = null;
-        for (const b of r.bookings) {
-          try {
-            const s = new Date(b.startTime || b.start).getTime();
-            const e = new Date(b.endTime || b.end).getTime();
-            if (isNaN(s) || isNaN(e)) continue;
-            if (minStart === null || s < minStart) minStart = s;
-            if (maxEnd === null || e > maxEnd) maxEnd = e;
-          } catch (ex) {
-            // ignore
-          }
-        }
-        if (minStart !== null && maxEnd !== null) {
-          r.start = new Date(minStart).toISOString();
-          r.end = new Date(maxEnd).toISOString();
-        }
-      } catch (e) {
-        // ignore
-      }
-    }
-    return ranges;
+  // --- Calendar grid setup ---
+  // Weekdays: Mon-Sat, hours: 7:30-19:00 (Mon–Fri), 7:30-12:00 (Sat), hourly slots
+  const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  // 7:30, 8:30, ..., 18:30 (Mon–Fri), 7:30–11:30 (Sat)
+  const hours = Array.from({ length: 12 }, (_, i) => 7.5 + i); // 7:30 to 18:30
+  const satHours = Array.from({ length: 5 }, (_, i) => 7.5 + i); // 7:30 to 11:30
+  const today = new Date();
+  const weekStart = new Date(selectedDate);
+  weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7)); // Monday
+  // Helper: get date for each weekday in this week
+  const getDateForDay = (d: number) => {
+    const date = new Date(weekStart);
+    date.setDate(weekStart.getDate() + d);
+    return date;
   };
 
-  return (
-    <div className="mt-6 space-y-4">
-  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-    <div className="text-xs sm:text-sm text-gray-600 break-words">Showing availability for <strong>{dateStr}</strong>{isShiftedToNextDay ? ' (next day)' : ''}</div>
-    {!date && (
-      <div className="flex items-center gap-2">
-        <button
-          onClick={() => setSelectedDate(dateForMode('today'))}
-          className={`px-2 sm:px-3 py-1 rounded text-xs sm:text-sm whitespace-nowrap ${format(selectedDate, 'yyyy-MM-dd') === format(dateForMode('today'), 'yyyy-MM-dd') ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700'}`}>
-          Today
-        </button>
-        <button
-          onClick={() => setSelectedDate(dateForMode('next'))}
-          className={`px-2 sm:px-3 py-1 rounded text-xs sm:text-sm whitespace-nowrap ${format(selectedDate, 'yyyy-MM-dd') === format(dateForMode('next'), 'yyyy-MM-dd') ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700'}`}>
-          Next day
-        </button>
+  // Helper: find slot for a facility, day, and hour (hourly slot)
+  function findSlot(facility: FacilityAvailability, date: Date, hour: number) {
+    // Find slot that matches this date and hour (hourly slot, start at :30)
+    const slot = (facility.slots || []).find(s => {
+      const slotStart = new Date(s.start);
+      return slotStart.getFullYear() === date.getFullYear() &&
+        slotStart.getMonth() === date.getMonth() &&
+        slotStart.getDate() === date.getDate() &&
+        slotStart.getHours() + slotStart.getMinutes() / 60 === hour;
+    });
+    return slot;
+  }
+
+  // --- Room list for sidebar (per role) ---
+  // Define which roles can see which rooms
+  const roomRoleMap: Record<string, Array<'student' | 'faculty' | 'admin'>> = {
+    'Collaborative Learning 1': ['student', 'faculty', 'admin'],
+    'Collaborative Learning 2': ['student', 'faculty', 'admin'],
+    'Board Room': ['faculty', 'admin'],
+    'Facility Lounge': ['faculty', 'admin'],
+  };
+  const roomList = [
+    { name: 'Collaborative Learning 1', match: /collaborative learning room 1/i },
+    { name: 'Collaborative Learning 2', match: /collaborative learning room 2/i },
+    { name: 'Board Room', match: /board room/i },
+    { name: 'Facility Lounge', match: /lounge|facility lounge/i },
+  ];
+  // Map roomList to facility ids
+  const roomMap = facilities.reduce((acc, f) => {
+    const found = roomList.find(r => r.match.test(f.facility.name));
+    if (found) acc[found.name] = f.facility.id;
+    return acc;
+  }, {} as Record<string, number>);
+  // Filter rooms by user role
+  const userRole = user?.role || 'student';
+  const filteredRoomList = roomList.filter(room => (roomRoleMap[room.name] || []).includes(userRole));
+
+  // --- Sidebar mini calendar (interactive) ---
+  const renderMiniCalendar = () => {
+    const month = selectedDate.getMonth();
+    const year = selectedDate.getFullYear();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const startDay = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1;
+    const days = [];
+    for (let i = 0; i < startDay; i++) days.push(null);
+    for (let d = 1; d <= lastDay.getDate(); d++) days.push(d);
+    while (days.length % 7 !== 0) days.push(null);
+
+    // Handlers for prev/next month
+    const handlePrevMonth = () => {
+  const prev = new Date(selectedDate.getFullYear(), selectedDate.getMonth() - 1, 1);
+  setSelectedDate(prev);
+    };
+    const handleNextMonth = () => {
+  const next = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 1);
+  setSelectedDate(next);
+    };
+
+    // Handler for selecting a day
+    const handleSelectDay = (d: number | null) => {
+  if (!d) return;
+  // Always set time to midnight and create a new Date instance for React state
+  const newDate = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), d, 0, 0, 0, 0);
+  setSelectedDate(newDate);
+    };
+
+    return (
+      <div className="bg-white rounded-lg p-2 md:p-3 shadow-sm mb-4 w-full max-w-xs mx-auto md:mx-0">
+        <div className="flex items-center justify-between mb-2">
+          <button onClick={handlePrevMonth} className="px-2 py-1 text-gray-500 hover:text-blue-600" aria-label="Previous month">&#8592;</button>
+          <span className="font-semibold text-sm">{format(selectedDate, 'MMMM yyyy')}</span>
+          <button onClick={handleNextMonth} className="px-2 py-1 text-gray-500 hover:text-blue-600" aria-label="Next month">&#8594;</button>
+        </div>
+        <div className="grid grid-cols-7 gap-1 text-xs text-center text-gray-500 mb-1">
+          {["M", "T", "W", "T", "F", "S", "S"].map((d, i) => <div key={d + i}>{d}</div>)}
+        </div>
+        <div className="grid grid-cols-7 gap-1">
+          {days.map((d, i) => {
+            const isSelected = d === selectedDate.getDate() && month === selectedDate.getMonth() && year === selectedDate.getFullYear();
+            const isToday = d === today.getDate() && month === today.getMonth() && year === today.getFullYear();
+            return (
+              <button
+                key={i}
+                className={`w-6 h-6 md:w-6 md:h-6 flex items-center justify-center rounded-full transition-all duration-75
+                  ${isSelected ? 'bg-blue-600 text-white' : 'hover:bg-gray-200'}
+                  ${isToday && !isSelected ? 'border-2 border-blue-600 bg-blue-100 text-blue-900 font-bold shadow-lg' : ''}
+                  ${isToday && isSelected ? 'ring-4 ring-blue-300 border-2 border-blue-700 bg-blue-700 text-white font-bold shadow-lg' : ''}
+                `}
+                style={{ outline: isSelected ? '2px solid #2563eb' : undefined }}
+                onClick={() => handleSelectDay(d)}
+                tabIndex={d ? 0 : -1}
+                disabled={!d}
+              >
+                {d || ''}
+              </button>
+            );
+          })}
+        </div>
       </div>
-    )}
-  </div>
-      {facilities.map((f) => {
-        const open = !!openMap[f.facility.id];
-        const ranges = mergeSlotsToRanges(f.slots);
+    );
+  };
 
-        return (
-          <div key={f.facility.id} className="bg-white border rounded-lg p-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
-              <div className="min-w-0 flex-1">
-                <div className="font-medium text-sm sm:text-base truncate">{formatFacilityName(f.facility.name)}</div>
-                <div className="text-xs text-gray-500">Capacity: {f.facility.capacity} {f.maxUsageHours ? `• Max ${f.maxUsageHours}h` : ''}</div>
-              </div>
-              <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
-                <div className="text-xs text-gray-500 whitespace-nowrap">Slots: {f.slots.length}</div>
-                <button onClick={() => setOpenMap(prev => ({ ...prev, [f.facility.id]: !prev[f.facility.id] }))} className="px-2 py-1 rounded text-xs sm:text-sm bg-gray-100 whitespace-nowrap">{open ? 'Hide list' : 'Show full list'}</button>
-              </div>
+  // --- Sidebar legend ---
+  const renderLegend = () => (
+    <div className="mt-6 space-y-2">
+      <div className="flex items-center gap-2">
+        <input type="checkbox" checked={showUnavailable} onChange={e => setShowUnavailable(e.target.checked)} className="accent-red-500" />
+        <span className="w-3 h-3 rounded bg-red-500 inline-block"></span>
+        <span className="text-xs">Unavailable</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <input type="checkbox" checked={showScheduled} onChange={e => setShowScheduled(e.target.checked)} className="accent-yellow-400" />
+        <span className="w-3 h-3 rounded bg-yellow-400 inline-block"></span>
+        <span className="text-xs">Scheduled</span>
+      </div>
+    </div>
+  );
+
+  // --- Main calendar grid, only for selected room ---
+  const renderGrid = () => {
+  const facility = facilities.find(f => f.facility.id === selectedRoomId);
+  // Get unavailable dates for this facility (YYYY-MM-DD)
+  const unavailableDates: string[] = unavailableDatesByFacility && facility ? (unavailableDatesByFacility[facility.facility.id] || []) : [];
+    if (!facility) return (
+      <div className="flex-1 flex items-center justify-center text-gray-400 text-base md:text-lg h-[200px] md:h-full min-h-[200px] md:min-h-[400px]">Select a room to view its schedule</div>
+    );
+    // If all school hours for the week are in the past, show only a single centered 'Unavailable' text
+    const now = new Date();
+    let allSchoolHoursPast = true;
+    for (let dayIdx = 0; dayIdx < 6; dayIdx++) { // Mon-Sat
+      const date = getDateForDay(dayIdx);
+      const isSat = dayIdx === 5;
+      const dayHours = isSat ? satHours : hours;
+      for (let h of dayHours) {
+        const slotTime = new Date(date);
+        slotTime.setHours(Math.floor(h), (h % 1) * 60, 0, 0);
+        const slotEnd = new Date(slotTime.getTime() + 60 * 60000);
+        if (slotEnd > now) {
+          allSchoolHoursPast = false;
+          break;
+        }
+      }
+      if (!allSchoolHoursPast) break;
+    }
+    if (allSchoolHoursPast) {
+      return (
+        <div className="flex-1 w-full overflow-x-auto flex items-center justify-center min-h-[400px]">
+          <span className="text-2xl text-gray-500 font-semibold">Unavailable</span>
+        </div>
+      );
+    }
+    // Otherwise, show the normal grid
+    return (
+      <div className="flex-1 w-full overflow-x-auto">
+        <div className="mb-4 md:mb-8">
+          <div className="font-semibold text-base md:text-base mb-2 text-center md:text-left">{formatFacilityName(facility.facility.name)}</div>
+          <div className="bg-white rounded-lg shadow-sm p-0">
+            {/* Header: days of week */}
+            <div className="grid grid-cols-6 border-b border-gray-200 text-xs md:text-xs" style={{ minWidth: 600 }}>
+              {weekDays.map((d, i) => {
+                const date = getDateForDay(i);
+                return (
+                  <div key={d} className="py-2 px-1 md:px-2 text-center font-semibold">
+                    <span>{d}</span>
+                    <div className="text-xs text-gray-500">{format(date, 'd')}</div>
+                  </div>
+                );
+              })}
             </div>
-
-            <div className="w-full overflow-auto mb-3">
-              <div className="flex gap-1 items-center" style={{ minWidth: Math.max(640, f.slots.length * 28) }}>
-                        {(() => {
-                          // Compute derived slots: mark any slot that ended already as 'unavailable'
-                          const computedSlots = (f.slots || []).map(s => {
-                            try {
-                              const slotEnd = new Date(s.end);
-                              if (slotEnd.getTime() <= now.getTime()) {
-                                return { ...s, status: 'unavailable' } as any;
-                              }
-                              return s;
-                            } catch (e) {
-                              return s;
-                            }
-                          });
-
-                          return computedSlots.map((s: any, idx: number) => {
-                            const isAvailable = s.status === 'available';
-                            const isScheduled = s.status === 'scheduled';
-                            const isUnavailable = s.status === 'unavailable';
-                            const bg = isAvailable ? 'bg-green-100' : isScheduled ? 'bg-yellow-100' : 'bg-gray-100';
-                            const border = isAvailable ? 'border-green-200' : isScheduled ? 'border-yellow-200' : 'border-gray-200';
-                            const title = isAvailable
-                              ? `Available ${new Date(s.start).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} - ${new Date(s.end).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
-                              : isScheduled
-                                ? `Scheduled: ${s.bookings && s.bookings.map((b: any) => `${new Date(b.startTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}-${new Date(b.endTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`).join(', ')}`
-                                : `Unavailable ${new Date(s.start).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
-
+            {/* Time grid */}
+            <div className="relative">
+              {/* Red timeline for current time */}
+              {today >= weekStart && today <= getDateForDay(5) && (
+                <div
+                  className="absolute left-0 right-0 h-0.5 bg-red-500 z-20"
+                  style={{
+                    top: (() => {
+                      // Calculate vertical position of red line
+                      const dayIdx = today.getDay() === 0 ? 6 : today.getDay() - 1;
+                      const hour = today.getHours() + today.getMinutes() / 60;
+                      const hourIdx = dayIdx === 5
+                        ? Math.max(0, Math.min(satHours.length - 1, Math.floor(hour - 7.5)))
+                        : Math.max(0, Math.min(hours.length - 1, Math.floor(hour - 7.5)));
+                      return `${(hourIdx) * 48 + 40}px`;
+                    })(),
+                  }}
+                />
+              )}
+              <div className="grid grid-cols-6" style={{ minWidth: 600 }}>
+                {weekDays.map((d, dayIdx) => {
+                  const date = getDateForDay(dayIdx);
+                  const isSat = dayIdx === 5;
+                  const dayHours = isSat ? satHours : hours;
+                  return (
+                    <div key={d} className="border-r border-gray-200 last:border-r-0">
+                      {dayHours.map((h, hIdx) => {
+                        const slotTime = new Date(date);
+                        slotTime.setHours(Math.floor(h), (h % 1) * 60, 0, 0);
+                        // Find the real slot for this facility, day, and time
+                        const slot = findSlot(facility, date, h);
+                        let slotStatus: 'available' | 'unavailable' | 'scheduled' = 'available';
+                        if (slot) slotStatus = slot.status;
+                        // If the slot is in the past and not scheduled, force unavailable
+                        const now = new Date();
+                        const slotEnd = new Date(slot ? slot.end : slotTime.getTime() + 60 * 60000);
+                        if (slotEnd < now && slotStatus !== 'scheduled') {
+                          slotStatus = 'unavailable';
+                        }
+                        if ((slotStatus === 'available' && !showAvailable) || (slotStatus === 'unavailable' && !showUnavailable) || (slotStatus === 'scheduled' && !showScheduled)) {
+                          return <div key={hIdx} className="h-10 md:h-12 border-b border-gray-100 bg-gray-50"></div>;
+                        }
+                        // Show unavailable tag if this day is marked unavailable and showUnavailable is true
+                        const slotDateStr = `${slotTime.getFullYear()}-${String(slotTime.getMonth() + 1).padStart(2, '0')}-${String(slotTime.getDate()).padStart(2, '0')}`;
+                        if (slotStatus === 'available') {
+                          if (showUnavailable && unavailableDates.includes(slotDateStr)) {
                             return (
                               <div
-                                key={`${f.facility.id}-${idx}`}
-                                title={title}
-                                className={`flex-shrink-0 w-7 h-7 rounded-sm border ${border} ${bg} flex items-center justify-center text-[10px] ${isUnavailable ? 'text-gray-400' : 'text-gray-700'}`}
+                                key={hIdx}
+                                className="h-10 md:h-12 flex items-center justify-center border-b border-gray-100 bg-red-100 text-xs text-red-700 font-semibold rounded-md m-0.5 md:m-1 shadow-sm"
+                                style={{ minHeight: 36 }}
+                                title="Unavailable"
                               >
-                                {isAvailable ? '' : (isScheduled ? '⭑' : '')}
+                                Unavailable
                               </div>
                             );
-                          });
-                        })()}
+                          }
+                          return (
+                            <div
+                              key={hIdx}
+                              className="h-10 md:h-12 cursor-pointer bg-white"
+                              tabIndex={0}
+                              style={{ minHeight: 36 }}
+                              onClick={() => {
+                                if (typeof onSelectRange === 'function') {
+                                  onSelectRange(facility.facility.id, slot?.start || slotTime.toISOString(), slot?.end || new Date(slotTime.getTime() + 60 * 60000).toISOString());
+                                }
+                              }}
+                            />
+                          );
+                        }
+                        // Leave scheduled and unavailable slots unchanged
+                        const color = slotStatus === 'scheduled' ? 'bg-yellow-400/80 hover:bg-yellow-500' : 'bg-red-400/80 hover:bg-red-500';
+                        return (
+                          <div
+                            key={hIdx}
+                            className={`h-10 md:h-12 border-b border-gray-100 flex items-center justify-center transition-all duration-150 ${color} text-xs md:text-xs text-white font-semibold rounded-md m-0.5 md:m-1 shadow-sm`}
+                            title={`${slotStatus.charAt(0).toUpperCase() + slotStatus.slice(1)}: ${format(slotTime, 'hh:mm a')}`}
+                            tabIndex={0}
+                            style={{ minHeight: 36 }}
+                          >
+                            {format(slotTime, 'hh:mm a')}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
               </div>
             </div>
-
-            {open && (
-              <div className="mt-2">
-                <div className="text-sm font-medium mb-2">Full Day List</div>
-                <div className="space-y-1 text-sm">
-                  {(() => {
-                    // Track bookings already displayed for this facility so duplicates
-                    // across adjacent/merged ranges are only shown once.
-                    const facilitySeen = new Set<string>();
-                    const nodes: any[] = [];
-                    for (let idx = 0; idx < ranges.length; idx++) {
-                      const r = ranges[idx];
-                      nodes.push(
-                        <div
-                          key={idx}
-                          onClick={() => {
-                            if (r.status === 'available' && typeof onSelectRange === 'function') {
-                              onSelectRange(f.facility.id, r.start, r.end);
-                            }
-                          }}
-                          className={`p-2 rounded cursor-pointer ${r.status === 'available' ? 'bg-green-50 hover:bg-green-100' : r.status === 'scheduled' ? 'bg-yellow-50' : 'bg-gray-50'} border ${r.status === 'available' ? 'border-green-100' : r.status === 'scheduled' ? 'border-yellow-100' : 'border-gray-100'}`}>
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <div className="text-xs text-gray-700 font-medium">{r.status === 'available' ? 'Available' : r.status === 'scheduled' ? 'Scheduled' : 'Unavailable'}</div>
-                              {/* Only show the merged range time if there's 0 or 1 booking - otherwise show individual times below */}
-                              {(!r.bookings || r.bookings.length <= 1) && (
-                                <div className="text-xs text-gray-600">{format(new Date(r.start), 'hh:mm a')} - {format(new Date(r.end), 'hh:mm a')}</div>
-                              )}
-                            </div>
-                            <div className="text-xs text-gray-500">
-                              {(() => {
-                                if (!r.bookings || !Array.isArray(r.bookings) || r.bookings.length === 0) return '';
-                                const uniq = new Set(r.bookings.map((b: any) => b.id ? String(b.id) : `${b.startTime || b.start}-${b.endTime || b.end}-${b.status || ''}`));
-                                const n = uniq.size;
-                                return `${n} booking${n > 1 ? 's' : ''}`;
-                              })()}
-                            </div>
-                          </div>
-                          {r.bookings && r.bookings.length > 1 && (
-                            <div className="mt-1 text-xs text-gray-600">
-                              {(() => {
-                                const out: any[] = [];
-                                for (const b of r.bookings) {
-                                  if (!b) continue;
-                                  const key = b.id ? String(b.id) : `${b.startTime || b.start}-${b.endTime || b.end}-${b.status || ''}`;
-                                  if (facilitySeen.has(key)) continue;
-                                  
-                                  facilitySeen.add(key);
-                                  // Map booking status to user-friendly labels
-                                  let statusLabel = '';
-                                  const rawStatus = String(b.status || '').toLowerCase();
-                                  if (rawStatus === 'approved' || rawStatus === 'pending') {
-                                    // Don't show status for approved/pending - it's implied by "Scheduled"
-                                    statusLabel = '';
-                                  } else if (rawStatus === 'denied') {
-                                    statusLabel = ' • Denied';
-                                  } else if (rawStatus === 'cancelled') {
-                                    statusLabel = ' • Cancelled';
-                                  }
-                                  
-                                  out.push(
-                                    <div key={key}>{format(new Date(b.startTime || b.start), 'hh:mm a')} - {format(new Date(b.endTime || b.end), 'hh:mm a')}{statusLabel}</div>
-                                  );
-                                }
-                                return out.length > 0 ? out : null;
-                              })()}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    }
-                    return nodes;
-                  })()}
-                </div>
-              </div>
-            )}
           </div>
-        );
-      })}
+        </div>
+      </div>
+    );
+  };
+
+  // --- Main layout ---
+  return (
+    <div className="flex flex-col md:flex-row md:gap-6 gap-2 mt-4 md:mt-6">
+      {/* Sidebar */}
+      <aside className="w-full md:w-64 flex-shrink-0 mb-4 md:mb-0">
+        {renderMiniCalendar()}
+        {renderLegend()}
+        <div className="mt-6 md:mt-8">
+          <div className="font-semibold text-xs md:text-xs text-gray-700 mb-2">Rooms</div>
+          <div className="space-y-1">
+            {filteredRoomList.map(room => (
+              <button
+                key={room.name}
+                className={`w-full text-left px-3 py-2 rounded-lg transition font-medium text-sm flex items-center gap-2 ${selectedRoomId === roomMap[room.name] ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100 text-gray-700'}`}
+                onClick={() => setSelectedRoomId(roomMap[room.name])}
+                tabIndex={0}
+              >
+                {room.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      </aside>
+      {/* Main calendar grid */}
+      <div className="w-full overflow-x-auto">{renderGrid()}</div>
     </div>
   );
 }

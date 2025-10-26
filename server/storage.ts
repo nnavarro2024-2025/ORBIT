@@ -52,7 +52,7 @@ export interface IStorage {
   // Facility operations
   getAllFacilities(): Promise<Facility[]>;
   getFacility(id: number): Promise<Facility | undefined>;
-  createFacility(facility: { name: string; description?: string; capacity: number }): Promise<Facility>;
+  createFacility(facility: { name: string; description?: string; capacity: number; image?: string }): Promise<Facility>;
   updateFacility(facilityId: number, updates: Partial<Facility>): Promise<void>;
   
   // Facility booking operations
@@ -243,13 +243,18 @@ class DatabaseStorage implements IStorage {
     return facility;
   }
 
-  async createFacility(facility: { name: string; description?: string; capacity: number }): Promise<Facility> {
+  async createFacility(facility: { name: string; description?: string; capacity: number; image?: string }): Promise<Facility> {
     const [newFacility] = await db.insert(facilities).values(facility as any).returning();
     return newFacility;
   }
 
   async updateFacility(facilityId: number, updates: Partial<Facility>): Promise<void> {
-    await db.update(facilities).set(updates).where(eq(facilities.id, facilityId));
+    // If unavailableDates is present, ensure it is saved as JSON
+    const updateObj: any = { ...updates };
+    if (updateObj.unavailableDates !== undefined) {
+      updateObj.unavailableDates = JSON.stringify(updateObj.unavailableDates);
+    }
+    await db.update(facilities).set(updateObj).where(eq(facilities.id, facilityId));
   }
 
   // Facility booking operations

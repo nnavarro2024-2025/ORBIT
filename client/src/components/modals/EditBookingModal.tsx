@@ -122,6 +122,7 @@ export default function EditBookingModal({
   onSave,
 }: EditBookingModalProps) {
   const [purpose, setPurpose] = useState("");
+  const [courseYearDept, setCourseYearDept] = useState("");
   const [facilityId, setFacilityId] = useState("");
   const PURPOSE_MAX = 200;
   const OTHERS_MAX = 50;
@@ -153,6 +154,7 @@ export default function EditBookingModal({
   useEffect(() => {
     if (booking) {
       setPurpose(booking.purpose || "");
+      setCourseYearDept(booking.courseYearDept || "");
       setFacilityId(booking.facilityId?.toString() || "");
       setPurposeError(""); // Clear any previous validation errors
 
@@ -363,6 +365,7 @@ export default function EditBookingModal({
       const payload = {
         ...booking,
         purpose,
+        courseYearDept, // Ensure courseYearDept is included in save
         facilityId: parseInt(facilityId, 10),
         startTime: startTime!.toISOString(),
         endTime: endTime!.toISOString(),
@@ -372,16 +375,18 @@ export default function EditBookingModal({
           others: equipmentOtherText.trim() || null,
         },
       };
-  // payload prepared for save
-  // DEBUG: log payload the client is sending to the server
-  try { console.log('[client] EditBookingModal - save payload', payload); } catch (e) {}
-  const result = await onSave(payload);
+      // payload prepared for save
+      try { console.log('[client] EditBookingModal - save payload', payload); } catch (e) {}
+      const result = await onSave(payload);
 
       setIsSubmitting(false);
       setLastSubmissionTime(Date.now());
 
       // Close after successful save; caller (BookingDashboard) updates cache
       onClose();
+      // Reset courseYearDept and purpose after close for data integrity
+      setCourseYearDept("");
+      setPurpose("");
       return result;
     } catch (error: any) {
       setIsSubmitting(false);
@@ -617,6 +622,7 @@ export default function EditBookingModal({
             </div>
           </div>
 
+
           {/* Purpose */}
           <div>
             <Label className="block text-sm font-medium text-gray-700 mb-2">Purpose</Label>
@@ -627,6 +633,24 @@ export default function EditBookingModal({
             }} placeholder="Describe your purpose for booking this facility" maxLength={PURPOSE_MAX} isInvalid={purpose.length >= PURPOSE_MAX} />
             {purpose.length >= PURPOSE_MAX && <div className="text-xs text-red-600 mt-1">Maximum length reached ({PURPOSE_MAX} characters)</div>}
             {purposeError && <div className="text-sm text-red-600 mt-1">{purposeError}</div>}
+          </div>
+
+          {/* Course & Year/Department */}
+          <div className="mt-4">
+            <Label className="block text-sm font-medium text-gray-700 mb-2">Course & Year/Department <span className="text-red-500">*</span></Label>
+            <CustomTextarea 
+              value={courseYearDept}
+              onChange={(v) => {
+                if (v && v.length > 100) setCourseYearDept(v.slice(0, 100));
+                else setCourseYearDept(v);
+              }}
+              placeholder="e.g. BSIT 3rd Year, Faculty of Engineering, etc."
+              maxLength={100}
+              isInvalid={!!(courseYearDept && courseYearDept.length >= 100)}
+              className="h-9 resize-none"
+              rows={1}
+            />
+            {courseYearDept && courseYearDept.length >= 100 && <div className="text-xs text-red-600 mt-1">Maximum length reached (100 characters)</div>}
           </div>
 
           {/* Inline warnings */}
@@ -690,6 +714,14 @@ export default function EditBookingModal({
                   </div>
                 </div>
               )}
+              {courseYearDept && (
+                <div className="flex flex-col space-y-1 pt-2 border-t border-gray-200">
+                  <span className="text-sm text-gray-600">Course & Year/Department:</span>
+                  <div className="text-left text-sm font-medium text-gray-900 bg-white p-2 rounded border" style={{ wordWrap: 'break-word', overflowWrap: 'anywhere', wordBreak: 'break-word', whiteSpace: 'pre-wrap', maxWidth: '100%', overflow: 'hidden' }}>
+                    {courseYearDept}
+                  </div>
+                </div>
+              )}
 
               {(Object.keys(equipmentState).filter(k => equipmentState[k]).length > 0 || equipmentOtherText) && (
                 <div className="flex flex-col space-y-1 pt-2 border-t border-gray-200">
@@ -718,7 +750,7 @@ export default function EditBookingModal({
           <div className="w-full space-y-3">
             <div className="flex gap-3">
               <div className="flex-1">
-                <Button variant="outline" onClick={onClose} className="w-full">Cancel</Button>
+                <Button variant="outline" onClick={() => { setCourseYearDept(""); setPurpose(""); onClose(); }} className="w-full">Cancel</Button>
               </div>
               <div className="flex-1">
                 <Button onClick={() => setShowConfirmDialog(true)} disabled={isSubmitting || !isDurationValid(startTime, endTime)} className="w-full">

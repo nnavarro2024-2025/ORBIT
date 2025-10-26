@@ -10,9 +10,10 @@ interface UnavailableReasonModalProps {
   onClose: () => void;
   facility: any | null;
   onConfirm: (reason?: string, startDate?: string, endDate?: string) => void;
+  alreadyUnavailableDates?: string[];
 }
 
-export default function UnavailableReasonModal({ isOpen, onClose, facility, onConfirm }: UnavailableReasonModalProps) {
+export default function UnavailableReasonModal({ isOpen, onClose, facility, onConfirm, alreadyUnavailableDates = [] }: UnavailableReasonModalProps) {
   const [reason, setReason] = useState<string>("");
   const [selectedDates, setSelectedDates] = useState<Set<string>>(new Set());
   const [currentMonth, setCurrentMonth] = useState(new Date());
@@ -51,16 +52,14 @@ export default function UnavailableReasonModal({ isOpen, onClose, facility, onCo
   // Toggle date selection
   const toggleDate = (date: Date) => {
     if (isDateDisabled(date)) return;
-    
     const dateKey = formatDateKey(date);
+    if (alreadyUnavailableDates.includes(dateKey)) return;
     const newSelected = new Set(selectedDates);
-    
     if (newSelected.has(dateKey)) {
       newSelected.delete(dateKey);
     } else {
       newSelected.add(dateKey);
     }
-    
     setSelectedDates(newSelected);
   };
 
@@ -167,7 +166,8 @@ export default function UnavailableReasonModal({ isOpen, onClose, facility, onCo
 
                   const dateKey = formatDateKey(date);
                   const isSelected = selectedDates.has(dateKey);
-                  const disabled = isDateDisabled(date);
+                  const isUnavailable = alreadyUnavailableDates.includes(dateKey);
+                  const disabled = isDateDisabled(date) || isUnavailable;
 
                   return (
                     <button
@@ -176,8 +176,10 @@ export default function UnavailableReasonModal({ isOpen, onClose, facility, onCo
                       disabled={disabled}
                       className={`
                         h-8 rounded text-xs font-medium transition-all
-                        ${disabled 
-                          ? 'text-gray-300 cursor-not-allowed bg-gray-50' 
+                        ${disabled
+                          ? isUnavailable
+                            ? 'bg-red-500 text-white cursor-not-allowed border border-red-600 opacity-70' // unavailable
+                            : 'text-gray-300 cursor-not-allowed bg-gray-50'
                           : isSelected
                             ? 'bg-red-500 text-white hover:bg-red-600'
                             : 'text-gray-700 hover:bg-gray-100 border border-gray-200'

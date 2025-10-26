@@ -147,7 +147,6 @@ export default function BookingModal({
   selectedFacilityId,
   initialStartTime = null,
   initialEndTime = null,
-  showSuggestedSlot = false,
 }: BookingModalProps) {
   const { toast } = useToast();
   const { user } = useAuth();
@@ -175,8 +174,8 @@ export default function BookingModal({
   // surprises and duplicate-check race conditions.
 
   const predefinedFacilities = [
-    { id: 1, name: "Collaraborative Learning Room 1", isActive: true, capacity: 8 },
-    { id: 2, name: "Collaraborative Learning Room 2", isActive: true, capacity: 8 },
+  { id: 1, name: "Collaborative Learning Room 1", isActive: true, capacity: 8 },
+  { id: 2, name: "Collaborative Learning Room 2", isActive: true, capacity: 8 },
     { id: 3, name: "Board Room", isActive: true, capacity: 12 },
   ];
 
@@ -272,6 +271,7 @@ export default function BookingModal({
         message: "An end date and time is required.",
       }),
       purpose: z.string().min(1, "Purpose is required"),
+      courseYearDept: z.string().min(1, "Course & Year/Department is required"),
       participants: z.number().min(1, "Number of participants is required"),
     })
     .superRefine((val, ctx) => {
@@ -311,6 +311,7 @@ export default function BookingModal({
   });
   const [equipmentOtherText, setEquipmentOtherText] = useState('');
   const PURPOSE_MAX = 200;
+  const COURSE_MAX = 100;
   const OTHERS_MAX = 50;
 
   const form = useForm<BookingFormData>({
@@ -321,6 +322,7 @@ export default function BookingModal({
       startTime: initialStartTime ?? new Date(new Date().getTime() + 5 * 60 * 1000), // Default: initialStartTime or now + 5 minutes
       endTime: initialEndTime ?? new Date(Date.now() + 35 * 60 * 1000), // Default: initialEndTime or start + 30 minutes
       purpose: "",
+      courseYearDept: "",
       participants: 1,
     },
   });
@@ -437,6 +439,7 @@ export default function BookingModal({
         facilityId: parseInt(data.facilityId),
         startTime: data.startTime.toISOString(),
         endTime: data.endTime.toISOString(),
+        courseYearDept: data.courseYearDept,
         equipment: {
           items: preparedItems,
           others: equipmentOtherText.trim() || null,
@@ -1365,6 +1368,9 @@ export default function BookingModal({
               );
             })()}
 
+            {/* Purpose and Course/Year/Dept fields */}
+
+            {/* Purpose field */}
             <FormField
               control={form.control}
               name="purpose"
@@ -1388,9 +1394,39 @@ export default function BookingModal({
                     />
                   </div>
                   <FormMessage />
-                  {/* Inline helper / error shown when at or over max length or when empty and touched */}
                   {field.value && field.value.length >= PURPOSE_MAX ? (
                     <div className="text-xs text-red-600 mt-1">Maximum length reached ({PURPOSE_MAX} characters)</div>
+                  ) : null}
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="courseYearDept"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Course & Year/Department <span className="text-red-500">*</span></FormLabel>
+                  <div style={{ display: 'block', width: '100%', maxWidth: '100%' }}>
+                    <CustomTextarea
+                      value={field.value || ""}
+                      onChange={(v) => {
+                        if (v && v.length > COURSE_MAX) {
+                          field.onChange(v.slice(0, COURSE_MAX));
+                        } else {
+                          field.onChange(v);
+                        }
+                      }}
+                      placeholder="e.g. BSIT 3rd Year, Faculty of Engineering, etc."
+                      maxLength={COURSE_MAX}
+                      isInvalid={!!(field.value && field.value.length >= COURSE_MAX)}
+                      className="h-9 resize-none"
+                      rows={1}
+                    />
+                  </div>
+                  <FormMessage />
+                  {field.value && field.value.length >= COURSE_MAX ? (
+                    <div className="text-xs text-red-600 mt-1">Maximum length reached ({COURSE_MAX} characters)</div>
                   ) : null}
                 </FormItem>
               )}
@@ -1455,6 +1491,24 @@ export default function BookingModal({
                         }}
                       >
                         {form.watch("purpose")}
+                      </div>
+                    </div>
+                  )}
+                  {form.watch("courseYearDept") && (
+                    <div className="flex flex-col space-y-1 pt-2 border-t border-gray-200">
+                      <span className="text-sm text-gray-600">Course & Year/Department:</span>
+                      <div 
+                        className="text-left text-sm font-medium text-gray-900 bg-white p-2 rounded border"
+                        style={{
+                          wordWrap: 'break-word',
+                          overflowWrap: 'anywhere',
+                          wordBreak: 'break-word',
+                          whiteSpace: 'pre-wrap',
+                          maxWidth: '100%',
+                          overflow: 'hidden'
+                        }}
+                      >
+                        {form.watch("courseYearDept")}
                       </div>
                     </div>
                   )}

@@ -25,7 +25,6 @@
     "noFallthroughCasesInSwitch": true,
 
   /* Path mapping */
-  "baseUrl": ".",
     "paths": {
       "@/*": ["./client/src/*"],
       "@shared/*": ["./shared/*"],

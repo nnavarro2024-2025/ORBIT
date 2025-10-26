@@ -3,6 +3,7 @@ import { useRoute } from "wouter";
 import { Check, Mail } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/useAuth";
+// import { loginToUic } from "@/lib/uicApi";
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -12,44 +13,55 @@ export default function Login() {
 
   const { isAuthenticated, user } = useAuth();
 
+  // Remove username, use email only
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [domainBlockMsg, setDomainBlockMsg] = useState("");
   const [showDomainBlockModal, setShowDomainBlockModal] = useState(false);
+  // Keep a ref for the initial domain-block detection so we can prevent
+  // automatic redirects even after the query string is cleaned.
+  const domainBlockedRef = useRef(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [confirmAction, setConfirmAction] = useState<"manual" | "oauth" | null>(null);
-  const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
+
 
   // When the confirm modal opens, focus the Confirm button so Enter will activate it immediately
-  useEffect(() => {
-    if (showConfirmModal) {
-      // small delay to ensure dialog content is mounted
-      const id = setTimeout(() => {
-        try {
-          confirmButtonRef.current?.focus();
-        } catch (e) {
-          // ignore focus failures
-        }
-      }, 50);
-      return () => clearTimeout(id);
-    }
-    return undefined;
-  }, [showConfirmModal]);
+
 
   useEffect(() => {
     try {
       const params = new URLSearchParams(window.location.search);
-      if (params.get('domain_block') || params.get('error') === 'domain_restricted') {
+      const hashParams = new URLSearchParams((window.location.hash || '').replace(/^#/, ''));
+      // domain block can come via query (?domain_block=1), via an error param (?error=domain_restricted),
+      // or via the OAuth fragment (#error=domain_restricted) depending on provider behavior.
+      // Also respect a sessionStorage flag set by other parts of the app.
+      const fromSearch = Boolean(params.get('domain_block')) || params.get('error') === 'domain_restricted';
+      const fromHash = Boolean(hashParams.get('domain_block')) || hashParams.get('error') === 'domain_restricted';
+      const fromSession = (() => { try { return !!sessionStorage.getItem('orbit:domain_blocked'); } catch (_) { return false; } })();
+      const domainBlocked = fromSearch || fromHash || fromSession;
+      if (domainBlocked) {
         setDomainBlockMsg('Access restricted: Please use your UIC email account (@uic.edu.ph) to sign in.');
         setShowDomainBlockModal(true);
-        // Clean query string so message isn't persistent on refresh
+        domainBlockedRef.current = true;
+        // Remember that we've shown the domain-block flow so other parts of
+        // the app (which may still be trying to sync) don't repeatedly
+        // redirect back to the login page.
+        try { sessionStorage.setItem('orbit:domain_blocked', '1'); } catch (_) {}
+        // Clean query string and fragment so message isn't persistent on refresh
         try { window.history.replaceState({}, '', window.location.pathname); } catch (_) {}
+        try { if (window.location.hash) window.history.replaceState({}, '', window.location.pathname); } catch (_) {}
+        // When the UI explicitly indicates the domain is blocked, do not auto-redirect
+        // even if the user is authenticated. Return early and let the user dismiss
+        // the modal or take action.
+        return;
       }
     } catch (e) {}
+    // If we previously detected a domain block, do not redirect even if the
+    // user becomes authenticated (we want the user to explicitly dismiss the modal).
+    if (domainBlockedRef.current) return;
+
     // Redirect authenticated users to the appropriate dashboard.
     if (isAuthenticated && user) {
       try {
@@ -72,7 +84,10 @@ export default function Login() {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: window.location.origin,
+          // Redirect back to the login page so the client can detect domain
+          // restrictions and show an appropriate UI instead of landing at
+          // the app root where the user may appear briefly signed in.
+          redirectTo: `${window.location.origin}/login`,
           // Force Google to show the account chooser so users can pick which account to use
           queryParams: { prompt: 'select_account' },
         },
@@ -87,30 +102,23 @@ export default function Login() {
   const handleAuth = async () => {
     setLoading(true);
     setErrorMsg("");
-    // basic client-side validation
     if (!email || !password) {
-      setErrorMsg("Login failed: missing email or phone");
+      setErrorMsg("Login failed: missing email or password");
       setLoading(false);
       return;
     }
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
+      // Use Supabase email/password login
+      const { error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
-
       if (error) {
         setErrorMsg("Login failed: " + error.message);
-        setLoading(false);
-        return;
       }
-
-      if (data.session?.access_token) {
-        localStorage.setItem("auth.token", data.session.access_token);
-      }
-      // Do not auto-redirect after login; allow the user to choose the next page.
-    } catch (e) {
-      setErrorMsg("Login failed");
+      // On success, useAuth will pick up the session and redirect
+    } catch (e: any) {
+      setErrorMsg("Login failed: " + (e?.message || "Unknown error"));
     }
     setLoading(false);
   };
@@ -123,7 +131,7 @@ export default function Login() {
         {/* Background image */}
         <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: 'url(/images/facility-overview.jpg)' }} />
         <div className="absolute inset-0 bg-black/60" />
-        
+
         <div className="relative w-full max-w-md z-10">
           <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200">
             <div className="text-center mb-6">
@@ -140,37 +148,52 @@ export default function Login() {
             </div>
 
             <div className="space-y-4">
-            {errorMsg && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-xs text-center shadow-sm">
-                {errorMsg}
+              <button
+                type="button"
+                onClick={signInWithGoogle}
+                className="w-full flex items-center justify-center gap-2 bg-white border border-gray-300 text-pink-600 font-medium text-sm py-2.5 px-4 rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed mb-2"
+                disabled={loading}
+              >
+                <Mail className="h-5 w-5 text-pink-600" />
+                {loading ? "Signing in..." : "Sign in with University Email"}
+              </button>
+
+              <div className="flex items-center my-2">
+                <div className="flex-grow border-t border-gray-200" />
+                <span className="mx-3 text-xs text-gray-400">Or continue with</span>
+                <div className="flex-grow border-t border-gray-200" />
               </div>
-            )}
 
-            <form onSubmit={(e) => { e.preventDefault(); setConfirmAction("manual"); setShowConfirmModal(true); }} className="space-y-4">
-              <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-700">Email Address</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-lg text-gray-900 placeholder-gray-400 focus:border-pink-600 focus:outline-none transition-all duration-200 shadow-sm"
-                placeholder="Enter Email Address"
-                required
-              />
-            </div>
+              {errorMsg && (
+                <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-xs text-center shadow-sm">
+                  {errorMsg}
+                </div>
+              )}
 
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-700">Password</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-lg text-gray-900 placeholder-gray-400 focus:border-pink-600 focus:outline-none transition-all duration-200 shadow-sm"
-                placeholder="Enter your password"
-                required
-              />
-            </div>
-              <div className="grid grid-cols-1 gap-2">
+              <form onSubmit={(e) => { e.preventDefault(); handleAuth(); }} className="space-y-4">
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700">Email</label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-lg text-gray-900 placeholder-gray-400 focus:border-pink-600 focus:outline-none transition-all duration-200 shadow-sm"
+                    placeholder="Enter your email"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700">Password</label>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-lg text-gray-900 placeholder-gray-400 focus:border-pink-600 focus:outline-none transition-all duration-200 shadow-sm"
+                    placeholder="Enter your password"
+                    required
+                  />
+                </div>
                 <button
                   type="submit"
                   className="w-full bg-pink-600 hover:bg-pink-700 text-white font-medium text-sm py-2 px-4 rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
@@ -178,40 +201,20 @@ export default function Login() {
                 >
                   {loading ? "Signing in..." : "Login"}
                 </button>
-                <div className="my-2 border-t border-gray-100" />
-                <button
-                  type="button"
-                  onClick={() => { setConfirmAction("oauth"); setShowConfirmModal(true); }}
-                  className="w-full bg-pink-600 hover:bg-pink-700 text-white font-medium text-sm py-2 px-4 rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
-                  disabled={loading}
-                >
-                  {loading ? "Signing in..." : "Sign up with UIC Account"}
-                </button>
+              </form>
+
+              <div className="text-center pt-4 border-t border-gray-100">
+                <p className="text-xs text-gray-600">
+                  By continuing, you agree to our{" "}
+                  <button
+                    onClick={() => setShowTermsModal(true)}
+                    className="text-pink-600 hover:text-pink-700 underline transition-colors text-xs"
+                  >
+                    Terms and Conditions
+                  </button>
+                </p>
               </div>
-            </form>
-
-            <div className="text-center pt-4 border-t border-gray-100">
-              <p className="text-xs text-gray-600">
-                By continuing, you agree to our{" "}
-                <button
-                  onClick={() => setShowTermsModal(true)}
-                  className="text-pink-600 hover:text-pink-700 underline transition-colors text-xs"
-                >
-                  Terms and Conditions
-                </button>
-              </p>
             </div>
-            <div className="text-center mt-2">
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className="text-pink-600 hover:text-pink-700 underline transition-colors text-xs"
-              >
-                Create Account
-              </button>
-            </div>
-          </div>
-
-          <div />
           </div>
         </div>
       </div>
@@ -282,41 +285,7 @@ export default function Login() {
         </DialogContent>
       </Dialog>
 
-      {/* Confirmation Modal for Sign In / OAuth */}
-      <Dialog open={showConfirmModal} onOpenChange={setShowConfirmModal}>
-        <DialogContent className="max-w-md bg-white rounded-lg p-6 text-gray-900 shadow-sm border border-gray-200">
-          <form onSubmit={async (e) => {
-            e.preventDefault();
-            setShowConfirmModal(false);
-            if (confirmAction === "manual") {
-              await handleAuth();
-            } else if (confirmAction === "oauth") {
-              await signInWithGoogle();
-            }
-            setConfirmAction(null);
-          }}>
-            <DialogHeader>
-              <DialogTitle className="text-lg font-semibold text-center mb-2">Confirm action</DialogTitle>
-            </DialogHeader>
-            <div className="text-sm text-gray-700">
-              {confirmAction === "manual" && (
-                <p>You're about to sign in with the email and password you provided. Do you want to continue?</p>
-              )}
-              {confirmAction === "oauth" && (
-                <p>You're about to sign in with your UIC account. You will be redirected to the provider to complete sign in. Continue?</p>
-              )}
-            </div>
-            <div className="flex justify-end gap-3 mt-6">
-              <Button type="button" variant="ghost" onClick={() => { setShowConfirmModal(false); setConfirmAction(null); }} className="bg-gray-200 text-gray-800 hover:bg-gray-300">
-                Cancel
-              </Button>
-              <Button ref={confirmButtonRef} type="submit" className="bg-pink-600 hover:bg-pink-700 text-white">
-                Confirm
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
+
 
       {/* Create Account Modal (UIC Account Required) */}
       <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
@@ -341,7 +310,7 @@ export default function Login() {
                   onClick={() => { setShowCreateModal(false); signInWithGoogle(); }}
                   className="w-full bg-pink-600 hover:bg-pink-700 text-white font-medium py-2 rounded-lg"
                 >
-                  Sign up with UIC Account
+                  Sign in with UIC Account
                 </Button>
               </div>
             </div>

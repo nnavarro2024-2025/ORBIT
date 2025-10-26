@@ -34,7 +34,7 @@ import UserEmailDisplay from "@/components/UserEmailDisplay";
   ChevronRight,
   Eye,
   Monitor,
-  X,
+
 } from "lucide-react";
 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -80,6 +80,7 @@ export default function AdminDashboard() {
   // prevent unused variable errors for setters while refactoring
   void setUsersData; void setActivities; void setFacilities; void setUser;
   const usersMap = useMemo(() => new Map<string, User>(), []);
+
 
   // Keep a map of users for quick lookup (populated after queries update usersData)
   useEffect(() => {
@@ -377,6 +378,7 @@ export default function AdminDashboard() {
   const [userToBan, setUserToBan] = useState<User | null>(null);
   const [isUnavailableModalOpen, setIsUnavailableModalOpen] = useState(false);
   const [facilityForUnavailable, setFacilityForUnavailable] = useState<any | null>(null);
+  const [unavailableDatesByFacility, setUnavailableDatesByFacility] = useState<Record<string, string[]>>({});
   // Track which booking's Popover is open (persisted until user clicks away)
   const [openOthers, setOpenOthers] = useState<Record<string, boolean>>({});
   // Track which booking's Purpose popover is open
@@ -386,16 +388,6 @@ export default function AdminDashboard() {
   useAuth(); // ensure user is authenticated
   const { toast } = useToast();
 
-  // Helper to determine if library is currently closed (same hours as booking validation)
-  const isLibraryClosedNow = () => {
-    const now = new Date();
-    const currentHour = now.getHours();
-    const currentMinute = now.getMinutes();
-    const currentTimeInMinutes = currentHour * 60 + currentMinute;
-    const libraryOpenTime = 7 * 60 + 30; // 7:30 AM
-  const libraryCloseTime = 19 * 60; // 7:00 PM
-    return currentTimeInMinutes < libraryOpenTime || currentTimeInMinutes > libraryCloseTime;
-  };
   const queryClient = useQueryClient();
 
   // Track which bookings are currently being updated so buttons show loading/disabled state
@@ -807,36 +799,10 @@ export default function AdminDashboard() {
   };
 
   // Small visible badge used to highlight bookings that requested equipment
-  function renderEquipmentBadge(booking: FacilityBooking | any) {
-    try {
-      const eq = booking?.equipment;
-      const has = !!(eq && ((Array.isArray(eq.items) && eq.items.length > 0) || (eq.others && String(eq.others).trim().length > 0)));
-      if (!has) return null;
-      return (
-        <div className="mt-1">
-          <span className="inline-block text-xs font-semibold px-2 py-1 rounded-full bg-yellow-100 text-yellow-800">NEEDS EQUIPMENT</span>
-        </div>
-      );
-    } catch (e) {
-      return null;
-    }
-  }
 
   // Admin stats
   const isAdmin = !!authUser && authUser.role === 'admin';
 
-  const { data: statsData = { pendingBookings: 0, systemAlerts: 0 }, isLoading: statsLoading, isError: statsError } = useQuery({
-    queryKey: ['/api/admin/stats'],
-    queryFn: async () => {
-      const res = await apiRequest('GET', '/api/admin/stats');
-      return res.json();
-    },
-    // Auto-refresh dashboard stats frequently so the admin overview stays up-to-date
-    refetchInterval: 5000,
-    refetchOnMount: 'always',
-    refetchOnWindowFocus: true,
-    enabled: isAdmin,
-  });
 
   // System alerts
   const { data: alertsData = [], isLoading: alertsLoading, isError: alertsError } = useQuery({
@@ -848,7 +814,7 @@ export default function AdminDashboard() {
     // Poll alerts so system alerts appear in near-real time for admins
     refetchInterval: 5000,
     refetchOnMount: 'always',
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
     enabled: isAdmin,
   });
 
@@ -861,7 +827,7 @@ export default function AdminDashboard() {
     },
     refetchInterval: 5000,
     refetchOnMount: 'always',
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
     enabled: isAdmin,
   });
 
@@ -874,7 +840,7 @@ export default function AdminDashboard() {
     },
     refetchInterval: 5000,
     refetchOnMount: 'always',
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
     enabled: isAdmin,
   });
 
@@ -887,7 +853,7 @@ export default function AdminDashboard() {
     },
     refetchInterval: 5000,
     refetchOnMount: 'always',
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
     enabled: isAdmin,
   });
 
@@ -899,7 +865,7 @@ export default function AdminDashboard() {
       return res.json();
     },
     refetchOnMount: 'always',
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
   });
 
   // Admin users
@@ -910,7 +876,7 @@ export default function AdminDashboard() {
       return res.json();
     },
     refetchOnMount: 'always',
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
   });
 
   // Current authenticated user (for admin email fallbacks)
@@ -961,6 +927,30 @@ export default function AdminDashboard() {
       if (!Array.isArray(facilitiesData)) return;
       const same = Array.isArray(facilities) && facilities.length === facilitiesData.length && facilities.every((f: any, i: number) => String(f?.id) === String(facilitiesData[i]?.id));
       if (!same) setFacilities(facilitiesData);
+
+      // Canonicalize unavailableDatesByFacility from backend
+      const newUnavailable: Record<string, string[]> = {};
+      for (const f of facilitiesData) {
+        if (Array.isArray(f.unavailableDates)) {
+          // Flatten all date ranges into a list of YYYY-MM-DD strings
+          const dates: string[] = [];
+          for (const range of f.unavailableDates) {
+            if (range && range.startDate && range.endDate) {
+              // Add all dates in the range (inclusive)
+              const start = new Date(range.startDate);
+              const end = new Date(range.endDate);
+              for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+                const yyyy = d.getFullYear();
+                const mm = String(d.getMonth() + 1).padStart(2, '0');
+                const dd = String(d.getDate()).padStart(2, '0');
+                dates.push(`${yyyy}-${mm}-${dd}`);
+              }
+            }
+          }
+          newUnavailable[f.id] = dates;
+        }
+      }
+      setUnavailableDatesByFacility(newUnavailable);
     } catch (e) {
       // ignore
     }
@@ -1234,19 +1224,48 @@ export default function AdminDashboard() {
     mutationFn: async ({ facilityId, available, reason, startDate, endDate }: any) => {
       // The server expects `isActive` boolean in the payload. Include optional reason and dates when disabling.
       const payload: any = { isActive: available };
-      if (!available && reason) payload.reason = reason;
-      if (!available && startDate) payload.startDate = startDate;
-      if (!available && endDate) payload.endDate = endDate;
+  if (reason) payload.reason = reason;
+  if (startDate) payload.startDate = startDate;
+  if (endDate) payload.endDate = endDate;
+      console.log('[AdminDashboard] Sending PUT /api/admin/facilities/:facilityId/availability', { facilityId, payload });
       const res = await apiRequest('PUT', `/api/admin/facilities/${facilityId}/availability`, payload);
       return res.json?.();
     },
-    onSuccess: async () => {
+    onSuccess: async (_data, variables) => {
+      // Update unavailableDatesByFacility for UI persistence
+      if (variables && !variables.available && variables.startDate) {
+        setUnavailableDatesByFacility(prev => {
+          const prevDates = prev[variables.facilityId] || [];
+          const newDates = [
+            ...prevDates,
+            ...(variables.startDate && variables.endDate
+              ? getDateRange(variables.startDate, variables.endDate)
+              : variables.startDate ? [variables.startDate] : []),
+          ];
+          return { ...prev, [variables.facilityId]: Array.from(new Set(newDates)) };
+        });
+      }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['/api/facilities'] }),
         queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] }),
       ]);
     },
   });
+
+  // Helper to get all dates between start and end (inclusive)
+  function getDateRange(start: string, end: string) {
+    const result: string[] = [];
+    let current = new Date(start);
+    const last = new Date(end);
+    while (current <= last) {
+      const y = current.getFullYear();
+      const m = String(current.getMonth() + 1).padStart(2, '0');
+      const d = String(current.getDate()).padStart(2, '0');
+      result.push(`${y}-${m}-${d}`);
+      current.setDate(current.getDate() + 1);
+    }
+    return result;
+  }
 
   const markAlertReadMutation = useMutation({
     mutationFn: async (alertId: string) => apiRequest('POST', `/api/admin/alerts/${alertId}/read`),
@@ -1311,9 +1330,10 @@ export default function AdminDashboard() {
   };
   // Map query results to local aliases used by the UI
   const alerts: SystemAlert[] = Array.isArray(alertsData) ? alertsData : [];
-  const stats: any = statsData || { pendingBookings: 0, systemAlerts: 0 };
+  // Compute userManagementAlerts for the overview tile (must be outside renderContent for scope)
+  const userManagementAlerts = useMemo(() => alerts.filter((a: SystemAlert) => a.type === 'user'), [alerts]);
   // silence unused query flags and helpers
-  void statsError; void alertsLoading; void alertsError; void activitiesLoading; void activitiesError; void allBookingsLoading; void allBookingsError; void pendingBookingsLoading; void pendingBookingsError; void usersLoading; void usersError; void facilitiesLoading; void facilitiesError; void markAlertReadMutation;
+  void alertsLoading; void alertsError; void activitiesLoading; void activitiesError; void allBookingsLoading; void allBookingsError; void pendingBookingsLoading; void pendingBookingsError; void usersLoading; void usersError; void facilitiesLoading; void facilitiesError; void markAlertReadMutation;
 
   // Derived booking flags used across the UI
   const bookingsLoading = !!(allBookingsLoading || pendingBookingsLoading);
@@ -1464,6 +1484,7 @@ export default function AdminDashboard() {
   void getActorEmail;
 
   const handleUnavailableConfirm = (reason?: string, startDate?: string, endDate?: string) => {
+  console.log('[AdminDashboard] handleUnavailableConfirm', { reason, startDate, endDate });
     if (!facilityForUnavailable) return;
     // Add date range information to the reason if dates were selected
     let fullReason = reason || '';
@@ -1473,13 +1494,33 @@ export default function AdminDashboard() {
         : `Unavailable from ${startDate} to ${endDate}`;
       fullReason = fullReason ? `${dateInfo}. ${fullReason}` : dateInfo;
     }
-    toggleFacilityAvailabilityMutation.mutate({ 
-      facilityId: facilityForUnavailable.id, 
-      available: false, 
-      reason: fullReason,
-      startDate,
-      endDate
-    });
+    // Only send startDate/endDate if both are defined (required by backend)
+    if (startDate && endDate) {
+      // For date-range unavailability, set isActive false so backend saves unavailableDates
+      toggleFacilityAvailabilityMutation.mutate({ 
+        facilityId: facilityForUnavailable.id, 
+        available: false, // isActive: false for date-range unavailable
+        reason: fullReason,
+        startDate,
+        endDate
+      });
+    } else {
+      // Defensive: do not send incomplete date range, show error/toast
+      toast({ title: 'Please select at least one date.', description: 'You must select a date range to mark unavailable.', variant: 'destructive' });
+    }
+    // Update unavailableDatesByFacility for UI persistence
+    if (startDate && facilityForUnavailable.id) {
+      setUnavailableDatesByFacility(prev => {
+        const prevDates = prev[facilityForUnavailable.id] || [];
+        const newDates = [
+          ...prevDates,
+          ...(startDate && endDate
+            ? getDateRange(startDate, endDate)
+            : startDate ? [startDate] : []),
+        ];
+        return { ...prev, [facilityForUnavailable.id]: Array.from(new Set(newDates)) };
+      });
+    }
     setFacilityForUnavailable(null);
     setIsUnavailableModalOpen(false);
   };
@@ -1636,26 +1677,6 @@ export default function AdminDashboard() {
     }
   };
 
-  // XML escape for Excel XML format
-  const escapeXML = (s: any) => {
-    if (s == null) return '';
-    const str = String(s);
-    return str
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&apos;')
-      .replace(/[\r\n]+/g, ' ');
-  };
-
-  // CSV escape for Excel compatibility (kept for other potential uses)
-  const escapeCSV = (s: any) => {
-    if (s == null) return '';
-    const str = String(s);
-    // Escape double quotes by doubling them, and remove line breaks
-    return str.replace(/"/g, '""').replace(/[\r\n]+/g, ' ');
-  };
 
   const OverviewTile = ({ title, count, subtitle, onClick, icon }: { title: string; count: number | string; subtitle?: string; onClick?: () => void; icon?: React.ReactNode }) => (
     <button onClick={onClick} className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 hover:shadow-md transition-all duration-200 text-left group w-full">
@@ -1674,7 +1695,6 @@ export default function AdminDashboard() {
 
   const renderContent = () => {
     const errorState = {
-      stats: statsError,
       bookings: bookingsError,
       alerts: alertsError,
       activities: activitiesError,
@@ -1686,7 +1706,6 @@ export default function AdminDashboard() {
     const hasError = Object.values(errorState).some(Boolean);
 
     if (
-      statsLoading ||
       bookingsLoading ||
       alertsLoading ||
       activitiesLoading ||
@@ -1784,6 +1803,12 @@ export default function AdminDashboard() {
                                 <div className="flex-1 min-w-0">
                                   <h4 className="font-medium text-sm text-gray-900 break-words">{getUserEmail(booking.userId)}</h4>
                                   <p className="text-xs text-gray-600 mt-0.5 break-words">{getFacilityName(booking.facilityId)}</p>
+                                  {booking.courseYearDept && (
+                                    <p className="text-xs text-blue-700 mt-0.5 break-words font-semibold">
+                                      <span className="text-[10px] text-gray-500 mr-1">Course/Year/Dept:</span>
+                                      {booking.courseYearDept}
+                                    </p>
+                                  )}
                                 </div>
                                 <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 whitespace-nowrap flex-shrink-0">Active</span>
                               </div>
@@ -1808,8 +1833,8 @@ export default function AdminDashboard() {
                                 </div>
                               </div>
 
-                              {/* Purpose */}
-                              {booking.purpose && (() => {
+                              {/* Purpose & Course/Year/Dept */}
+                              {(booking.purpose || booking.courseYearDept) && (() => {
                                 const id = String(booking.id || Math.random());
                                 const isOpen = !!openPurpose[id];
                                 return (
@@ -1819,7 +1844,7 @@ export default function AdminDashboard() {
                                       className="flex items-center gap-1 text-xs text-pink-600 hover:text-pink-700 transition-colors"
                                     >
                                       <Eye className="h-3 w-3 text-pink-600" />
-                                      <span>View purpose</span>
+                                      <span>View details</span>
                                     </button>
                                     {isOpen && (
                                       <div className="fixed inset-0 z-50 flex items-start justify-center pt-20" onClick={() => setOpenPurpose(prev => ({ ...prev, [id]: false }))}>
@@ -1831,6 +1856,12 @@ export default function AdminDashboard() {
                                             <p className="text-sm text-gray-900 leading-5 break-words text-left">
                                               {booking.purpose || 'No purpose specified'}
                                             </p>
+                                            {booking.courseYearDept && (
+                                              <>
+                                                <p className="font-semibold text-sm text-gray-800 text-left mt-4">Course & Year/Department</p>
+                                                <p className="text-sm text-gray-900 leading-5 break-words text-left">{booking.courseYearDept}</p>
+                                              </>
+                                            )}
                                           </div>
                                         </div>
                                       </div>
@@ -1898,6 +1929,12 @@ export default function AdminDashboard() {
                                 <div>
                                   <h4 className="font-medium text-gray-900">{getUserEmail(booking.userId)}</h4>
                                   <p className="text-sm text-gray-600">{getFacilityName(booking.facilityId)}</p>
+                                  {booking.courseYearDept && (
+                                    <p className="text-xs text-blue-700 mt-0.5 break-words font-semibold">
+                                      <span className="text-[10px] text-gray-500 mr-1">Course/Year/Dept:</span>
+                                      {booking.courseYearDept}
+                                    </p>
+                                  )}
                                   <div className="flex items-center gap-2 mt-1">
                                     <span className="text-xs font-medium text-gray-500">Participants:</span>
                                     <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">{booking.participants || 0}</span>
@@ -2187,6 +2224,12 @@ export default function AdminDashboard() {
                                 <div className="flex-1">
                                   <h4 className="font-medium text-gray-900">{getUserEmail(booking.userId)}</h4>
                                   <p className="text-sm text-gray-600">{getFacilityName(booking.facilityId)}</p>
+                                  {booking.courseYearDept && (
+                                    <p className="text-xs text-blue-700 mt-0.5 break-words font-semibold">
+                                      <span className="text-[10px] text-gray-500 mr-1">Course/Year/Dept:</span>
+                                      {booking.courseYearDept}
+                                    </p>
+                                  )}
                                   <div className="flex items-center gap-2 mt-1">
                                     <span className="text-xs font-medium text-gray-500">Participants:</span>
                                     <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">{booking.participants || 0}</span>
@@ -2572,39 +2615,33 @@ export default function AdminDashboard() {
 
       case "security": // System alerts
         // Compute badge counts based on selected inner security tab (booking | users)
-        const computeSecurityCounts = (tab: string) => {
-          if (!alerts) return { unread: 0, total: 0 };
 
-          // Helper filters
+        let tabUnread = 0;
+        let tabTotal = 0;
+        if (securityTab === 'users') {
+          const userAlertsLocal = alerts.filter(a => {
+            const t = (a.title || '').toLowerCase();
+            const m = (a.message || '').toLowerCase();
+            return t.includes('user banned') || t.includes('user unbanned') || t.includes('suspension') || m.includes('banned') || m.includes('unbanned') ||
+                   t.includes('equipment') || t.includes('needs') || m.includes('equipment') || m.includes('needs');
+          });
+          tabUnread = userAlertsLocal.filter(a => !a.isRead).length;
+          tabTotal = userAlertsLocal.length;
+        } else {
           const isComputerAlert = (a: SystemAlert) => {
             const t = (a.title || '').toLowerCase();
             const m = (a.message || '').toLowerCase();
             return t.includes('automatically logged out') || t.includes('auto-logout') || m.includes('inactivity');
           };
-
-          if (tab === 'users') {
-            const userAlerts = alerts.filter(a => {
-              const t = (a.title || '').toLowerCase();
-              const m = (a.message || '').toLowerCase();
-              return t.includes('user banned') || t.includes('user unbanned') || t.includes('suspension') || m.includes('banned') || m.includes('unbanned');
-            });
-            const unread = userAlerts.filter(a => !a.isRead).length || 0;
-            return { unread, total: userAlerts.length || 0 };
-          }
-
-          // default to booking alerts
-          const bookingAlerts = alerts.filter(a => {
+          const bookingAlertsLocal = alerts.filter((a: SystemAlert) => {
             if (a.type === 'booking') return true;
             const t = (a.title || '').toLowerCase();
             const m = (a.message || '').toLowerCase();
             return t.includes('booking cancelled') || t.includes('booking canceled') || t.includes('booking') || m.includes('booking');
-          }).filter(a => !isComputerAlert(a));
-
-          const unread = bookingAlerts.filter(a => !a.isRead).length || 0;
-          return { unread, total: bookingAlerts.length || 0 };
-        };
-
-        const { unread: securityUnread, total: securityTotal } = computeSecurityCounts(securityTab);
+          }).filter((a: SystemAlert) => !isComputerAlert(a));
+          tabUnread = bookingAlertsLocal.filter(a => !a.isRead).length;
+          tabTotal = bookingAlertsLocal.length;
+        }
 
         return (
           <div className="space-y-4 sm:space-y-6">
@@ -2615,8 +2652,8 @@ export default function AdminDashboard() {
                   <p className="text-xs sm:text-sm text-gray-600 mt-1">Monitor system security alerts and notifications</p>
                 </div>
                 <div className="flex flex-row flex-wrap gap-2 items-center">
-                  <div className="bg-orange-100 text-orange-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center">{securityUnread || 0} alerts</div>
-                  <div className="bg-gray-100 text-gray-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center">{securityTotal || 0} Total</div>
+                  <div className="bg-orange-100 text-orange-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center">{tabUnread || 0} alerts</div>
+                  <div className="bg-gray-100 text-gray-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center">{tabTotal || 0} Total</div>
                 </div>
               </div>
 
@@ -4188,7 +4225,7 @@ export default function AdminDashboard() {
 
               <OverviewTile
                 title="System Alerts"
-                count={stats?.systemAlerts || 0}
+                count={userManagementAlerts.length}
                 subtitle="Requiring attention"
                 onClick={() => setSelectedView("security")}
                 icon={<TriangleAlert className="h-6 w-6 text-orange-600" />}
@@ -4224,7 +4261,7 @@ export default function AdminDashboard() {
                     </div>
                   </div>
                   <div>
-                    <AvailabilityGrid />
+                    <AvailabilityGrid unavailableDatesByFacility={unavailableDatesByFacility} />
                   </div>
                 </div>
               </div>
@@ -5043,6 +5080,7 @@ export default function AdminDashboard() {
         onClose={() => { setIsUnavailableModalOpen(false); setFacilityForUnavailable(null); }}
         facility={facilityForUnavailable}
         onConfirm={handleUnavailableConfirm}
+        alreadyUnavailableDates={facilityForUnavailable && unavailableDatesByFacility[facilityForUnavailable.id] ? unavailableDatesByFacility[facilityForUnavailable.id] : []}
       />
     </div>
   );
