@@ -34,7 +34,7 @@ export async function authenticatedFetch(url: string, options: RequestInit = {})
   // Construct the full API URL. Prefer an explicit backend URL when provided via
   // VITE_API_BASE_URL (e.g. http://localhost:5000). Otherwise, fall back to a
   // relative `/api/...` path which relies on Vite's dev server proxy in development.
-  const apiBase = (import.meta as any).env?.VITE_API_URL || '';
+  const apiBase = (import.meta as any).env?.VITE_API_BASE_URL || '';
   const apiUrl = apiBase
     ? `${apiBase.replace(/\/$/, '')}/api${url.startsWith('/') ? '' : '/'}${url}`
     : `/api${url.startsWith('/') ? '' : '/'}${url}`;
