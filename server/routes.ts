@@ -2589,5 +2589,9 @@ router.post("/api/uic/login", express.json(), async (req, res) => {
   }
 });
 
-export default router;
+// Export the registerRoutes function as the default export so consumers that import the default
+// will receive the full route-registration function (not the small standalone `router` used
+// for the UIC proxy). This prevents deployments that mount the default export from only
+// exposing the proxy route and returning 404 for the main API routes like /api/auth/sync.
+export default registerRoutes;
 
