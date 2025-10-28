@@ -120,6 +120,9 @@ async function startServer() {
 
   // Start server
   const port = parseInt(process.env.PORT || "5000", 10);
+  if (!process.env.PORT) {
+    console.warn("[WARNING] process.env.PORT is not set. If running on Railway, this will break routing!\nMake sure you do NOT set a hardcoded port in Railway, and do not set PORT in Railway env variables.");
+  }
   server.listen(port, "0.0.0.0", () => {
     console.log(`🚀 Server running on http://localhost:${port}`);
   });
