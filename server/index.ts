@@ -18,15 +18,16 @@ async function startServer() {
   const app = express();
 
   // --- CORS middleware: allow only the deployed frontend domain ---
-  app.use(
-    cors({
-      origin: "https://orbit-lms.web.app", // allow only your deployed frontend
-      credentials: true, // allow cookies and Authorization headers
-      methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization", "Accept"],
-      optionsSuccessStatus: 204,
-    })
-  );
+  const corsOptions = {
+    origin: "https://orbit-lms.web.app", // allow only your deployed frontend
+    credentials: true, // allow cookies and Authorization headers
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "Accept"],
+    optionsSuccessStatus: 204,
+  };
+  app.use(cors(corsOptions));
+  // Explicitly handle preflight OPTIONS requests for all routes
+  app.options("*", cors(corsOptions));
 
   // Body parsing middleware
   app.use(express.json());
