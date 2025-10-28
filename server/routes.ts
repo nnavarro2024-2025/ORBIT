@@ -524,6 +524,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/auth/sync', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
+      console.log('[AUTH/SYNC] userId from token:', userId);
 
       // Fetch user from Supabase Auth to get the latest user_metadata
       const { data: { user: supabaseUser }, error: supabaseError } = await supabaseAdmin.auth.admin.getUserById(userId);
@@ -531,6 +532,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.error('Error fetching user from Supabase Auth:', supabaseError?.message);
         return res.status(404).json({ message: 'User not found in authentication system.' });
       }
+      console.log('[AUTH/SYNC] Supabase user:', supabaseUser);
 
       // Enforce allowed email domains (prevent sign-ins from non-UIC accounts)
       try {
@@ -550,6 +552,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Sync user data with local database
       const existingUser = await storage.getUser(supabaseUser.id);
+      console.log('[AUTH/SYNC] Existing user in DB:', existingUser);
       const userRecord = {
         id: supabaseUser.id,
         email: supabaseUser.email!,
@@ -563,7 +566,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
 
       const syncedUser = await storage.upsertUser(userRecord);
-      res.json(syncedUser);
+      console.log('[AUTH/SYNC] Synced user returned to client:', syncedUser);
+      res.json({ user: syncedUser });
     } catch (error) {
       console.error('Error syncing user via POST /api/auth/sync:', error);
       res.status(500).json({ message: 'Failed to sync user' });
