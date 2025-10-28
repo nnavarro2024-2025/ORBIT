@@ -1049,7 +1049,23 @@ export default function BookingDashboard() {
   };
 
   const getFacilityImageByName = (name?: string) => {
-    // Fallback to facility-overview.jpg if no image is set
+    if (!name) return '/images/facility-overview.jpg';
+    const lower = name.toLowerCase();
+  if (
+    lower.includes('collab 1') ||
+    lower.includes('collab1') ||
+    lower.includes('collaboration 1') ||
+    lower.includes('collaborative learning room 1')
+  ) return '/images/collab1.jpg';
+  if (
+    lower.includes('collab 2') ||
+    lower.includes('collab2') ||
+    lower.includes('collaboration 2') ||
+    lower.includes('collaborative learning room 2')
+  ) return '/images/collab2.jpg';
+  if (lower.includes('board room') || lower.includes('boardroom')) return '/images/boardroom.jpg';
+  if (lower.includes('lounge')) return '/images/lounge.jpg';
+  // Add more mappings as needed
     return '/images/facility-overview.jpg';
   };
 
@@ -1983,7 +1999,7 @@ export default function BookingDashboard() {
                       }`}
                       onClick={() => { if (!isRestrictedFacility(facility) || (user?.role === 'faculty' || user?.role === 'admin')) { if (isAvailableForBooking) openBookingModal(facility.id); } else { /* ignore clicks for restricted users */ } }}
                     >
-                      <div className="aspect-video bg-gradient-to-br from-pink-100 to-rose-100 flex items-center justify-center relative">
+                      <div className="relative flex items-center justify-center bg-gradient-to-br from-pink-100 to-rose-100" style={{ aspectRatio: '16/9', height: '260px', minHeight: '180px', maxHeight: '320px', width: '100%' }}>
                           {isAvailableForBooking ? (
                             <div className="absolute inset-0 bg-black bg-opacity-40 flex items-center justify-center">
                               <FacilityStatusBadge facility={facility} bookingStatus={bookingStatus} />
@@ -2432,17 +2448,20 @@ export default function BookingDashboard() {
                             </div>
                           ) : null}
                         {(facility.image || facility.imageUrl || getFacilityImageByName(facility.name)) ? (
-                          <img
-                            src={facility.image ? `/images/${facility.image}` : (facility.imageUrl || getFacilityImageByName(facility.name))}
-                            alt={facility.name}
-                            className={`w-full h-full object-cover transition-transform duration-300 ${
-                              isAvailableForBooking ? 'group-hover:scale-105' : 'grayscale'
-                            }`}
-                            onError={(e) => {
-                              e.currentTarget.style.display = 'none';
-                              e.currentTarget.nextElementSibling?.classList?.remove('hidden');
-                            }}
-                          />
+                          <div className="absolute inset-0 w-full h-full flex items-center justify-center">
+                            <img
+                              src={facility.image ? `/images/${facility.image}` : (facility.imageUrl || getFacilityImageByName(facility.name))}
+                              alt={facility.name}
+                              className={`w-full h-full object-cover transition-transform duration-300 ${
+                                isAvailableForBooking ? 'group-hover:scale-105' : 'grayscale'
+                              }`}
+                              style={{ objectPosition: 'center', width: '100%', height: '100%', aspectRatio: '16/9', minHeight: '180px', maxHeight: '320px' }}
+                              onError={(e) => {
+                                e.currentTarget.style.display = 'none';
+                                e.currentTarget.nextElementSibling?.classList?.remove('hidden');
+                              }}
+                            />
+                          </div>
                         ) : null}
                         {!(facility.image || facility.imageUrl || getFacilityImageByName(facility.name)) && (
                           <div className="text-center">

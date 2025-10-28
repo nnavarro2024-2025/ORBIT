@@ -115,8 +115,8 @@ export default function AvailabilityGrid({ date, onSelectRange, unavailableDates
   // --- Room list for sidebar (per role) ---
   // Define which roles can see which rooms
   const roomRoleMap: Record<string, Array<'student' | 'faculty' | 'admin'>> = {
-    'Collaborative Learning 1': ['student', 'faculty', 'admin'],
-    'Collaborative Learning 2': ['student', 'faculty', 'admin'],
+    'Collaborative Learning 1': ['student', 'admin'],
+    'Collaborative Learning 2': ['student', 'admin'],
     'Board Room': ['faculty', 'admin'],
     'Facility Lounge': ['faculty', 'admin'],
   };
@@ -271,23 +271,7 @@ export default function AvailabilityGrid({ date, onSelectRange, unavailableDates
             </div>
             {/* Time grid */}
             <div className="relative">
-              {/* Red timeline for current time */}
-              {today >= weekStart && today <= getDateForDay(5) && (
-                <div
-                  className="absolute left-0 right-0 h-0.5 bg-red-500 z-20"
-                  style={{
-                    top: (() => {
-                      // Calculate vertical position of red line
-                      const dayIdx = today.getDay() === 0 ? 6 : today.getDay() - 1;
-                      const hour = today.getHours() + today.getMinutes() / 60;
-                      const hourIdx = dayIdx === 5
-                        ? Math.max(0, Math.min(satHours.length - 1, Math.floor(hour - 7.5)))
-                        : Math.max(0, Math.min(hours.length - 1, Math.floor(hour - 7.5)));
-                      return `${(hourIdx) * 48 + 40}px`;
-                    })(),
-                  }}
-                />
-              )}
+              {/* Red timeline for current time removed */}
               <div className="grid grid-cols-6" style={{ minWidth: 600 }}>
                 {weekDays.map((d, dayIdx) => {
                   const date = getDateForDay(dayIdx);

@@ -17,10 +17,10 @@ async function startServer() {
   
   const app = express();
 
-  // --- CORS middleware: allow all origins dynamically ---
+  // --- CORS middleware: allow only the deployed frontend domain ---
   app.use(
     cors({
-      origin: true, // allow all origins
+      origin: "https://orbit-lms.web.app", // allow only your deployed frontend
       credentials: true, // allow cookies and Authorization headers
       methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
       allowedHeaders: ["Content-Type", "Authorization", "Accept"],
