@@ -53,11 +53,40 @@ export async function authenticatedFetch(url: string, options: RequestInit = {})
       console.error(`API 502 Bad Gateway at ${apiUrl} - proxy failed to reach backend.`);
     }
     if (response.status === 401) {
-      console.error("🚨 401 Unauthorized received. Session expired. NOT redirecting to login for debugging.");
+      console.error("🚨 401 Unauthorized received. Attempting silent session refresh...");
       console.error("401 Response:", response);
+
+      // Try to get a refreshed session from Supabase client and retry once if token changed
+      try {
+        const {
+          data: { session: refreshedSession },
+        } = await supabase.auth.getSession();
+
+        const refreshedToken = refreshedSession?.access_token;
+        const originalToken = session.access_token;
+
+        if (refreshedToken && refreshedToken !== originalToken) {
+          console.log('[AUTH] Token refreshed locally, retrying request once');
+          // Retry the original request with the refreshed token
+          const retryHeaders = new Headers(options.headers);
+          retryHeaders.set('Authorization', `Bearer ${refreshedToken}`);
+          retryHeaders.set('Content-Type', 'application/json');
+
+          const retryResp = await fetch(apiUrl, {
+            ...options,
+            headers: retryHeaders,
+          });
+
+          if (retryResp.ok) return retryResp.json().catch(() => undefined);
+          // If retry failed, fall through to sign-out below
+        }
+      } catch (e) {
+        console.warn('[AUTH] Silent refresh attempt failed', e);
+      }
+
+      // Final fallback: sign out the client to force a fresh login
       await supabase.auth.signOut();
-      // window.location.href = "/login"; // Temporarily commented out for debugging
-      // No need to throw an error here as the page will reload
+      // window.location.href = "/login"; // Optionally redirect to login
     }
     
     if (response.status === 403) {

@@ -6,6 +6,10 @@ import { storage } from "./storage";
 const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const anonKey = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
+// Helpful debug logs (safe: do NOT print secret keys)
+console.log(`[AUTH] SUPABASE_URL=${supabaseUrl}`);
+console.log(`[AUTH] SUPABASE_ANON_KEY set?=${!!anonKey}`);
+
 export async function isAuthenticated(req: Request, res: Response, next: NextFunction) {
   const token = req.headers.authorization?.replace("Bearer ", "");
 
@@ -24,16 +28,25 @@ export async function isAuthenticated(req: Request, res: Response, next: NextFun
     error,
   } = await supabase.auth.getUser();
 
-  // Only log errors in development
-  if (error && process.env.NODE_ENV === 'development') {
-    console.error("❌ [isAuthenticated] Supabase getUser error:", error.message);
-    if (error.message.includes("JWT expired")) {
+  if (error) {
+    // Log details to make debugging easier in staging/dev. Avoid leaking tokens.
+    console.error("❌ [isAuthenticated] Supabase getUser error:", error.message || error);
+    try {
+      const snippet = token.substring(0, 6) + '...' + token.substring(token.length - 6);
+      console.error(`[isAuthenticated] Token snippet: ${snippet}`);
+    } catch (e) {
+      // ignore
+    }
+    if (error.message && error.message.includes("JWT expired")) {
       console.error("🚨 [isAuthenticated] JWT token has expired!");
     }
   }
 
   if (error || !user) {
-    return res.status(401).json({ message: "Unauthorized: Invalid token" });
+    const detail = error?.message || (user ? undefined : 'No user returned');
+    const payload: any = { message: 'Unauthorized: Invalid token' };
+    if (process.env.NODE_ENV !== 'production' && detail) payload.detail = detail;
+    return res.status(401).json(payload);
   }
 
   // 👇 Attach user in a way that works with your current routes
@@ -65,7 +78,10 @@ export async function isAuthenticatedAndActive(req: Request, res: Response, next
   } = await supabase.auth.getUser();
 
   if (error || !user) {
-    return res.status(401).json({ message: "Unauthorized: Invalid token" });
+    const detail = error?.message || (user ? undefined : 'No user returned');
+    const payload: any = { message: 'Unauthorized: Invalid token' };
+    if (process.env.NODE_ENV !== 'production' && detail) payload.detail = detail;
+    return res.status(401).json(payload);
   }
 
   // Check user status in database
