@@ -30,16 +30,15 @@ export function useAuth() {
             const userData = await authenticatedFetch('/auth/sync', {
               method: 'POST',
             });
-            
+            const user = userData?.user;
             // Check if user is banned - keep user data but don't auto-logout
             // This allows the Router to show the BannedUser component
-            if (userData && userData.status === "banned") {
+            if (user && user.status === "banned") {
               console.log("User is banned, setting banned user data");
-              if (isMounted) setUser(userData); // Keep user data so Router can show ban message
+              if (isMounted) setUser(user); // Keep user data so Router can show ban message
               return; // Don't logout, let Router handle the ban display
             }
-            
-            if (isMounted) setUser(userData);
+            if (isMounted) setUser(user);
             // Successful sync means the user is allowed — clear any domain-block flag
             try { sessionStorage.removeItem('orbit:domain_blocked'); } catch (_) {}
           } catch (syncError) {
@@ -48,7 +47,6 @@ export function useAuth() {
             // This prevents data inconsistency and logs the user out cleanly.
             await supabase.auth.signOut();
             if (isMounted) setUser(null);
-            
             // Check if it's a 403 domain block error
             const errorMessage = (syncError as any)?.message || '';
             if (errorMessage.includes('403') || errorMessage.includes('restricted')) {
