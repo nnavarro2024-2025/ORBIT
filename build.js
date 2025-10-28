@@ -8,11 +8,16 @@ console.log('Building ORBIT for Vercel...');
 console.log('Building client...');
 execSync('cd client && npm run build', { stdio: 'inherit' });
 
+// Build the server
+console.log('Building server...');
+execSync('npm run build:server', { stdio: 'inherit' });
+
 // Copy client dist to root
 console.log('Copying client build to root...');
-if (fs.existsSync('dist')) {
-  fs.rmSync('dist', { recursive: true, force: true });
+if (fs.existsSync('dist/client')) {
+  // Remove old client files from dist (but keep server bundle)
+  fs.rmSync('dist/client', { recursive: true, force: true });
 }
-fs.cpSync('client/dist', 'dist', { recursive: true });
+fs.cpSync('client/dist', 'dist/client', { recursive: true });
 
 console.log('Build complete!');
