@@ -19,7 +19,7 @@ async function startServer() {
 
   // --- CORS middleware: allow only the deployed frontend domain ---
   const corsOptions = {
-    origin: "https://orbit-lms.web.app", // allow only your deployed frontend
+    origin: "https://orbit-lms1.web.app", // allow only your deployed frontend
     credentials: true, // allow cookies and Authorization headers
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "Accept"],
