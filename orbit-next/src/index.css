@@ -1,0 +1,165 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: hsl(0, 0%, 100%);
+  --foreground: hsl(0, 0%, 9%);
+  --muted: hsl(0, 0%, 96%);
+  --muted-foreground: hsl(0, 0%, 45%);
+  --popover: hsl(0, 0%, 100%);
+  --popover-foreground: hsl(0, 0%, 9%);
+  --card: hsl(0, 0%, 100%);
+  --card-foreground: hsl(0, 0%, 9%);
+  --border: hsl(0, 0%, 90%);
+  --input: hsl(0, 0%, 90%);
+  --primary: hsl(207, 90%, 54%);
+  --primary-foreground: hsl(0, 0%, 100%);
+  --secondary: hsl(122, 47%, 36%);
+  --secondary-foreground: hsl(0, 0%, 100%);
+  --accent: hsl(0, 0%, 96%);
+  --accent-foreground: hsl(0, 0%, 9%);
+  --destructive: hsl(0, 75%, 60%);
+  --destructive-foreground: hsl(0, 0%, 100%);
+  --ring: hsl(207, 90%, 54%);
+  --warning: hsl(36, 100%, 47%);
+  --warning-foreground: hsl(0, 0%, 100%);
+  --surface: hsl(0, 0%, 100%);
+  --surface-variant: hsl(0, 0%, 96%);
+  --radius: 0.5rem;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  body {
+    @apply font-sans antialiased;
+    background-color: hsl(0, 0%, 100%);
+    color: hsl(0, 0%, 9%);
+  }
+}
+
+@layer components {
+  .material-card {
+    @apply bg-card rounded-lg shadow-sm border transition-shadow duration-300;
+  }
+
+  .material-card:hover {
+    @apply shadow-md;
+  }
+
+  .material-button {
+    @apply px-6 py-3 rounded-lg font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .material-button.primary {
+    @apply bg-primary text-primary-foreground hover:bg-primary hover:opacity-90 focus:ring-primary;
+  }
+
+  .material-button.secondary {
+    @apply bg-secondary text-secondary-foreground hover:bg-secondary hover:opacity-90 focus:ring-secondary;
+  }
+
+  .material-button.outlined {
+    @apply border-2 border-primary text-primary hover:bg-primary hover:text-primary-foreground focus:ring-primary;
+  }
+
+  .material-button.warning {
+    background-color: hsl(var(--warning));
+    color: hsl(var(--warning-foreground));
+    transition: opacity 0.2s;
+  }
+
+  .material-button.warning:hover {
+    opacity: 0.9;
+  }
+
+  .material-button.destructive {
+    @apply bg-destructive text-destructive-foreground hover:bg-destructive hover:opacity-90 focus:ring-destructive;
+  }
+
+  .material-button.small {
+    @apply px-3 py-1.5 text-sm rounded-md bg-gray-200 text-gray-800 hover:bg-gray-300;
+  }
+
+  .material-input {
+    @apply w-full px-4 py-3 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent bg-background;
+  }
+
+  .sidebar-item {
+    @apply flex items-center px-4 py-3 text-muted-foreground hover:bg-accent hover:text-accent-foreground cursor-pointer transition-colors duration-200 rounded-lg;
+  }
+
+  .sidebar-item.active {
+    @apply bg-primary text-primary-foreground;
+  }
+
+  .status-badge {
+    @apply px-3 py-1 rounded-full text-sm font-medium;
+  }
+
+  .status-badge.pending {
+    @apply bg-yellow-100 text-yellow-800;
+  }
+
+  .status-badge.approved {
+    @apply bg-green-100 text-green-800;
+  }
+
+  .status-badge.denied {
+    @apply bg-red-100 text-red-800;
+  }
+
+  .status-badge.active {
+    @apply bg-blue-100 text-blue-800;
+  }
+
+  .status-badge.cancelled {
+    @apply bg-gray-100 text-gray-800;
+  }
+
+  .status-badge.inactive {
+    @apply bg-gray-100 text-gray-800;
+  }
+}
+
+@layer utilities {
+  .gradient-primary {
+    background: linear-gradient(
+      135deg,
+      hsl(207, 90%, 54%) 0%,
+      hsl(207, 90%, 44%) 100%
+    );
+  }
+
+  .gradient-secondary {
+    background: linear-gradient(
+      135deg,
+      hsl(122, 47%, 36%) 0%,
+      hsl(122, 47%, 26%) 100%
+    );
+  }
+
+  .shadow-material {
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1), 0 8px 16px rgba(0, 0, 0, 0.1);
+  }
+
+  .shadow-material-lg {
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.12), 0 16px 32px rgba(0, 0, 0, 0.12);
+  }
+}
+
+/* Hide and style spin buttons for number input */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+  background-color: transparent; /* Ensure background is transparent */
+  color: transparent; /* Hide any default icon color */
+}
+input[type="number"] {
+  appearance: textfield; /* Standard property for compatibility */
+  -moz-appearance: textfield; /* Firefox */
+}
