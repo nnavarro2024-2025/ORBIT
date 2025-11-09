@@ -22,8 +22,9 @@ export const sessions = pgTable(
     sess: jsonb("sess").notNull(),
     expire: timestamp("expire").notNull(),
   },
-  (table) => [index("IDX_session_expire").on(table.expire)],
 );
+
+export const sessionsExpireIdx = index("IDX_session_expire").on(sessions.expire);
 
 // User roles enum
 export const userRoleEnum = pgEnum("user_role", ["student", "faculty", "admin"]);
@@ -73,7 +74,7 @@ export const facilities = pgTable("facilities", {
   image: varchar("image", { length: 255 }), // Path or filename for facility image
   isActive: boolean("is_active").default(true).notNull(),
   unavailableReason: text("unavailable_reason"),
-  unavailableDates: jsonb("unavailable_dates").$type<Array<{ startDate: string; endDate: string; reason?: string }>>(),
+  unavailableDates: jsonb("unavailable_dates"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -109,6 +110,7 @@ export const systemAlerts = pgTable("system_alerts", {
   userId: varchar("user_id").references(() => users.id),
   isRead: boolean("is_read").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 // Activity logs
@@ -123,34 +125,34 @@ export const activityLogs = pgTable("activity_logs", {
 });
 
 // Relations
-export const usersRelations = relations(users, ({ many }) => ({
-  facilityBookings: many(facilityBookings),
-  systemAlerts: many(systemAlerts),
-  activityLogs: many(activityLogs),
+export const usersRelations = relations(users, (helpers) => ({
+  facilityBookings: helpers.many(facilityBookings),
+  systemAlerts: helpers.many(systemAlerts),
+  activityLogs: helpers.many(activityLogs),
 }));
 
-export const computerStationsRelations = relations(computerStations, ({ many: _many }) => ({
+export const computerStationsRelations = relations(computerStations, () => ({
   // ORZ sessions removed
 }));
 
 // ORZ relations removed
 
-export const facilitiesRelations = relations(facilities, ({ many }) => ({
-  bookings: many(facilityBookings),
+export const facilitiesRelations = relations(facilities, (helpers) => ({
+  bookings: helpers.many(facilityBookings),
 }));
 
-export const facilityBookingsRelations = relations(facilityBookings, ({ one }) => ({
-  facility: one(facilities, { fields: [facilityBookings.facilityId], references: [facilities.id] }),
-  user: one(users, { fields: [facilityBookings.userId], references: [users.id] }),
-  admin: one(users, { fields: [facilityBookings.adminId], references: [users.id] }),
+export const facilityBookingsRelations = relations(facilityBookings, (helpers) => ({
+  facility: helpers.one(facilities, { fields: [facilityBookings.facilityId], references: [facilities.id] }),
+  user: helpers.one(users, { fields: [facilityBookings.userId], references: [users.id] }),
+  admin: helpers.one(users, { fields: [facilityBookings.adminId], references: [users.id] }),
 }));
 
-export const systemAlertsRelations = relations(systemAlerts, ({ one }) => ({
-  user: one(users, { fields: [systemAlerts.userId], references: [users.id] }),
+export const systemAlertsRelations = relations(systemAlerts, (helpers) => ({
+  user: helpers.one(users, { fields: [systemAlerts.userId], references: [users.id] }),
 }));
 
-export const activityLogsRelations = relations(activityLogs, ({ one }) => ({
-  user: one(users, { fields: [activityLogs.userId], references: [users.id] }),
+export const activityLogsRelations = relations(activityLogs, (helpers) => ({
+  user: helpers.one(users, { fields: [activityLogs.userId], references: [users.id] }),
 }));
 
 // Schemas for validation - using simplified approach to avoid drizzle-zod typing issues
@@ -211,6 +213,8 @@ export const insertSystemAlertSchema = z.object({
   message: z.string(),
   userId: z.string().optional(),
   isRead: z.boolean().default(false),
+  updatedAt: z.date().optional(),
+  createdAt: z.date().optional(),
 });
 
 export const insertActivityLogSchema = z.object({

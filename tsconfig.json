@@ -1,48 +1,17 @@
 {
   "compilerOptions": {
     "target": "ES2020",
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "module": "ESNext",
-    "skipLibCheck": true,
-
-    /* Module Resolution */
-    "moduleResolution": "bundler",
-    "allowImportingTsExtensions": false,
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "noEmit": true,
-    "jsx": "react-jsx",
-
-    /* Bundler mode */
-    "allowSyntheticDefaultImports": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
-
-    /* Linting */
+    "module": "commonjs",
+    "moduleResolution": "node",
     "strict": true,
-    "noUnusedLocals": false,
-    "noUnusedParameters": false,
-    "noFallthroughCasesInSwitch": true,
-
-  /* Path mapping */
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "baseUrl": ".",
     "paths": {
-      "@/*": ["./client/src/*"],
-      "@shared/*": ["./shared/*"],
-      "@assets/*": ["./attached_assets/*"]
+      "*": ["orbit-next/node_modules/*", "*"]
     },
-
-    /* Types */
-    "types": ["node"]
+    "types": ["node"],
+    "typeRoots": ["./orbit-next/node_modules/@types", "./node_modules/@types"]
   },
-  "include": [
-    "client/src/**/*",
-    "server/**/*",
-    "shared/**/*",
-    "api/**/*"
-  ],
-  "exclude": [
-    "node_modules",
-    "dist",
-    "migrations"
-  ]
+  "include": ["drizzle.config.ts", "shared/**/*.ts", "types/**/*.d.ts"]
 }
