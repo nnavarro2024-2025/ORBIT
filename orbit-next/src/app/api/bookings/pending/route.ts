@@ -2,11 +2,16 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { requireAdminUser } from "@/server/auth";
 import { storage } from "@/server/storage";
+import { isBuildTime } from "@/server/build-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
+  if (isBuildTime()) {
+    return NextResponse.json([], { status: 200 });
+  }
+
   const authResult = await requireAdminUser(request.headers);
   if (!authResult.ok) {
     return authResult.response;

@@ -9,7 +9,7 @@ import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
 import BookingModal from "@/components/modals/BookingModal";
 import EditBookingModal from "@/components/modals/EditBookingModal";
-import { Plus, Calendar, Home, Eye, AlertTriangle, BarChart3, Settings, Clock, CheckCircle, Loader2 } from "lucide-react";
+import { Plus, Calendar, Home, Eye, AlertTriangle, BarChart3, Settings, Clock, CheckCircle, Loader2, HelpCircle } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import {
@@ -22,6 +22,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { format } from 'date-fns';
 import AvailabilityGrid from '@/components/AvailabilityGrid';
+import FaqList from '@/components/faq/FaqList';
 import { useLegacyLocation } from "@/lib/navigation";
 
 export default function BookingDashboard() {
@@ -150,6 +151,7 @@ export default function BookingDashboard() {
       { id: 'new-booking', label: 'New Booking', icon: BarChart3 },
       { id: 'my-bookings', label: 'My Bookings', icon: Calendar },
       { id: 'available-rooms', label: 'Available Rooms', icon: Home },
+      { id: 'faqs', label: 'FAQs', icon: HelpCircle },
       { id: 'activity-logs', label: 'Activity Logs', icon: BarChart3 },
       { id: 'booking-settings', label: 'Guidelines & Policy', icon: Settings },
     ];
@@ -444,6 +446,21 @@ export default function BookingDashboard() {
       } catch (e) {
         console.warn('[BookingDashboard] updateBookingMutation.onSuccess handler failed', e);
       }
+
+      try {
+        await queryClient.invalidateQueries({ queryKey: ["/api/admin/activity"] });
+      } catch (activityError) {
+        console.warn('[BookingDashboard] Failed to invalidate activity logs after booking update', activityError);
+      }
+
+      try {
+        toast({
+          title: 'Booking updated successfully.',
+          description: 'Your changes have been saved.',
+        });
+      } catch (toastError) {
+        console.warn('[BookingDashboard] Failed to show update success toast', toastError);
+      }
     },
     onError: (error: any) => {
       // Handle specific conflict error, prefer structured payload when available
@@ -523,11 +540,7 @@ export default function BookingDashboard() {
           const end = new Date(bookingSnapshot.endTime);
           const now = new Date();
           const isActive = bookingSnapshot.status === 'approved' ? (start <= now && now <= end) : (start <= now && now <= end);
-          if (isActive) {
-            toast({ title: 'Booking Ended', description: 'Your active booking has been ended.' });
-          } else {
-            toast({ title: 'Booking Cancelled', description: 'Your booking has been cancelled.' });
-          }
+          toast({ title: 'Booking cancelled successfully.', description: isActive ? 'Your active booking has been ended.' : 'Your booking has been cancelled.' });
           // Close modal only after mutation succeeds and cache is updated
           setShowCancelModal(false);
           setBookingToCancel(null);
@@ -1945,6 +1958,19 @@ export default function BookingDashboard() {
           </div>
         );
 
+      case "faqs":
+        return (
+          <div className="bg-white/0">
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
+              <div className="mb-6">
+                <h3 className="text-lg sm:text-xl font-semibold text-gray-900">Frequently Asked Questions</h3>
+                <p className="text-xs sm:text-sm text-gray-600 mt-1">Find quick answers about booking policies, facilities, and support.</p>
+              </div>
+              <FaqList />
+            </div>
+          </div>
+        );
+
       case "available-rooms":
         return (
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
@@ -2001,51 +2027,47 @@ export default function BookingDashboard() {
                       }`}
                       onClick={() => { if (!isRestrictedFacility(facility) || (user?.role === 'faculty' || user?.role === 'admin')) { if (isAvailableForBooking) openBookingModal(facility.id); } else { /* ignore clicks for restricted users */ } }}
                     >
-                      <div className="relative flex items-center justify-center bg-gradient-to-br from-pink-100 to-rose-100" style={{ aspectRatio: '16/9', height: '260px', minHeight: '180px', maxHeight: '320px', width: '100%' }}>
-                          {isAvailableForBooking ? (
-                            <div className="absolute inset-0 bg-black bg-opacity-40 flex items-center justify-center">
-                              <FacilityStatusBadge facility={facility} bookingStatus={bookingStatus} />
+                      <div className="aspect-video bg-gradient-to-br from-pink-100 to-rose-100 flex items-center justify-center relative">
+                        {isAvailableForBooking ? (
+                          <div className="absolute inset-0 bg-black bg-opacity-40 flex items-center justify-center">
+                            <FacilityStatusBadge facility={facility} bookingStatus={bookingStatus} />
+                          </div>
+                        ) : null}
 
-                              {/* Owner cancel button intentionally removed from image overlay to avoid duplicated visuals.
-                                  End/cancel actions remain available in the booking details area and confirm dialogs. */}
+                        {(facility.image || facility.imageUrl || getFacilityImageByName(facility.name)) ? (
+                          <div className="absolute inset-0 w-full h-full flex items-center justify-center">
+                            <img
+                              src={facility.image ? `/images/${facility.image}` : (facility.imageUrl || getFacilityImageByName(facility.name))}
+                              alt={facility.name}
+                              className={`w-full h-full object-cover transition-transform duration-300 ${
+                                isAvailableForBooking ? 'group-hover:scale-105' : 'grayscale'
+                              }`}
+                              style={{ objectPosition: 'center', width: '100%', height: '100%' }}
+                              onError={(e) => {
+                                e.currentTarget.style.display = 'none';
+                                e.currentTarget.nextElementSibling?.classList?.remove('hidden');
+                              }}
+                            />
+                            <div className="hidden absolute inset-0 flex items-center justify-center">
+                              <div className="text-center">
+                                <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mx-auto mb-2 shadow-sm">
+                                  <Calendar className={`h-8 w-8 ${isAvailableForBooking ? 'text-gray-400' : 'text-gray-300'}`} />
+                                </div>
+                                <p className={`text-sm ${isAvailableForBooking ? 'text-gray-500' : 'text-gray-400'}`}>
+                                  No image available
+                                </p>
+                              </div>
                             </div>
-                          ) : null}
-                        {facility.image ? (
-                          <img
-                            src={`/images/${facility.image}`}
-                            alt={facility.name}
-                            className={`w-full h-full object-cover transition-transform duration-300 ${
-                              isAvailableForBooking ? 'group-hover:scale-105' : 'grayscale'
-                            }`}
-                            onError={(e) => {
-                              // Fallback to imageUrl or default if image fails
-                              if (facility.imageUrl) {
-                                e.currentTarget.src = facility.imageUrl;
-                              } else {
-                                e.currentTarget.src = getFacilityImageByName(facility.name);
-                              }
-                            }}
-                          />
-                        ) : facility.imageUrl ? (
-                          <img
-                            src={facility.imageUrl}
-                            alt={facility.name}
-                            className={`w-full h-full object-cover transition-transform duration-300 ${
-                              isAvailableForBooking ? 'group-hover:scale-105' : 'grayscale'
-                            }`}
-                            onError={(e) => {
-                              e.currentTarget.src = getFacilityImageByName(facility.name);
-                            }}
-                          />
+                          </div>
                         ) : (
-                          <img
-                            src={getFacilityImageByName(facility.name)}
-                            alt={facility.name}
-                            className={`w-full h-full object-cover transition-transform duration-300 ${
-                              isAvailableForBooking ? 'group-hover:scale-105' : 'grayscale'
-                            }`}
-                          />
-                        
+                          <div className="text-center">
+                            <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mx-auto mb-2 shadow-sm">
+                              <Calendar className={`h-8 w-8 ${isAvailableForBooking ? 'text-gray-400' : 'text-gray-300'}`} />
+                            </div>
+                            <p className={`text-sm ${isAvailableForBooking ? 'text-gray-500' : 'text-gray-400'}`}>
+                              No image available
+                            </p>
+                          </div>
                         )}
                       </div>
 

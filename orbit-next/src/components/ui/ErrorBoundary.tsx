@@ -17,7 +17,6 @@ export default class ErrorBoundary extends React.Component<Props, State> {
 
   componentDidCatch(error: any, info: any) {
     // Log to console for now; could send to telemetry
-    // eslint-disable-next-line no-console
     console.error('ErrorBoundary caught error:', error, info);
   }
 

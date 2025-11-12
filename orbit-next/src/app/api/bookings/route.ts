@@ -45,8 +45,16 @@ export async function POST(request: NextRequest) {
     const endTime = new Date(rawBody?.endTime);
     const forceCancelConflicts = Boolean(rawBody?.forceCancelConflicts);
 
+    const reminderOptIn = rawBody?.reminderOptIn === undefined ? true : Boolean(rawBody.reminderOptIn);
+    const rawLeadMinutes = Number(rawBody?.reminderLeadMinutes);
+    const reminderLeadMinutes = Number.isFinite(rawLeadMinutes)
+      ? Math.min(Math.max(Math.floor(rawLeadMinutes), 5), 1440)
+      : 60;
+
     const parsed = createFacilityBookingSchema.parse({
       ...rawBody,
+      reminderOptIn,
+      reminderLeadMinutes,
       startTime,
       endTime,
       userId: authResult.user.id,

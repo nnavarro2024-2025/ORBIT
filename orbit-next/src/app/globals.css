@@ -1,41 +1,35 @@
-@import "tailwindcss";
-
-@layer theme, base, components, utilities;
-
-@preset theme, base, components, utilities;
-
+/* stylelint-disable at-rule-no-unknown */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+/* stylelint-enable at-rule-no-unknown */
 
 :root {
-  --background: hsl(0, 0%, 100%);
-  --foreground: hsl(0, 0%, 9%);
-  --muted: hsl(0, 0%, 96%);
-  --muted-foreground: hsl(0, 0%, 45%);
-  --popover: hsl(0, 0%, 100%);
-  --popover-foreground: hsl(0, 0%, 9%);
-  --card: hsl(0, 0%, 100%);
-  --card-foreground: hsl(0, 0%, 9%);
-  --border: hsl(0, 0%, 90%);
-  --input: hsl(0, 0%, 90%);
-  --primary: hsl(207, 90%, 54%);
-  --primary-foreground: hsl(0, 0%, 100%);
-  --secondary: hsl(122, 47%, 36%);
-  --secondary-foreground: hsl(0, 0%, 100%);
-  --accent: hsl(0, 0%, 96%);
-  --accent-foreground: hsl(0, 0%, 9%);
-  --destructive: hsl(0, 75%, 60%);
-  --destructive-foreground: hsl(0, 0%, 100%);
-  --ring: hsl(207, 90%, 54%);
-  --warning: hsl(36, 100%, 47%);
-  --warning-foreground: hsl(0, 0%, 100%);
-  --surface: hsl(0, 0%, 100%);
-  --surface-variant: hsl(0, 0%, 96%);
+  --background: 0 0% 100%;
+  --foreground: 0 0% 9%;
+  --muted: 0 0% 96%;
+  --muted-foreground: 0 0% 45%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 9%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 9%;
+  --border: 0 0% 90%;
+  --input: 0 0% 90%;
+  --primary: 207 90% 54%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 122 47% 36%;
+  --secondary-foreground: 0 0% 100%;
+  --accent: 0 0% 96%;
+  --accent-foreground: 0 0% 9%;
+  --destructive: 0 75% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --ring: 207 90% 54%;
+  --warning: 36 100% 47%;
+  --warning-foreground: 0 0% 100%;
+  --surface: 0 0% 100%;
+  --surface-variant: 0 0% 96%;
   --radius: 0.5rem;
-}
 
-@theme {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-muted: var(--muted);
@@ -116,11 +110,12 @@
     font-family: var(--font-family-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    background-color: hsl(0, 0%, 100%);
-    color: hsl(0, 0%, 9%);
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
   }
 }
 
+/* stylelint-disable at-rule-no-unknown */
 @layer components {
   .material-card {
     @apply bg-card rounded-lg shadow-sm border transition-shadow duration-300;
@@ -204,6 +199,7 @@
     @apply bg-gray-100 text-gray-800;
   }
 }
+/* stylelint-enable at-rule-no-unknown */
 
 @layer utilities {
   .gradient-primary {

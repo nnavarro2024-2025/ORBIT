@@ -5,6 +5,9 @@ import {
   computerStations,
   systemAlerts,
   activityLogs,
+  faqs,
+  bookingReminders,
+  reportSchedules,
   type User,
   type UpsertUser,
   type FacilityBooking,
@@ -13,9 +16,16 @@ import {
   type ComputerStation,
   type SystemAlert,
   type ActivityLog,
+  type Faq,
   createFacilityBookingSchema,
+  insertFaqSchema,
+  updateFaqSchema,
+  insertReportScheduleSchema,
   userRoleEnum,
   userStatusEnum,
+  type ReportSchedule,
+  type InsertReportSchedule,
+  type UpdateReportSchedule,
 } from "@shared/schema";
 import { db } from "@/server/db";
 import { eq, and, desc, asc, gte, lte, count, sql, isNotNull, or, lt, gt, ne } from "drizzle-orm";
@@ -82,14 +92,28 @@ export interface IStorage {
   // Activity logs
   createActivityLog(log: ActivityLog): Promise<ActivityLog>;
   getActivityLogs(limit?: number): Promise<ActivityLog[]>;
-  
+
+  // Report schedules
+  getReportSchedules(): Promise<ReportSchedule[]>;
+  getReportSchedule(id: string): Promise<ReportSchedule | undefined>;
+  createReportSchedule(input: InsertReportSchedule): Promise<ReportSchedule>;
+  updateReportSchedule(id: string, updates: UpdateReportSchedule): Promise<ReportSchedule | null>;
+  deleteReportSchedule(id: string): Promise<void>;
+
+  // FAQs
+  getFaqs(): Promise<Faq[]>;
+  createFaq(input: z.infer<typeof insertFaqSchema>): Promise<Faq>;
+  updateFaq(id: string, input: z.infer<typeof updateFaqSchema>): Promise<Faq | null>;
+  deleteFaq(id: string): Promise<void>;
+  recordFaqFeedback(id: string, helpful: boolean): Promise<Faq | null>;
+
   // Statistics
   getOrzUsageStats(): Promise<any>; // returns empty data now that ORZ is removed
   getFacilityUsageStats(): Promise<any>;
   getAdminDashboardStats(): Promise<any>;
 }
 
-class DatabaseStorage implements IStorage {
+export class DatabaseStorage implements IStorage {
   // User operations (mandatory for Replit Auth)
   async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
@@ -279,7 +303,9 @@ class DatabaseStorage implements IStorage {
         const overlaps = await tx.select().from(facilityBookings).where(
           and(
             eq(facilityBookings.facilityId, facilityId),
-            or(eq(facilityBookings.status, 'approved'), eq(facilityBookings.status, 'pending')),
+            // Only check approved bookings
+            eq(facilityBookings.status, "approved"),
+            // Time overlap
             and(
               lt(facilityBookings.startTime, booking.endTime),
               gt(facilityBookings.endTime, booking.startTime)
@@ -294,6 +320,17 @@ class DatabaseStorage implements IStorage {
 
         // No conflicts - insert booking
         const [created] = await tx.insert(facilityBookings).values(booking as any).returning();
+
+        const shouldScheduleReminder = (booking as any).reminderOptIn !== false;
+        if (shouldScheduleReminder) {
+          await this.upsertBookingReminder(tx as any, created.id, booking.reminderLeadMinutes ?? 60, booking.startTime);
+        } else {
+          await tx
+            .update(facilityBookings)
+            .set({ reminderStatus: "skipped", reminderScheduledAt: null, reminderOptIn: false })
+            .where(eq(facilityBookings.id, created.id));
+        }
+
         return created;
       });
       return result as FacilityBooking;
@@ -316,7 +353,85 @@ class DatabaseStorage implements IStorage {
         try { console.log('[storage] updateFacilityBooking - writing equipment for booking', id, (updates as any).equipment); } catch (e) {}
       }
     } catch (e) {}
-    await db.update(facilityBookings).set(updates).where(eq(facilityBookings.id, id));
+    await db.transaction(async (tx) => {
+      const [existing] = await tx.select().from(facilityBookings).where(eq(facilityBookings.id, id));
+      if (!existing) return;
+
+      await tx.update(facilityBookings).set(updates).where(eq(facilityBookings.id, id));
+
+      const [updated] = await tx.select().from(facilityBookings).where(eq(facilityBookings.id, id));
+      if (!updated) return;
+
+      if ((updates as any).reminderOptIn === false) {
+        await tx.delete(bookingReminders).where(eq(bookingReminders.bookingId, id));
+        await tx
+          .update(facilityBookings)
+          .set({ reminderStatus: "skipped", reminderScheduledAt: null, reminderOptIn: false })
+          .where(eq(facilityBookings.id, id));
+        return;
+      }
+
+      const reminderOptIn = (updates as any).reminderOptIn ?? updated.reminderOptIn;
+      if (!reminderOptIn) {
+        await tx.delete(bookingReminders).where(eq(bookingReminders.bookingId, id));
+        await tx
+          .update(facilityBookings)
+          .set({ reminderStatus: "skipped", reminderScheduledAt: null, reminderOptIn: false })
+          .where(eq(facilityBookings.id, id));
+        return;
+      }
+
+      if (reminderOptIn) {
+        const leadMinutes = updates.reminderLeadMinutes ?? updated.reminderLeadMinutes ?? 60;
+        const startTime = updates.startTime ?? updated.startTime;
+        await this.upsertBookingReminder(tx as any, id, leadMinutes, startTime);
+      }
+    });
+  }
+
+  private async upsertBookingReminder(
+    client: Pick<typeof db, "insert" | "update" | "delete">,
+    bookingId: string,
+    leadMinutes: number,
+    startTime: Date,
+  ) {
+    const reminderTime = new Date(startTime.getTime() - leadMinutes * 60 * 1000);
+    if (reminderTime.getTime() <= Date.now()) {
+      await client
+        .update(facilityBookings)
+        .set({ reminderStatus: "skipped", reminderScheduledAt: null, reminderLeadMinutes: leadMinutes })
+        .where(eq(facilityBookings.id, bookingId));
+      await client.delete(bookingReminders).where(eq(bookingReminders.bookingId, bookingId));
+      return;
+    }
+
+    await client
+      .insert(bookingReminders)
+      .values({ bookingId, reminderTime, status: "pending" })
+      .onConflictDoUpdate({
+        target: bookingReminders.bookingId,
+        set: {
+          reminderTime,
+          status: "pending",
+          attempts: 0,
+          lastAttemptAt: null,
+          updatedAt: new Date(),
+        },
+      });
+
+    await client
+      .update(facilityBookings)
+      .set({ reminderStatus: "scheduled", reminderScheduledAt: reminderTime, reminderLeadMinutes: leadMinutes, reminderOptIn: true })
+      .where(eq(facilityBookings.id, bookingId));
+  }
+
+  async markReminderSent(bookingId: string) {
+    await db.update(facilityBookings).set({ reminderStatus: "sent", reminderScheduledAt: null, updatedAt: new Date() }).where(eq(facilityBookings.id, bookingId));
+    await db.update(bookingReminders).set({ status: "sent", lastAttemptAt: new Date(), updatedAt: new Date() }).where(eq(bookingReminders.bookingId, bookingId));
+  }
+
+  async deleteBookingReminder(bookingId: string) {
+    await db.delete(bookingReminders).where(eq(bookingReminders.bookingId, bookingId));
   }
 
   async getAllFacilityBookings(): Promise<FacilityBooking[]> {
@@ -572,7 +687,6 @@ class DatabaseStorage implements IStorage {
   async createSystemAlert(alert: SystemAlert): Promise<SystemAlert> {
     try {
       try { console.log('[storage][DEBUG] createSystemAlert called title="' + String(alert.title) + '" userId=' + String(alert.userId)); } catch (e) {}
-
       // Normalization helper: extract first meaningful line and strip noisy timestamps
       const normalizeFirstLine = (text: string | undefined) => {
         try {
@@ -689,11 +803,134 @@ class DatabaseStorage implements IStorage {
     return newLog;
   }
 
-  async getActivityLogs(limit?: number): Promise<ActivityLog[]> {
+  async getActivityLogs(limit = 50): Promise<ActivityLog[]> {
+    const query = db.select().from(activityLogs).orderBy(desc(activityLogs.createdAt));
     if (limit) {
-      return db.select().from(activityLogs).orderBy(desc(activityLogs.createdAt)).limit(limit);
+      return query.limit(limit);
     }
-    return db.select().from(activityLogs).orderBy(desc(activityLogs.createdAt));
+    return query;
+  }
+
+  // Report schedules
+  async getReportSchedules(): Promise<ReportSchedule[]> {
+    return db.select().from(reportSchedules).orderBy(desc(reportSchedules.createdAt));
+  }
+
+  async getReportSchedule(id: string): Promise<ReportSchedule | undefined> {
+    const [schedule] = await db.select().from(reportSchedules).where(eq(reportSchedules.id, id));
+    return schedule;
+  }
+
+  async createReportSchedule(input: InsertReportSchedule): Promise<ReportSchedule> {
+    const parsed = insertReportScheduleSchema.parse(input);
+    const { emailRecipients, timeOfDay, ...rest } = parsed;
+
+    const [created] = await db
+      .insert(reportSchedules)
+      .values({
+        ...rest,
+        emailRecipients: emailRecipients?.trim() || null,
+        timeOfDay: timeOfDay?.trim() || null,
+      } as InsertReportSchedule)
+      .returning();
+    return created;
+  }
+
+  async updateReportSchedule(id: string, updates: UpdateReportSchedule): Promise<ReportSchedule | null> {
+    if (!updates || Object.keys(updates).length === 0) {
+      const existing = await this.getReportSchedule(id);
+      return existing ?? null;
+    }
+
+    const sanitized: UpdateReportSchedule = { ...updates };
+    if (sanitized.emailRecipients !== undefined) {
+      sanitized.emailRecipients = sanitized.emailRecipients?.trim() || null;
+    }
+    if (sanitized.timeOfDay !== undefined) {
+      sanitized.timeOfDay = sanitized.timeOfDay?.trim() || null;
+    }
+
+    const toUpdate = Object.entries(sanitized).reduce((acc, [key, value]) => {
+      if (value !== undefined) {
+        (acc as any)[key] = value;
+      }
+      return acc;
+    }, {} as Partial<InsertReportSchedule>);
+
+    if (Object.keys(toUpdate).length === 0) {
+      const existing = await this.getReportSchedule(id);
+      return existing ?? null;
+    }
+
+    const [updated] = await db
+      .update(reportSchedules)
+      .set({
+        ...toUpdate,
+        updatedAt: new Date(),
+      } as any)
+      .where(eq(reportSchedules.id, id))
+      .returning();
+
+    return updated ?? null;
+  }
+
+  async deleteReportSchedule(id: string): Promise<void> {
+    await db.delete(reportSchedules).where(eq(reportSchedules.id, id));
+  }
+
+  async getFaqs(): Promise<Faq[]> {
+    return db
+      .select()
+      .from(faqs)
+      .orderBy(asc(faqs.sortOrder), asc(faqs.createdAt));
+  }
+
+  async createFaq(input: z.infer<typeof insertFaqSchema>): Promise<Faq> {
+    const parsed = insertFaqSchema.parse(input);
+    const [faq] = await db
+      .insert(faqs)
+      .values({
+        category: parsed.category,
+        question: parsed.question,
+        answer: parsed.answer,
+        sortOrder: parsed.sortOrder ?? 0,
+      })
+      .returning();
+    return faq;
+  }
+
+  async updateFaq(id: string, input: z.infer<typeof updateFaqSchema>): Promise<Faq | null> {
+    const parsed = updateFaqSchema.parse(input);
+    if (Object.keys(parsed).length === 0) {
+      const [existing] = await db.select().from(faqs).where(eq(faqs.id, id));
+      return existing ?? null;
+    }
+    const [updated] = await db
+      .update(faqs)
+      .set({
+        ...parsed,
+        updatedAt: new Date(),
+      })
+      .where(eq(faqs.id, id))
+      .returning();
+    return updated ?? null;
+  }
+
+  async deleteFaq(id: string): Promise<void> {
+    await db.delete(faqs).where(eq(faqs.id, id));
+  }
+
+  async recordFaqFeedback(id: string, helpful: boolean): Promise<Faq | null> {
+    const column = helpful ? faqs.helpfulCount : faqs.notHelpfulCount;
+    const [updated] = await db
+      .update(faqs)
+      .set({
+        [helpful ? "helpfulCount" : "notHelpfulCount"]: sql`${column} + 1`,
+        updatedAt: new Date(),
+      } as any)
+      .where(eq(faqs.id, id))
+      .returning();
+    return updated ?? null;
   }
 
   // Statistics

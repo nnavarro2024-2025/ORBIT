@@ -13,6 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { z } from "zod";
+import { FAQ_CATEGORIES, type FaqCategory } from "./faq";
 
 // Session storage table for Replit Auth
 export const sessions = pgTable(
@@ -95,9 +96,24 @@ export const facilityBookings = pgTable("facility_bookings", {
   status: varchar("status").default("pending").notNull(), // pending, approved, denied, cancelled
   adminId: varchar("admin_id").references(() => users.id),
   adminResponse: text("admin_response"),
+  reminderOptIn: boolean("reminder_opt_in").default(true).notNull(),
+  reminderStatus: varchar("reminder_status").default("pending").notNull(),
+  reminderScheduledAt: timestamp("reminder_scheduled_at"),
+  reminderLeadMinutes: integer("reminder_lead_minutes").default(60).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
   
+});
+
+export const bookingReminders = pgTable("booking_reminders", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  bookingId: uuid("booking_id").references(() => facilityBookings.id).notNull().unique(),
+  reminderTime: timestamp("reminder_time").notNull(),
+  status: varchar("status").default("pending").notNull(),
+  attempts: integer("attempts").default(0).notNull(),
+  lastAttemptAt: timestamp("last_attempt_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 // System alerts
@@ -121,6 +137,24 @@ export const activityLogs = pgTable("activity_logs", {
   ipAddress: varchar("ip_address"),
   userAgent: text("user_agent"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const reportSchedules = pgTable("report_schedules", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  reportType: varchar("report_type").notNull(),
+  frequency: varchar("frequency").notNull(),
+  dayOfWeek: integer("day_of_week"),
+  timeOfDay: varchar("time_of_day"),
+  format: varchar("format").default("pdf").notNull(),
+  description: text("description"),
+  emailRecipients: text("email_recipients"),
+  isActive: boolean("is_active").default(true).notNull(),
+  nextRunAt: timestamp("next_run_at"),
+  lastRunAt: timestamp("last_run_at"),
+  createdBy: varchar("created_by").references(() => users.id),
+  updatedBy: varchar("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 // Relations
@@ -201,6 +235,8 @@ export const insertFacilityBookingSchema = z.object({
   status: z.enum(["pending", "approved", "denied", "cancelled"]).default("pending"),
   adminId: z.string().optional(),
   adminResponse: z.string().optional(),
+  reminderOptIn: z.boolean().optional(),
+  reminderLeadMinutes: z.number().int().min(5).max(1440).optional(),
 });
 
 export const createFacilityBookingSchema = insertFacilityBookingSchema;
@@ -221,6 +257,49 @@ export const insertActivityLogSchema = z.object({
   ipAddress: z.string().optional(),
   userAgent: z.string().optional(),
 });
+
+export const insertReportScheduleSchema = z.object({
+  reportType: z.string().min(1),
+  frequency: z.string().min(1),
+  dayOfWeek: z
+    .number()
+    .int()
+    .min(0)
+    .max(6)
+    .optional(),
+  timeOfDay: z.string().optional(),
+  format: z.string().min(1).default("pdf"),
+  description: z.string().optional(),
+  emailRecipients: z.string().optional(),
+  isActive: z.boolean().optional(),
+  nextRunAt: z.date().optional(),
+  lastRunAt: z.date().optional(),
+  createdBy: z.string().optional(),
+  updatedBy: z.string().optional(),
+});
+
+export const faqs = pgTable("faqs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  category: varchar("category").notNull(),
+  question: text("question").notNull(),
+  answer: text("answer").notNull(),
+  helpfulCount: integer("helpful_count").default(0).notNull(),
+  notHelpfulCount: integer("not_helpful_count").default(0).notNull(),
+  sortOrder: integer("sort_order").default(0).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertFaqSchema = z.object({
+  category: z.custom<FaqCategory>((value) => typeof value === "string" && FAQ_CATEGORIES.includes(value as FaqCategory), {
+    message: "Invalid FAQ category",
+  }) as z.ZodType<FaqCategory>,
+  question: z.string().min(1),
+  answer: z.string().min(1),
+  sortOrder: z.number().int().optional(),
+});
+
+export const updateFaqSchema = insertFaqSchema.partial();
 
 // Types
 export type UpsertUser = typeof users.$inferInsert;
@@ -245,3 +324,8 @@ export const insertFacilitySchema = z.object({
 export type ComputerStation = typeof computerStations.$inferSelect;
 export type SystemAlert = typeof systemAlerts.$inferSelect;
 export type ActivityLog = typeof activityLogs.$inferSelect;
+export type ReportSchedule = typeof reportSchedules.$inferSelect;
+export type InsertReportSchedule = typeof reportSchedules.$inferInsert;
+export type UpdateReportSchedule = Partial<Omit<ReportSchedule, "id" | "createdAt">>;
+export type NormalizedInsertReportSchedule = Omit<InsertReportSchedule, "format"> & { format: string };
+export type Faq = typeof faqs.$inferSelect;

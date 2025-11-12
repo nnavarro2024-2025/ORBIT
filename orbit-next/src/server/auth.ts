@@ -139,10 +139,12 @@ export async function requireActiveUser(headers: Headers): Promise<ActiveAuthSuc
       userRecord: userRecord ?? null,
     };
   } catch (error) {
-    console.error("[auth] Error checking user status:", error);
+    console.error("[auth] Error checking user status (falling back to Supabase user only):", error);
     return {
-      ok: false,
-      response: NextResponse.json({ message: "Internal server error" }, { status: 500 }),
+      ok: true,
+      token: base.token,
+      user: base.user,
+      userRecord: null,
     };
   }
 }

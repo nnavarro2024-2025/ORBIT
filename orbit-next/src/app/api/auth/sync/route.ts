@@ -2,7 +2,10 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { requireActiveUser } from "@/server/auth";
 import { storage } from "@/server/storage";
-import { supabaseAdmin } from "@/server/supabaseAdmin";
+import { isBuildTime } from "@/server/build-guard";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 function getAllowedDomains(): string[] {
   return (process.env.ALLOWED_EMAIL_DOMAINS || "uic.edu.ph,uic.edu")
@@ -12,25 +15,26 @@ function getAllowedDomains(): string[] {
 }
 
 export async function POST(request: NextRequest) {
+  if (isBuildTime()) {
+    // During build we cannot perform Supabase/auth/database calls. Return a safe placeholder.
+    return NextResponse.json({ user: null, build: true }, { status: 200 });
+  }
+
   const authResult = await requireActiveUser(request.headers);
   if (!authResult.ok) {
     return authResult.response;
   }
 
   try {
-    const userId = authResult.user.id;
+    const supabaseUser = authResult.user;
+    const userId = supabaseUser.id;
     const allowedDomains = getAllowedDomains();
 
-    const { data: adminUser, error: adminError } = await supabaseAdmin.auth.admin.getUserById(userId);
-    if (adminError || !adminUser?.user) {
-      console.error("[auth/sync] Failed to fetch user from Supabase Admin:", adminError?.message || "Unknown error");
-      return NextResponse.json(
-        { message: "User not found in authentication system." },
-        { status: 404 }
-      );
+    if (!supabaseUser.email) {
+      console.error("[auth/sync] Authenticated user is missing email", supabaseUser);
+      return NextResponse.json({ message: "Authenticated user is missing email" }, { status: 400 });
     }
 
-    const supabaseUser = adminUser.user;
     const email = (supabaseUser.email || "").toLowerCase();
     const domain = email.split("@")[1] || "";
 
@@ -42,9 +46,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const existingUser = await storage.getUser(supabaseUser.id);
+    let existingUser;
+    try {
+      existingUser = await storage.getUser(userId);
+    } catch (dbError: any) {
+      console.error("[auth/sync] Database getUser error:", dbError?.message || dbError);
+      return NextResponse.json(
+        { message: "Database error: " + (dbError?.message || "Unknown error") },
+        { status: 500 }
+      );
+    }
+
     const userRecord = {
-      id: supabaseUser.id,
+      id: userId,
       email: supabaseUser.email ?? "",
       firstName: supabaseUser.user_metadata?.first_name ?? "",
       lastName: supabaseUser.user_metadata?.last_name ?? "",
@@ -55,11 +69,22 @@ export async function POST(request: NextRequest) {
       updatedAt: new Date(),
     };
 
-    const syncedUser = await storage.upsertUser(userRecord);
+    let syncedUser;
+    try {
+      syncedUser = await storage.upsertUser(userRecord);
+    } catch (dbError: any) {
+      console.error("[auth/sync] Database upsertUser error:", dbError?.message || dbError);
+      return NextResponse.json(
+        { message: "Database upsert error: " + (dbError?.message || "Unknown error") },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({ user: syncedUser }, { status: 200 });
-  } catch (error) {
-    console.error("[auth/sync] Error syncing user:", error);
-    return NextResponse.json({ message: "Failed to sync user" }, { status: 500 });
+  } catch (error: any) {
+    console.error("[auth/sync] Unexpected error syncing user:", error?.message || error);
+    return NextResponse.json({ 
+      message: "Failed to sync user: " + (error?.message || "Unknown error") 
+    }, { status: 500 });
   }
 }

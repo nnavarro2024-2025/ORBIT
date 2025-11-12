@@ -1,4 +1,4 @@
-import { BarChart3, Calendar, Users, Shield, Settings, Home } from "lucide-react";
+import { BarChart3, Calendar, Users, Shield, Settings, Home, HelpCircle, CalendarClock } from "lucide-react";
 
 type RawItem = {
   id: string;
@@ -24,6 +24,7 @@ export function makeSidebar(isAdmin: boolean, lastItem?: RawItem, forPage: 'admi
       { id: 'new-booking', label: 'New Booking', icon: BarChart3 },
       { id: 'my-bookings', label: 'My Bookings', icon: Calendar },
       { id: 'available-rooms', label: 'Available Rooms', icon: Home },
+      { id: 'faqs', label: 'FAQs', icon: HelpCircle },
       { id: 'booking-settings', label: 'Booking Settings', icon: Settings },
     ];
     if (isAdmin && lastItem) {
@@ -38,8 +39,10 @@ export function makeSidebar(isAdmin: boolean, lastItem?: RawItem, forPage: 'admi
     const adminCore: RawItem[] = [
       { id: 'overview', label: 'Dashboard', icon: Home },
       { id: 'booking-management', label: 'Facility Booking Management', icon: Calendar },
+      { id: 'report-schedules', label: 'Report Schedules', icon: CalendarClock },
       { id: 'user-management', label: 'User Management', icon: Users },
       { id: 'security', label: 'Admin System Alerts', icon: Shield },
+      { id: 'faq-management', label: 'FAQ Management', icon: HelpCircle },
       { id: 'admin-activity-logs', label: 'Admin Activity Logs', icon: BarChart3 },
       { id: 'settings', label: 'System Settings', icon: Settings },
     ];

@@ -8,11 +8,6 @@ type NavigateOptions = {
 };
 
 export function useLegacyLocation(): [string, (path: string, options?: NavigateOptions) => void] {
-  if (typeof window === "undefined") {
-    const noop = () => {};
-    return ["/", noop];
-  }
-
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();

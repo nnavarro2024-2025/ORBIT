@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest } from "@/lib/queryClient";
@@ -12,7 +12,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import BanUserModal from "@/components/modals/BanUserModal";
 import UnavailableReasonModal from "@/components/modals/UnavailableReasonModal";
 import UserEmailDisplay from "@/components/UserEmailDisplay";
-  import {
+import AdminFaqManager from "@/components/faq/AdminFaqManager";
+import {
   Shield,
   Dock,
   Calendar,
@@ -32,15 +33,69 @@ import UserEmailDisplay from "@/components/UserEmailDisplay";
   ChevronRight,
   Eye,
   Monitor,
-
+  HelpCircle,
+  ArrowUpDown,
+  CalendarClock,
+  Plus,
+  PenSquare,
+  Trash2,
+  Download,
 } from "lucide-react";
 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
-import { User, FacilityBooking, SystemAlert, ActivityLog, Facility } from "@shared/schema";
+import { User, FacilityBooking, SystemAlert, ActivityLog, Facility, ReportSchedule } from "@shared/schema";
 import { Button } from "@/components/ui/button";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import AvailabilityGrid from '@/components/AvailabilityGrid';
+import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip as RechartsTooltip, Legend as RechartsLegend, BarChart, Bar, CartesianGrid, XAxis, YAxis, LineChart, Line } from "recharts";
 import { useLegacyLocation } from "@/lib/navigation";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+
+type DepartmentChartDatum = { name: string; value: number };
+type FacilityUtilizationDatum = { name: string; hours: number; bookings: number };
+type WeeklyTrendDatum = { week: string; total: number; approved: number; pending: number };
+
+const PIE_CHART_COLORS = ["#f472b6", "#fb7185", "#3b82f6", "#22c55e", "#f59e0b", "#8b5cf6", "#14b8a6"]; // tailwind palette
+const FACILITY_BAR_COLORS = { hours: "#10b981", bookings: "#6366f1" };
+const WEEKLY_LINE_COLORS = { total: "#6366f1", approved: "#10b981", pending: "#f59e0b" };
+
+function getIsoWeekLabel(date: Date): string {
+  const target = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = target.getUTCDay() || 7;
+  target.setUTCDate(target.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(target.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil((((target.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return `${target.getUTCFullYear()}-W${String(weekNo).padStart(2, "0")}`;
+}
+
+function formatIsoWeekLabel(isoWeek: string): string {
+  const [yearPart, weekPart] = isoWeek.split('-W');
+  if (!yearPart || !weekPart) return isoWeek;
+  return `W${weekPart} ${yearPart}`;
+}
 
 const safeJsonParse = (input: unknown) => {
   if (input === null || input === undefined) return null;
@@ -88,7 +143,7 @@ export default function AdminDashboard() {
   void useAuth; void useToast; void apiRequest;
   void Header; void Sidebar; void Tooltip; void TooltipContent; void TooltipProvider; void TooltipTrigger;
   // reference icon values (no-op to avoid unused imports)
-  void Dock; void BarChart3; void XCircle; void Monitor; void Settings; void UserCheck; void UserX; void Clock; void ChevronLeft; void ChevronRight; void Eye;
+  void Dock; void BarChart3; void XCircle; void Monitor; void Settings; void UserCheck; void UserX; void Clock; void ChevronLeft; void ChevronRight; void Eye; void HelpCircle;
   void UserEmailDisplay;
   // UI components are imported statically at the top to avoid runtime require in the browser
   // Forward-declared placeholders and helpers (populated later by queries)
@@ -98,17 +153,10 @@ export default function AdminDashboard() {
   const [user, setUser] = useState<User | undefined>(undefined);
   // prevent unused variable errors for setters while refactoring
   void setUsersData; void setActivities; void setFacilities; void setUser;
-  const usersMap = useMemo(() => new Map<string, User>(), []);
-
-
-  // Keep a map of users for quick lookup (populated after queries update usersData)
-  useEffect(() => {
-    try {
-      usersMap.clear();
-      (usersData || []).forEach((u: User) => usersMap.set(String(u.id), u));
-    } catch (e) {
-      // ignore
-    }
+  const usersMap = useMemo(() => {
+    const map = new Map<string, User>();
+    (usersData || []).forEach((u: User) => map.set(String(u.id), u));
+    return map;
   }, [usersData]);
 
   function getUserEmail(id: any) {
@@ -133,9 +181,18 @@ export default function AdminDashboard() {
   function formatTime(value: any) {
     if (!value) return '';
     try {
-      return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      return new Date(value).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
     } catch (_e) {
       return String(value);
+    }
+  }
+
+  function getTimestamp(value: any) {
+    try {
+      const ts = new Date(value).getTime();
+      return Number.isNaN(ts) ? 0 : ts;
+    } catch (_e) {
+      return 0;
     }
   }
 
@@ -148,6 +205,78 @@ export default function AdminDashboard() {
     }
   }
 
+  const WEEKDAY_LABELS = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+  ];
+
+  const SCHEDULE_FREQUENCY_OPTIONS: Array<{ value: string; label: string }> = [
+    { value: "daily", label: "Daily" },
+    { value: "weekly", label: "Weekly" },
+    { value: "monthly", label: "Monthly" },
+    { value: "custom", label: "Custom" },
+  ];
+
+  function toInputDateTimeValue(value: Date | string | null | undefined) {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toISOString().slice(0, 16);
+  }
+
+  function formatScheduleFrequencyText(schedule: Pick<ReportSchedule | Partial<ReportSchedule>, "frequency" | "dayOfWeek" | "timeOfDay">) {
+    const frequency = String(schedule.frequency || '').toLowerCase();
+    if (!frequency) return '—';
+    const base = frequency.charAt(0).toUpperCase() + frequency.slice(1);
+    if (frequency === 'weekly' && schedule.dayOfWeek !== undefined && schedule.dayOfWeek !== null) {
+      const index = Number(schedule.dayOfWeek);
+      const dayLabel = WEEKDAY_LABELS[index] ?? `Day ${index}`;
+      return `${base} on ${dayLabel}`;
+    }
+    if (frequency === 'custom' && schedule.timeOfDay) {
+      return `${base} at ${schedule.timeOfDay}`;
+    }
+    return base;
+  }
+
+  function extractRecipientList(recipients?: string | null) {
+    if (!recipients) return [] as string[];
+    return recipients
+      .split(',')
+      .map(entry => entry.trim())
+      .filter(Boolean);
+  }
+
+  type ScheduleFormState = {
+    reportType: string;
+    frequency: 'daily' | 'weekly' | 'monthly' | 'custom';
+    dayOfWeek: number | null;
+    timeOfDay: string;
+    format: string;
+    description: string;
+    recipients: string;
+    isActive: boolean;
+    nextRunAt: string;
+    lastRunAt: string;
+  };
+
+  const defaultScheduleForm: ScheduleFormState = {
+    reportType: '',
+    frequency: 'weekly',
+    dayOfWeek: 1,
+    timeOfDay: '09:00',
+    format: 'pdf',
+    description: '',
+    recipients: '',
+    isActive: true,
+    nextRunAt: '',
+    lastRunAt: '',
+  };
 
   // Render a colored badge for booking status
   // Render a colored badge for booking status.
@@ -203,7 +332,56 @@ export default function AdminDashboard() {
   const [settingsTab, setSettingsTab] = useState<string>('facilities');
   // Preview tab for system alerts in the dashboard (booking | users)
   const [alertsPreviewTab, setAlertsPreviewTab] = useState<string>('booking');
-  
+  // Report scheduling UI state
+  const [reportSchedules, setReportSchedules] = useState<ReportSchedule[]>([]);
+  const [scheduleForm, setScheduleForm] = useState<ScheduleFormState>(defaultScheduleForm);
+  const [scheduleSearchTerm, setScheduleSearchTerm] = useState('');
+  const [scheduleFilter, setScheduleFilter] = useState<'all' | 'active' | 'paused'>('all');
+  const [scheduleSort, setScheduleSort] = useState<'next-run' | 'name'>('next-run');
+  const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
+  const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
+  const [deleteScheduleTarget, setDeleteScheduleTarget] = useState<ReportSchedule | null>(null);
+  const [scheduleActionLoadingId, setScheduleActionLoadingId] = useState<string | null>(null);
+  const [scheduleMutationPending, setScheduleMutationPending] = useState(false);
+  const [schedulePaginationPage, setSchedulePaginationPage] = useState(0);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const { toast } = useToast();
+
+  const handleExportPdf = useCallback(async () => {
+    if (isExportingPdf) return;
+    setIsExportingPdf(true);
+    try {
+      const res = await fetch('/api/admin/reports/export', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ reportType: 'booking-overview' }),
+      });
+
+      if (!res.ok) {
+        const message = await res.text();
+        throw new Error(message || 'Failed to export report');
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `orbit-booking-report-${new Date().toISOString().slice(0, 10)}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+
+      toast({ title: 'Export complete', description: 'PDF report downloaded successfully.' });
+    } catch (error: any) {
+      toast({ title: 'Export failed', description: error?.message || 'Unable to generate PDF export.', variant: 'destructive' });
+    } finally {
+      setIsExportingPdf(false);
+    }
+  }, [isExportingPdf, toast]);
+
   // Loading state for navigation to booking dashboard
   const [isNavigatingToBooking, setIsNavigatingToBooking] = useState(false);
   
@@ -219,11 +397,27 @@ export default function AdminDashboard() {
   const { user: authUser } = useAuth();
   const isAuthenticated = !!authUser;
   const [location, setLocation] = useLegacyLocation();
+  const locationInfoRef = useRef<{ pathname: string; search: string; hash: string }>({ pathname: "", search: "", hash: "" });
+
+  useEffect(() => {
+    try {
+      const hash = typeof window !== "undefined" ? window.location.hash : "";
+      const [pathWithSearch, hashOnly] = location.split("#");
+      const [pathname, search = ""] = pathWithSearch.split("?");
+      locationInfoRef.current = {
+        pathname: pathname || "",
+        search: search ? `?${search}` : "",
+        hash: hashOnly ? `#${hashOnly}` : hash || "",
+      };
+    } catch (_error) {
+      // ignore
+    }
+  }, [location]);
 
   // If the route is '/admin/alerts', open the Admin System Alerts view and select the Booking tab.
   useEffect(() => {
     try {
-      const path = typeof location === 'string' ? location : (window?.location?.pathname || '');
+      const path = locationInfoRef.current.pathname || (typeof window !== 'undefined' ? window.location.pathname : '');
       if (path && path.startsWith('/admin/alerts')) {
         setSelectedView('security');
         setSecurityTab('booking');
@@ -256,7 +450,7 @@ export default function AdminDashboard() {
 
     const handleHash = () => {
       try {
-        const rawHash = window.location.hash?.replace('#', '') || '';
+        const rawHash = locationInfoRef.current.hash?.replace('#', '') || '';
         if (!rawHash) return;
         // Accept patterns like 'activity:notifications' or 'activity/notifications'
         const normalized = rawHash.replace('/', ':');
@@ -336,6 +530,7 @@ export default function AdminDashboard() {
       { id: 'booking-management', label: 'Facility Bookings', icon: Calendar },
       { id: 'user-management', label: 'User Management', icon: Users },
       { id: 'security', label: 'System Alerts', icon: Shield },
+      { id: 'faq-management', label: 'FAQ Management', icon: HelpCircle },
       { id: 'admin-activity-logs', label: 'Activity Logs', icon: BarChart3 },
       { id: 'settings', label: 'System Settings', icon: Settings },
     ];
@@ -406,7 +601,6 @@ export default function AdminDashboard() {
 
   // Wire real data using react-query and the project's apiRequest helper
   useAuth(); // ensure user is authenticated
-  const { toast } = useToast();
 
   const queryClient = useQueryClient();
 
@@ -826,6 +1020,18 @@ export default function AdminDashboard() {
     enabled: isAdmin,
   });
 
+  // Report schedules
+  const { data: reportSchedulesData = [], isLoading: reportSchedulesLoading, isError: reportSchedulesError } = useQuery({
+    queryKey: ['/api/admin/report-schedules'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', '/api/admin/report-schedules');
+      return res.json();
+    },
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: false,
+    enabled: isAdmin,
+  });
+
   // Activity logs
   const { data: activitiesData = [], isLoading: activitiesLoading, isError: activitiesError } = useQuery({
     queryKey: ['/api/admin/activity'],
@@ -973,6 +1179,18 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     try {
+      if (!Array.isArray(reportSchedulesData)) return;
+      const existing = reportSchedules || [];
+      const sameLength = existing.length === reportSchedulesData.length;
+      const sameIds = sameLength && existing.every((s, idx) => String(s.id) === String(reportSchedulesData[idx]?.id));
+      if (!sameIds) setReportSchedules(reportSchedulesData);
+    } catch (e) {
+      // ignore
+    }
+  }, [reportSchedulesData, reportSchedules]);
+
+  useEffect(() => {
+    try {
       if (!currentUserData) return;
       const different = !user || String(currentUserData?.id) !== String(user?.id) || String(currentUserData?.email) !== String(user?.email);
       if (different) setUser(currentUserData);
@@ -983,27 +1201,406 @@ export default function AdminDashboard() {
 
   // Derived lists used in the UI
   const allBookings: FacilityBooking[] = Array.isArray(adminBookingsData) ? adminBookingsData : [];
-  const activeBookings: FacilityBooking[] = allBookings.filter(b => b.status === 'approved' && new Date(b.startTime) <= new Date() && new Date(b.endTime) >= new Date());
-  // Upcoming bookings: include both approved future bookings and any pending bookings
-  // (the UI treats pending as scheduled for admins; the server remains canonical).
-  const futureApproved: FacilityBooking[] = allBookings.filter(b => b.status === 'approved' && new Date(b.startTime) > new Date());
-  const pendingFromApi: FacilityBooking[] = Array.isArray(pendingBookingsData) ? (pendingBookingsData.filter((b: any) => new Date(b.startTime) > new Date())) : [];
-  const upcomingBookings: FacilityBooking[] = [...futureApproved, ...pendingFromApi].sort((a,b) => new Date(String(a.startTime)).getTime() - new Date(String(b.startTime)).getTime());
-  const recentBookings: FacilityBooking[] = allBookings
-    .filter(b => {
-      // include denied bookings; include approved bookings only if they have ended
+
+  const courseYearOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const booking of allBookings) {
+      const raw = String(booking.courseYearDept || '').trim();
+      if (raw) set.add(raw);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [allBookings]);
+
+  const [courseYearFilter, setCourseYearFilter] = useState<string>('all');
+  const [courseYearSort, setCourseYearSort] = useState<'asc' | 'desc'>('desc');
+
+  const filterByCourseYear = useCallback(
+    (bookings: FacilityBooking[]) => {
+      if (courseYearFilter === 'all') return bookings;
+      const target = courseYearFilter;
+      return bookings.filter(b => String(b.courseYearDept || '').trim() === target);
+    },
+    [courseYearFilter]
+  );
+
+  const compareCourseYear = useCallback(
+    (a: FacilityBooking, b: FacilityBooking) => {
+      const aValRaw = String(a.courseYearDept || '').trim();
+      const bValRaw = String(b.courseYearDept || '').trim();
+      const aEmpty = !aValRaw;
+      const bEmpty = !bValRaw;
+      if (aEmpty && bEmpty) return 0;
+      if (aEmpty) return courseYearSort === 'asc' ? 1 : -1;
+      if (bEmpty) return courseYearSort === 'asc' ? -1 : 1;
+      const aVal = aValRaw.toLowerCase();
+      const bVal = bValRaw.toLowerCase();
+      const comparison = aVal.localeCompare(bVal, undefined, { sensitivity: 'base' });
+      return courseYearSort === 'asc' ? comparison : -comparison;
+    },
+    [courseYearSort]
+  );
+
+  const activeBookings: FacilityBooking[] = useMemo(() => {
+    const base = allBookings.filter(b => b.status === 'approved' && getTimestamp(b.startTime) <= Date.now() && getTimestamp(b.endTime) >= Date.now());
+    const filtered = filterByCourseYear(base);
+    return filtered.slice().sort((a, b) => {
+      const courseComparison = compareCourseYear(a, b);
+      if (courseComparison !== 0) return courseComparison;
+      return getTimestamp(a.startTime) - getTimestamp(b.startTime);
+    });
+  }, [allBookings, filterByCourseYear, compareCourseYear]);
+
+  const upcomingBookings: FacilityBooking[] = useMemo(() => {
+    const futureApproved = allBookings.filter(b => b.status === 'approved' && getTimestamp(b.startTime) > Date.now());
+    const pendingFuture = Array.isArray(pendingBookingsData) ? pendingBookingsData.filter((b: any) => getTimestamp(b.startTime) > Date.now()) : [];
+    const merged = [...futureApproved, ...pendingFuture] as FacilityBooking[];
+    const filtered = filterByCourseYear(merged);
+    return filtered.slice().sort((a, b) => {
+      const courseComparison = compareCourseYear(a, b);
+      if (courseComparison !== 0) return courseComparison;
+      return getTimestamp(a.startTime) - getTimestamp(b.startTime);
+    });
+  }, [allBookings, pendingBookingsData, filterByCourseYear, compareCourseYear]);
+
+  const filteredReportSchedules = useMemo(() => {
+    const term = scheduleSearchTerm.trim().toLowerCase();
+    const filter = scheduleFilter;
+    const sort = scheduleSort;
+    let items = Array.isArray(reportSchedules) ? reportSchedules.slice() : [];
+    if (term) {
+      items = items.filter(item => {
+        const haystack = [item.reportType, item.description, item.emailRecipients]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(term);
+      });
+    }
+    if (filter === 'active') {
+      items = items.filter(item => item.isActive !== false);
+    } else if (filter === 'paused') {
+      items = items.filter(item => item.isActive === false);
+    }
+
+    items.sort((a, b) => {
+      if (sort === 'name') {
+        return String(a.reportType || '').localeCompare(String(b.reportType || ''), undefined, { sensitivity: 'base' });
+      }
+      const aNext = a.nextRunAt ? new Date(a.nextRunAt).getTime() : Infinity;
+      const bNext = b.nextRunAt ? new Date(b.nextRunAt).getTime() : Infinity;
+      if (aNext === bNext) {
+        return String(a.reportType || '').localeCompare(String(b.reportType || ''), undefined, { sensitivity: 'base' });
+      }
+      return aNext - bNext;
+    });
+
+    return items;
+  }, [reportSchedules, scheduleSearchTerm, scheduleFilter, scheduleSort]);
+
+  const paginatedReportSchedules = useMemo(() => {
+    const pageSize = 8;
+    const start = schedulePaginationPage * pageSize;
+    return filteredReportSchedules.slice(start, start + pageSize);
+  }, [filteredReportSchedules, schedulePaginationPage]);
+
+  const totalSchedulePages = useMemo(() => {
+    const pageSize = 8;
+    return Math.ceil(filteredReportSchedules.length / pageSize) || 1;
+  }, [filteredReportSchedules]);
+
+  const resetScheduleForm = (overrides: Partial<ScheduleFormState> = {}) => {
+    setScheduleForm({
+      ...defaultScheduleForm,
+      ...overrides,
+    });
+  };
+
+  const openCreateScheduleModal = () => {
+    setEditingScheduleId(null);
+    resetScheduleForm();
+    setIsScheduleModalOpen(true);
+  };
+
+  const openEditScheduleModal = (schedule: ReportSchedule) => {
+    setEditingScheduleId(String(schedule.id));
+    resetScheduleForm({
+      reportType: schedule.reportType || '',
+      frequency: (schedule.frequency as any) || 'weekly',
+      dayOfWeek: schedule.dayOfWeek ?? null,
+      timeOfDay: schedule.timeOfDay || '09:00',
+      format: schedule.format || 'pdf',
+      description: schedule.description || '',
+      recipients: (schedule.emailRecipients || '').trim(),
+      isActive: schedule.isActive !== false,
+      nextRunAt: toInputDateTimeValue(schedule.nextRunAt || ''),
+      lastRunAt: toInputDateTimeValue(schedule.lastRunAt || ''),
+    });
+    setIsScheduleModalOpen(true);
+  };
+
+  const closeScheduleModal = () => {
+    setIsScheduleModalOpen(false);
+    setEditingScheduleId(null);
+    resetScheduleForm();
+  };
+
+  const handleScheduleFormChange = <K extends keyof ScheduleFormState>(key: K, value: ScheduleFormState[K]) => {
+    setScheduleForm(prev => ({ ...prev, [key]: value }));
+  };
+
+  const deriveSchedulePayload = (): Partial<ReportSchedule> => {
+    const recipients = scheduleForm.recipients
+      .split(',')
+      .map(entry => entry.trim())
+      .filter(Boolean)
+      .join(',');
+
+    const payload: Partial<ReportSchedule> = {
+      reportType: scheduleForm.reportType.trim(),
+      frequency: scheduleForm.frequency,
+      dayOfWeek: scheduleForm.frequency === 'weekly' ? scheduleForm.dayOfWeek ?? 0 : null,
+      timeOfDay: scheduleForm.timeOfDay || null,
+      format: scheduleForm.format || 'pdf',
+      description: scheduleForm.description.trim() || null,
+      emailRecipients: recipients || null,
+      isActive: scheduleForm.isActive,
+      nextRunAt: scheduleForm.nextRunAt ? new Date(scheduleForm.nextRunAt) : null,
+      lastRunAt: scheduleForm.lastRunAt ? new Date(scheduleForm.lastRunAt) : null,
+    };
+
+    if (scheduleForm.frequency !== 'weekly') {
+      payload.dayOfWeek = null;
+    }
+
+    if (!scheduleForm.nextRunAt) {
+      payload.nextRunAt = null;
+    }
+
+    if (!scheduleForm.lastRunAt) {
+      payload.lastRunAt = null;
+    }
+
+    return payload;
+  };
+
+  const createScheduleMutation = useMutation({
+    mutationFn: async () => {
+      const payload = deriveSchedulePayload();
+      const res = await apiRequest('POST', '/api/admin/report-schedules', payload);
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || 'Failed to create schedule');
+      }
+      return res.json();
+    },
+    onMutate: async () => {
+      setScheduleMutationPending(true);
+    },
+    onSuccess: async () => {
+      toast({ title: 'Schedule created', description: 'Report schedule saved successfully.' });
+      closeScheduleModal();
+      setSchedulePaginationPage(0);
+      await queryClient.invalidateQueries({ queryKey: ['/api/admin/report-schedules'] });
+    },
+    onError: (err: any) => {
+      const message = err?.message || 'Failed to create schedule';
+      toast({ title: 'Create failed', description: message, variant: 'destructive' });
+    },
+    onSettled: () => {
+      setScheduleMutationPending(false);
+    },
+  });
+
+  const updateScheduleMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const payload = deriveSchedulePayload();
+      const res = await apiRequest('PUT', `/api/admin/report-schedules/${id}`, payload);
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || 'Failed to update schedule');
+      }
+      return res.json();
+    },
+    onMutate: async () => {
+      setScheduleMutationPending(true);
+    },
+    onSuccess: async () => {
+      toast({ title: 'Schedule updated', description: 'Changes saved successfully.' });
+      closeScheduleModal();
+      await queryClient.invalidateQueries({ queryKey: ['/api/admin/report-schedules'] });
+    },
+    onError: (err: any) => {
+      const message = err?.message || 'Failed to update schedule';
+      toast({ title: 'Update failed', description: message, variant: 'destructive' });
+    },
+    onSettled: () => {
+      setScheduleMutationPending(false);
+    },
+  });
+
+  const deleteScheduleMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiRequest('DELETE', `/api/admin/report-schedules/${id}`);
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || 'Failed to delete schedule');
+      }
+    },
+    onMutate: async (id: string) => {
+      setScheduleActionLoadingId(id);
+    },
+    onSuccess: async (_data, id) => {
+      toast({ title: 'Schedule deleted', description: 'Report schedule removed.' });
+      setDeleteScheduleTarget(null);
+      setSchedulePaginationPage(0);
+      await queryClient.invalidateQueries({ queryKey: ['/api/admin/report-schedules'] });
+    },
+    onError: (err: any) => {
+      const message = err?.message || 'Failed to delete schedule';
+      toast({ title: 'Delete failed', description: message, variant: 'destructive' });
+    },
+    onSettled: () => {
+      setScheduleActionLoadingId(null);
+    },
+  });
+
+  const handleScheduleSubmit = async () => {
+    if (scheduleMutationPending) return;
+    if (!scheduleForm.reportType.trim()) {
+      toast({ title: 'Report name required', description: 'Please provide a report name.', variant: 'destructive' });
+      return;
+    }
+    if (scheduleForm.frequency === 'weekly' && (scheduleForm.dayOfWeek === null || scheduleForm.dayOfWeek === undefined)) {
+      toast({ title: 'Select weekday', description: 'Please choose the day the report should run.', variant: 'destructive' });
+      return;
+    }
+
+    if (editingScheduleId) {
+      await updateScheduleMutation.mutateAsync(editingScheduleId);
+    } else {
+      await createScheduleMutation.mutateAsync();
+    }
+  };
+
+  const handleToggleScheduleActive = async (schedule: ReportSchedule) => {
+    if (!schedule?.id) return;
+    const id = String(schedule.id);
+    const nextActive = !(schedule.isActive === true);
+    setScheduleActionLoadingId(id);
+    try {
+      await apiRequest('PUT', `/api/admin/report-schedules/${id}`, {
+        isActive: nextActive,
+      });
+      await queryClient.invalidateQueries({ queryKey: ['/api/admin/report-schedules'] });
+      toast({
+        title: `Schedule ${nextActive ? 'activated' : 'paused'}`,
+        description: `${schedule.reportType} will ${nextActive ? 'resume running' : 'no longer run automatically'}.`,
+      });
+    } catch (err: any) {
+      const message = err?.message || 'Failed to update schedule status';
+      toast({ title: 'Update failed', description: message, variant: 'destructive' });
+    } finally {
+      setScheduleActionLoadingId(null);
+    }
+  };
+
+  const schedulesEmptyState = !reportSchedulesLoading && !reportSchedulesError && reportSchedules.length === 0;
+  const schedulesHasFilters = !!scheduleSearchTerm || scheduleFilter !== 'all';
+
+
+  const recentBookings: FacilityBooking[] = useMemo(() => {
+    const base = allBookings.filter(b => {
       if (b.status === 'denied') return true;
+      if (b.status === 'cancelled' || b.status === 'canceled' || b.status === 'expired' || b.status === 'void') return true;
       if (b.status === 'approved') {
-        try {
-          return new Date(b.endTime) < new Date();
-        } catch (_e) {
-          return false;
-        }
+        return getTimestamp(b.endTime) < Date.now();
       }
       return false;
-    })
-    .sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  const pendingBookings: FacilityBooking[] = Array.isArray(pendingBookingsData) ? pendingBookingsData : [];
+    });
+    const filtered = filterByCourseYear(base);
+    return filtered.slice().sort((a, b) => {
+      const courseComparison = compareCourseYear(a, b);
+      if (courseComparison !== 0) return courseComparison;
+      return getTimestamp(b.createdAt || b.startTime) - getTimestamp(a.createdAt || a.startTime);
+    });
+  }, [allBookings, filterByCourseYear, compareCourseYear]);
+
+  const pendingBookings: FacilityBooking[] = useMemo(() => {
+    const base = Array.isArray(pendingBookingsData) ? pendingBookingsData : [];
+    const filtered = filterByCourseYear(base as FacilityBooking[]);
+    return filtered.slice().sort((a, b) => {
+      const courseComparison = compareCourseYear(a, b);
+      if (courseComparison !== 0) return courseComparison;
+      return getTimestamp(a.startTime) - getTimestamp(b.startTime);
+    });
+  }, [pendingBookingsData, filterByCourseYear, compareCourseYear]);
+
+  const departmentChartData = useMemo<DepartmentChartDatum[]>(() => {
+    if (!allBookings.length) return [];
+    const counts = new Map<string, number>();
+    for (const booking of allBookings) {
+      const raw = String(booking.courseYearDept || '').trim();
+      const key = raw || 'Unspecified';
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 12);
+  }, [allBookings]);
+
+  const facilityUtilizationData = useMemo<FacilityUtilizationDatum[]>(() => {
+    if (!allBookings.length) return [];
+    const map = new Map<string, FacilityUtilizationDatum>();
+    for (const booking of allBookings) {
+      const start = booking?.startTime ? new Date(booking.startTime) : null;
+      const end = booking?.endTime ? new Date(booking.endTime) : null;
+      if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) continue;
+      const hours = Math.max(0, (end.getTime() - start.getTime()) / 3_600_000);
+      const facilityId = booking?.facilityId ?? `unknown-${booking.id}`;
+      const key = String(facilityId);
+      const facilityName = getFacilityName(facilityId) || `Facility ${key}`;
+      const current = map.get(key) ?? { name: facilityName, hours: 0, bookings: 0 };
+      current.hours += hours;
+      current.bookings += 1;
+      current.name = facilityName; // ensure latest friendly name
+      map.set(key, current);
+    }
+    return Array.from(map.values())
+      .filter(item => item.hours > 0 || item.bookings > 0)
+      .sort((a, b) => b.hours - a.hours)
+      .slice(0, 10)
+      .map(item => ({ ...item, hours: Math.round(item.hours * 10) / 10 }));
+  }, [allBookings, facilities]);
+
+  const weeklyTrendData = useMemo<WeeklyTrendDatum[]>(() => {
+    if (!allBookings.length) return [];
+    const bucket = new Map<string, { total: number; approved: number; pending: number }>();
+    for (const booking of allBookings) {
+      if (!booking?.startTime) continue;
+      const start = new Date(booking.startTime);
+      if (Number.isNaN(start.getTime())) continue;
+      const weekLabel = getIsoWeekLabel(start);
+      const entry = bucket.get(weekLabel) ?? { total: 0, approved: 0, pending: 0 };
+      entry.total += 1;
+      const status = String(booking.status || '').toLowerCase();
+      if (status === 'approved') entry.approved += 1;
+      if (status === 'pending') entry.pending += 1;
+      bucket.set(weekLabel, entry);
+    }
+    const sorted = Array.from(bucket.entries()).sort((a, b) => {
+      const [aYear, aWeek] = a[0].split('-W').map(Number);
+      const [bYear, bWeek] = b[0].split('-W').map(Number);
+      return aYear === bYear ? aWeek - bWeek : aYear - bYear;
+    });
+    const trimmed = sorted.slice(-12);
+    return trimmed.map(([week, counts]) => ({
+      week: formatIsoWeekLabel(week),
+      total: counts.total,
+      approved: counts.approved,
+      pending: counts.pending,
+    }));
+  }, [allBookings]);
 
   // Deduplicate scheduled bookings count: union of upcoming (approved future + pending API) and any pending items
   const scheduledSet = new Set<string>();
@@ -1767,18 +2364,245 @@ export default function AdminDashboard() {
     switch (selectedView) {
       /* ORZ / station UI removed (conservative cleanup) */
 
+      case "report-schedules":
+        return (
+          <div className="space-y-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex-1 min-w-0">
+                <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                  <CalendarClock className="h-6 w-6 text-blue-600" />
+                  Report Schedules
+                </h2>
+                <p className="text-sm text-gray-600 mt-1">
+                  Automate delivery of admin insights with recurring PDF reports.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button onClick={openCreateScheduleModal} className="inline-flex items-center gap-2">
+                  <Plus className="h-4 w-4" />
+                  Add schedule
+                </Button>
+              </div>
+            </div>
+
+            <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-4 sm:p-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <Input
+                    value={scheduleSearchTerm}
+                    onChange={(e) => setScheduleSearchTerm(e.target.value)}
+                    placeholder="Search by name, description, recipient..."
+                    className="w-full sm:w-72"
+                    aria-label="Search report schedules"
+                  />
+                  <Select value={scheduleFilter} onValueChange={(val: 'all' | 'active' | 'paused') => { setScheduleFilter(val); setSchedulePaginationPage(0); }}>
+                    <SelectTrigger className="w-[140px]" aria-label="Filter status">
+                      <SelectValue placeholder="Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All statuses</SelectItem>
+                      <SelectItem value="active">Active only</SelectItem>
+                      <SelectItem value="paused">Paused only</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={scheduleSort} onValueChange={(val: 'next-run' | 'name') => { setScheduleSort(val); setSchedulePaginationPage(0); }}>
+                    <SelectTrigger className="w-[150px]" aria-label="Sort schedules">
+                      <SelectValue placeholder="Sort" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="next-run">Next run first</SelectItem>
+                      <SelectItem value="name">Alphabetical</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {reportSchedulesLoading ? (
+                <div className="flex items-center justify-center py-16 text-gray-500">
+                  <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                  Loading schedules…
+                </div>
+              ) : reportSchedulesError ? (
+                <div className="py-10 text-center text-red-600">
+                  Failed to load report schedules. Please try again.
+                </div>
+              ) : filteredReportSchedules.length === 0 ? (
+                <div className="py-12 text-center">
+                  <div className="bg-gray-100 rounded-full w-12 h-12 flex items-center justify-center mx-auto mb-3">
+                    <CalendarClock className="h-6 w-6 text-gray-400" />
+                  </div>
+                  <p className="text-gray-600 text-sm max-w-md mx-auto">
+                    {schedulesHasFilters
+                      ? 'No schedules match your search criteria. Try adjusting filters or clearing the search field.'
+                      : 'No report schedules have been configured yet. Create one to begin automated reporting.'}
+                  </p>
+                  <div className="mt-4">
+                    <Button onClick={openCreateScheduleModal} className="inline-flex items-center gap-2">
+                      <Plus className="h-4 w-4" />
+                      Create your first schedule
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="overflow-hidden border border-gray-200 rounded-lg">
+                    <Table>
+                      <TableHeader className="bg-gray-50">
+                        <TableRow>
+                          <TableHead className="w-[220px]">Report name</TableHead>
+                          <TableHead className="min-w-[160px]">Frequency</TableHead>
+                          <TableHead className="hidden md:table-cell w-[160px]">Next run</TableHead>
+                          <TableHead className="hidden lg:table-cell w-[200px]">Recipients</TableHead>
+                          <TableHead className="hidden lg:table-cell">Description</TableHead>
+                          <TableHead className="w-[150px] text-center">Status</TableHead>
+                          <TableHead className="w-[120px] text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {paginatedReportSchedules.map((schedule) => {
+                          const nextRun = schedule.nextRunAt ? formatDateTime(schedule.nextRunAt) : 'Not set';
+                          const lastRun = schedule.lastRunAt ? formatDateTime(schedule.lastRunAt) : '—';
+                          const recipients = extractRecipientList(schedule.emailRecipients).join(', ') || '—';
+                          const isPending = scheduleActionLoadingId === String(schedule.id);
+                          return (
+                            <TableRow key={schedule.id} className="align-top">
+                              <TableCell>
+                                <div className="font-medium text-gray-900 truncate" title={schedule.reportType}>{schedule.reportType}</div>
+                                <div className="text-xs text-gray-500 mt-1">Last run <span className="font-medium text-gray-700">{lastRun}</span></div>
+                              </TableCell>
+                              <TableCell>
+                                <div className="text-sm text-gray-800">{formatScheduleFrequencyText(schedule)}</div>
+                                {schedule.frequency === 'weekly' && schedule.dayOfWeek !== null && schedule.dayOfWeek !== undefined && (
+                                  <div className="text-xs text-gray-500 mt-1">Runs on {WEEKDAY_LABELS[schedule.dayOfWeek] ?? 'selected day'}</div>
+                                )}
+                                {schedule.timeOfDay && (
+                                  <div className="text-xs text-gray-500">at {schedule.timeOfDay}</div>
+                                )}
+                              </TableCell>
+                              <TableCell className="hidden md:table-cell align-middle">
+                                <div className="text-sm font-medium text-gray-800">{nextRun}</div>
+                              </TableCell>
+                              <TableCell className="hidden lg:table-cell align-middle">
+                                <div className="text-sm text-gray-700 whitespace-pre-wrap break-words">
+                                  {recipients}
+                                </div>
+                              </TableCell>
+                              <TableCell className="hidden lg:table-cell align-middle">
+                                <div className="text-sm text-gray-600 whitespace-pre-wrap break-words min-h-[1.5rem]">
+                                  {schedule.description || '—'}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-center align-middle">
+                                <div className="flex flex-col items-center gap-2">
+                                  <Switch
+                                    checked={schedule.isActive !== false}
+                                    onCheckedChange={() => handleToggleScheduleActive(schedule)}
+                                    disabled={isPending}
+                                    aria-label={schedule.isActive !== false ? 'Pause schedule' : 'Activate schedule'}
+                                  />
+                                  <Badge variant={schedule.isActive !== false ? 'default' : 'secondary'}>
+                                    {schedule.isActive !== false ? 'Active' : 'Paused'}
+                                  </Badge>
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right align-middle">
+                                <div className="flex items-center justify-end gap-2">
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    aria-label="Edit schedule"
+                                    onClick={() => openEditScheduleModal(schedule)}
+                                    disabled={isPending}
+                                  >
+                                    <PenSquare className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    aria-label="Delete schedule"
+                                    onClick={() => setDeleteScheduleTarget(schedule)}
+                                    disabled={isPending}
+                                  >
+                                    <Trash2 className="h-4 w-4 text-red-600" />
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  {totalSchedulePages > 1 && (
+                    <div className="flex items-center justify-between text-sm text-gray-600">
+                      <div>
+                        Showing {(schedulePaginationPage * 8) + 1} - {Math.min((schedulePaginationPage + 1) * 8, filteredReportSchedules.length)} of {filteredReportSchedules.length}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setSchedulePaginationPage(prev => Math.max(prev - 1, 0))}
+                          disabled={schedulePaginationPage === 0}
+                        >
+                          Previous
+                        </Button>
+                        <div className="text-xs text-gray-500">Page {schedulePaginationPage + 1} of {totalSchedulePages}</div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setSchedulePaginationPage(prev => Math.min(prev + 1, totalSchedulePages - 1))}
+                          disabled={schedulePaginationPage >= totalSchedulePages - 1}
+                        >
+                          Next
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+
       case "booking-management":
         return (
           <div className="space-y-4 sm:space-y-6">
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4 sm:mb-6">
                 <div className="flex-1 min-w-0">
                   <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Facility Booking Management</h2>
                   <p className="text-sm sm:text-base text-gray-600 mt-1">Monitor active bookings, scheduled reservations, and booking history</p>
                 </div>
-                <div className="flex flex-row flex-wrap gap-2 items-center">
-                  <div className="bg-green-100 text-green-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center">{activeBookings?.length || 0} Active</div>
-                  <div className="bg-pink-100 text-pink-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center">{(upcomingBookings?.length || pendingBookings?.length) || 0} Scheduled</div>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div className="flex flex-row flex-wrap gap-2 items-center">
+                    <div className="bg-green-100 text-green-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center">{activeBookings?.length || 0} Active</div>
+                    <div className="bg-pink-100 text-pink-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center">{(upcomingBookings?.length || pendingBookings?.length) || 0} Scheduled</div>
+                  </div>
+                  <div className="flex flex-row gap-2">
+                    <Select value={courseYearFilter} onValueChange={setCourseYearFilter}>
+                      <SelectTrigger className="w-[160px]">
+                        <SelectValue placeholder="All courses" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All courses</SelectItem>
+                        {courseYearOptions.map(option => (
+                          <SelectItem key={option} value={option}>
+                            {option}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <button
+                      onClick={() => setCourseYearSort(prev => (prev === 'asc' ? 'desc' : 'asc'))}
+                      className="inline-flex items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm hover:bg-muted"
+                      aria-label="Toggle course/year sort order"
+                    >
+                      <span className="mr-2">{courseYearSort === 'asc' ? 'A → Z' : 'Z → A'}</span>
+                      <ArrowUpDown className="h-4 w-4 text-gray-500" />
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -3327,6 +4151,9 @@ export default function AdminDashboard() {
         );
         break;
 
+      case "faq-management":
+        return <AdminFaqManager />;
+
       case "admin-activity-logs":
         // Prepare lists for the activity logs view (improved with richer details)
         const successfullyBooked = allBookings.filter(b => b.status === 'approved' && b.arrivalConfirmed && new Date(b.endTime) < new Date());
@@ -4236,22 +5063,179 @@ export default function AdminDashboard() {
               />
             </div>
 
-            {/* Quick Actions Bar */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div>
-                  <h3 className="text-base sm:text-lg font-bold text-gray-900">Quick Actions</h3>
-                  <p className="text-xs sm:text-sm text-gray-600 mt-1">Generate reports and manage system</p>
+            <div className="grid grid-cols-1 lg:grid-cols-[3fr_minmax(0,1fr)] gap-3 sm:gap-4 md:gap-6">
+              {/* Quick Actions Bar */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div>
+                    <h3 className="text-base sm:text-lg font-bold text-gray-900">Quick Actions</h3>
+                    <p className="text-xs sm:text-sm text-gray-600 mt-1">Generate reports and manage system</p>
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                    <Button 
+                      size="default" 
+                      className="bg-pink-600 hover:bg-pink-700 text-white shadow-sm text-sm"
+                      onClick={() => generateBookingWeeklyReport?.()} 
+                      aria-label="Generate weekly booking report"
+                    >
+                      <BarChart3 className="h-4 w-4 mr-2" />
+                      Export Excel
+                    </Button>
+                    <Button
+                      size="default"
+                      variant="outline"
+                      className="text-sm"
+                      onClick={handleExportPdf}
+                      disabled={isExportingPdf}
+                      aria-label="Export PDF overview"
+                    >
+                      {isExportingPdf ? (
+                        <span className="inline-flex items-center gap-2">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Generating PDF…
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-2">
+                          <Download className="h-4 w-4" />
+                          Export PDF
+                        </span>
+                      )}
+                    </Button>
+                  </div>
                 </div>
-                <Button 
-                  size="default" 
-                  className="bg-pink-600 hover:bg-pink-700 text-white shadow-sm text-sm w-full sm:w-auto"
-                  onClick={() => generateBookingWeeklyReport?.()} 
-                  aria-label="Generate weekly booking report"
-                >
-                  <BarChart3 className="h-4 w-4 mr-2" />
-                  <span className="whitespace-nowrap">Generate Weekly Report</span>
-                </Button>
+              </div>
+
+              {/* Course/Year Controls */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-base font-bold text-gray-900">Course / Year Filters</h3>
+                  <button
+                    onClick={() => {
+                      setCourseYearFilter('all');
+                      setCourseYearSort('desc');
+                    }}
+                    className="text-xs font-medium text-pink-600 hover:text-pink-700"
+                  >
+                    Reset
+                  </button>
+                </div>
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-xs uppercase tracking-wide text-gray-500">Filter</span>
+                    <Select value={courseYearFilter} onValueChange={setCourseYearFilter}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="All courses" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All courses</SelectItem>
+                        {courseYearOptions.map(option => (
+                          <SelectItem key={option} value={option}>
+                            {option}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-xs uppercase tracking-wide text-gray-500">Sort</span>
+                    <button
+                      onClick={() => setCourseYearSort(prev => (prev === 'asc' ? 'desc' : 'asc'))}
+                      className="inline-flex items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm hover:bg-muted"
+                      aria-label="Toggle course/year sort order"
+                    >
+                      <span className="mr-2">{courseYearSort === 'asc' ? 'A → Z' : 'Z → A'}</span>
+                      <ArrowUpDown className="h-4 w-4 text-gray-500" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Analytics Overview */}
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-3 sm:gap-4 md:gap-6">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-base sm:text-lg font-bold text-gray-900">Bookings by Department</h3>
+                    <p className="text-xs sm:text-sm text-gray-600 mt-1">Top departments by booking count</p>
+                  </div>
+                </div>
+                {departmentChartData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={260}>
+                    <PieChart>
+                      <Pie
+                        data={departmentChartData}
+                        dataKey="value"
+                        nameKey="name"
+                        innerRadius="45%"
+                        outerRadius="75%"
+                        paddingAngle={2}
+                        label={({ name, value }) => `${name} (${value})`}
+                      >
+                        {departmentChartData.map((entry, index) => (
+                          <Cell key={`dept-${entry.name}`} fill={PIE_CHART_COLORS[index % PIE_CHART_COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <RechartsTooltip formatter={(value: number, _name: string, entry: any) => [`${value} bookings`, entry.name]} />
+                      <RechartsLegend wrapperStyle={{ fontSize: 12 }} verticalAlign="bottom" height={36} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <EmptyState Icon={Users} message="No department data yet" />
+                )}
+              </div>
+
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-base sm:text-lg font-bold text-gray-900">Facility Utilization</h3>
+                    <p className="text-xs sm:text-sm text-gray-600 mt-1">Top facilities by usage hours</p>
+                  </div>
+                </div>
+                {facilityUtilizationData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={260}>
+                    <BarChart data={facilityUtilizationData} margin={{ top: 10, right: 10, left: 0, bottom: 40 }}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-25} textAnchor="end" height={60} />
+                      <YAxis tick={{ fontSize: 12 }} />
+                      <RechartsTooltip formatter={(value: number, name: string) => {
+                        if (name === 'hours') return [`${value} hrs`, 'Usage'];
+                        if (name === 'bookings') return [`${value} bookings`, 'Bookings'];
+                        return [value, name];
+                      }} />
+                      <RechartsLegend wrapperStyle={{ fontSize: 12 }} />
+                      <Bar dataKey="hours" name="Hours" fill={FACILITY_BAR_COLORS.hours} radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="bookings" name="Bookings" fill={FACILITY_BAR_COLORS.bookings} radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <EmptyState Icon={MapPin} message="No facility usage records" />
+                )}
+              </div>
+
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-base sm:text-lg font-bold text-gray-900">Weekly Booking Trends</h3>
+                    <p className="text-xs sm:text-sm text-gray-600 mt-1">Rolling 12-week activity snapshot</p>
+                  </div>
+                </div>
+                {weeklyTrendData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={260}>
+                    <LineChart data={weeklyTrendData} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="week" tick={{ fontSize: 12 }} interval={0} angle={-25} textAnchor="end" height={50} />
+                      <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+                      <RechartsTooltip formatter={(value: number, name: string) => [`${value} bookings`, name.charAt(0).toUpperCase() + name.slice(1)]} />
+                      <RechartsLegend wrapperStyle={{ fontSize: 12 }} />
+                      <Line type="monotone" dataKey="total" name="Total" stroke={WEEKLY_LINE_COLORS.total} strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="approved" name="Approved" stroke={WEEKLY_LINE_COLORS.approved} strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="pending" name="Pending" stroke={WEEKLY_LINE_COLORS.pending} strokeWidth={2} dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <EmptyState Icon={BarChart3} message="No weekly trend data" />
+                )}
               </div>
             </div>
 
@@ -4277,8 +5261,33 @@ export default function AdminDashboard() {
                     <h3 className="text-base sm:text-lg font-bold text-gray-900">Scheduled Bookings</h3>
                     <p className="text-xs sm:text-sm text-gray-600 mt-1">Upcoming approved and auto-scheduled reservations</p>
                   </div>
-                  <div className="bg-pink-100 text-pink-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium self-start whitespace-nowrap">
-                    {scheduledCount || 0} scheduled
+                  <div className="flex flex-row flex-wrap gap-2 items-center">
+                    <div className="bg-pink-100 text-pink-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium self-start whitespace-nowrap">
+                      {scheduledCount || 0} scheduled
+                    </div>
+                    <div className="ml-auto flex gap-2">
+                      <Select value={courseYearFilter} onValueChange={setCourseYearFilter}>
+                        <SelectTrigger className="w-[150px]">
+                          <SelectValue placeholder="All courses" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All courses</SelectItem>
+                          {courseYearOptions.map(option => (
+                            <SelectItem key={option} value={option}>
+                              {option}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <button
+                        onClick={() => setCourseYearSort(prev => (prev === 'asc' ? 'desc' : 'asc'))}
+                        className="inline-flex items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm hover:bg-muted"
+                        aria-label="Toggle course/year sort order"
+                      >
+                        <span className="mr-2">{courseYearSort === 'asc' ? 'A → Z' : 'Z → A'}</span>
+                        <ArrowUpDown className="h-4 w-4 text-gray-500" />
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -5013,6 +6022,186 @@ export default function AdminDashboard() {
           setIsBanUserModalOpen(false);
         }}
       />
+
+      <Dialog open={isScheduleModalOpen} onOpenChange={(open) => (open ? setIsScheduleModalOpen(true) : closeScheduleModal())}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{editingScheduleId ? 'Edit Report Schedule' : 'Create Report Schedule'}</DialogTitle>
+          </DialogHeader>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="schedule-reportType">Report name</Label>
+              <Input
+                id="schedule-reportType"
+                value={scheduleForm.reportType}
+                placeholder="e.g. Weekly Facility Utilization"
+                onChange={(e) => handleScheduleFormChange('reportType', e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="schedule-frequency">Frequency</Label>
+              <Select
+                value={scheduleForm.frequency}
+                onValueChange={(value: ScheduleFormState['frequency']) => handleScheduleFormChange('frequency', value)}
+              >
+                <SelectTrigger id="schedule-frequency">
+                  <SelectValue placeholder="Select frequency" />
+                </SelectTrigger>
+                <SelectContent>
+                  {SCHEDULE_FREQUENCY_OPTIONS.map(option => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {scheduleForm.frequency === 'weekly' && (
+              <div className="space-y-2">
+                <Label htmlFor="schedule-dayOfWeek">Weekday</Label>
+                <Select
+                  value={scheduleForm.dayOfWeek !== null && scheduleForm.dayOfWeek !== undefined ? String(scheduleForm.dayOfWeek) : ''}
+                  onValueChange={(value) => handleScheduleFormChange('dayOfWeek', Number(value))}
+                >
+                  <SelectTrigger id="schedule-dayOfWeek">
+                    <SelectValue placeholder="Select day" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {WEEKDAY_LABELS.map((label, idx) => (
+                      <SelectItem key={idx} value={String(idx)}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="schedule-timeOfDay">Preferred time</Label>
+              <Input
+                id="schedule-timeOfDay"
+                type="time"
+                value={scheduleForm.timeOfDay}
+                onChange={(e) => handleScheduleFormChange('timeOfDay', e.target.value)}
+              />
+              <p className="text-xs text-gray-500">Used as a guideline for when the report should run.</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="schedule-format">Format</Label>
+              <Select
+                value={scheduleForm.format}
+                onValueChange={(value) => handleScheduleFormChange('format', value)}
+              >
+                <SelectTrigger id="schedule-format">
+                  <SelectValue placeholder="Select format" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pdf">PDF</SelectItem>
+                  <SelectItem value="xlsx">Excel (.xlsx)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="sm:col-span-2 space-y-2">
+              <Label htmlFor="schedule-description">Description</Label>
+              <Textarea
+                id="schedule-description"
+                value={scheduleForm.description}
+                onChange={(e) => handleScheduleFormChange('description', e.target.value)}
+                placeholder="Optional details about what the report covers."
+                rows={3}
+              />
+            </div>
+
+            <div className="sm:col-span-2 space-y-2">
+              <Label htmlFor="schedule-recipients">Recipients</Label>
+              <Input
+                id="schedule-recipients"
+                value={scheduleForm.recipients}
+                onChange={(e) => handleScheduleFormChange('recipients', e.target.value)}
+                placeholder="Comma-separated emails (e.g., dean@example.com, analytics@example.com)"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="schedule-nextRun">Next run (optional)</Label>
+              <Input
+                id="schedule-nextRun"
+                type="datetime-local"
+                value={scheduleForm.nextRunAt}
+                onChange={(e) => handleScheduleFormChange('nextRunAt', e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="schedule-lastRun">Last run (optional)</Label>
+              <Input
+                id="schedule-lastRun"
+                type="datetime-local"
+                value={scheduleForm.lastRunAt}
+                onChange={(e) => handleScheduleFormChange('lastRunAt', e.target.value)}
+              />
+            </div>
+
+            <div className="sm:col-span-2 flex items-center justify-between rounded-md border border-gray-200 bg-gray-50 px-4 py-3">
+              <div>
+                <div className="text-sm font-medium text-gray-900">Schedule status</div>
+                <div className="text-xs text-gray-500">Toggle to pause or resume the automated report.</div>
+              </div>
+              <Switch
+                checked={scheduleForm.isActive}
+                onCheckedChange={(checked) => handleScheduleFormChange('isActive', checked)}
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={closeScheduleModal} disabled={scheduleMutationPending}>
+              Cancel
+            </Button>
+            <Button onClick={handleScheduleSubmit} disabled={scheduleMutationPending}>
+              {scheduleMutationPending ? (
+                <span className="inline-flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Saving…
+                </span>
+              ) : (
+                editingScheduleId ? 'Save changes' : 'Create schedule'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={!!deleteScheduleTarget} onOpenChange={(open) => { if (!open) setDeleteScheduleTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this report schedule?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will stop future automated report deliveries for <strong>{deleteScheduleTarget?.reportType}</strong>. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={!!scheduleActionLoadingId} onClick={() => setDeleteScheduleTarget(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700"
+              disabled={!!scheduleActionLoadingId}
+              onClick={() => {
+                if (deleteScheduleTarget?.id) {
+                  void deleteScheduleMutation.mutateAsync(String(deleteScheduleTarget.id));
+                }
+              }}
+            >
+              {scheduleActionLoadingId ? 'Deleting…' : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Equipment check modal - admin can mark each item prepared / not available */}
       {showEquipmentModal && equipmentModalBooking && (

@@ -3,6 +3,8 @@ import { useAuth } from '@/hooks/useAuth';
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { format } from 'date-fns';
+import { cn } from '@/lib/utils';
+import { CalendarDays, CheckCircle2, Filter, Slash, Undo2 } from 'lucide-react';
 
 interface SlotItem {
   start: string;
@@ -32,8 +34,8 @@ export default function AvailabilityGrid({ date, onSelectRange, unavailableDates
   // --- Always call hooks at the top level ---
   const { user } = useAuth();
   const [selectedRoomId, setSelectedRoomId] = useState<number|null>(null);
-  const [showAvailable, setShowAvailable] = useState(true);
-  const [showUnavailable, setShowUnavailable] = useState(true);
+  const [availabilityView, setAvailabilityView] = useState<'available' | 'unavailable' | 'all'>('available');
+  const [slotPreview, setSlotPreview] = useState<{ facilityId: number; slots: SlotItem[] } | null>(null);
   const [showScheduled, setShowScheduled] = useState(true);
   // selectedDate is writable so users can toggle between days/months
   const [selectedDate, _setSelectedDate] = useState<Date>(() => {
@@ -70,7 +72,12 @@ export default function AvailabilityGrid({ date, onSelectRange, unavailableDates
     refetchInterval: 30_000,
   });
 
-  if (isLoading) return <div className="py-6">Loading availability…</div>;
+  if (isLoading) return (
+    <div className="flex items-center gap-2 py-6 text-sm text-gray-600">
+      <CalendarDays className="h-4 w-4 animate-spin" />
+      Loading availability…
+    </div>
+  );
   if (error) return (
     <div className="py-6 text-sm text-red-600">
       Failed to load availability
@@ -204,17 +211,73 @@ export default function AvailabilityGrid({ date, onSelectRange, unavailableDates
 
   // --- Sidebar legend ---
   const renderLegend = () => (
-    <div className="mt-6 space-y-2">
-      <div className="flex items-center gap-2">
-        <input type="checkbox" checked={showUnavailable} onChange={e => setShowUnavailable(e.target.checked)} className="accent-red-500" />
-        <span className="w-3 h-3 rounded bg-red-500 inline-block"></span>
-        <span className="text-xs">Unavailable</span>
+    <div className="mt-6 space-y-3">
+      <div>
+        <p className="text-xs font-semibold text-gray-600 mb-2">Availability</p>
+        <div className="flex flex-wrap gap-2">
+          {([
+            { label: 'Available', value: 'available', badge: 'bg-emerald-500', description: 'Show open slots', icon: CheckCircle2 },
+            { label: 'Unavailable', value: 'unavailable', badge: 'bg-red-500', description: 'Show closed slots', icon: Slash },
+            { label: 'All', value: 'all', badge: 'bg-slate-400', description: 'Show everything', icon: Filter },
+          ] as const).map(({ label, value, badge, icon: Icon, description }) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setAvailabilityView(value)}
+              className={cn(
+                'flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500',
+                availabilityView === value
+                  ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-sm'
+                  : 'border-gray-200 bg-white text-gray-600 hover:border-blue-200 hover:text-blue-600'
+              )}
+              aria-pressed={availabilityView === value}
+            >
+              <span className={cn('inline-flex h-2.5 w-2.5 rounded-full', badge)} aria-hidden="true" />
+              <span className="flex items-center gap-1">
+                <Icon className="h-3.5 w-3.5" />
+                {label}
+              </span>
+            </button>
+          ))}
+        </div>
+        <p className="mt-2 text-[11px] text-gray-500">{availabilityView === 'available' ? 'Showing only open time slots.' : availabilityView === 'unavailable' ? 'Showing only blocked slots or facility closures.' : 'Showing every slot including unavailable ones.'}</p>
       </div>
-      <div className="flex items-center gap-2">
-        <input type="checkbox" checked={showScheduled} onChange={e => setShowScheduled(e.target.checked)} className="accent-yellow-400" />
-        <span className="w-3 h-3 rounded bg-yellow-400 inline-block"></span>
-        <span className="text-xs">Scheduled</span>
+      <div>
+        <p className="text-xs font-semibold text-gray-600 mb-2">Overlay</p>
+        <label className="flex items-center gap-2 text-xs text-gray-600">
+          <input type="checkbox" checked={showScheduled} onChange={e => setShowScheduled(e.target.checked)} className="accent-yellow-400" />
+          <span className="inline-flex h-2.5 w-2.5 rounded-full bg-yellow-400" aria-hidden="true"></span>
+          Show scheduled (pending/approved) bookings
+        </label>
       </div>
+      {slotPreview ? (
+        <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50 p-3">
+          <div className="flex items-center justify-between text-xs font-semibold text-blue-700">
+            <span>Next available slots</span>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-white px-2 py-0.5 text-[10px] font-medium text-blue-600 hover:border-blue-300"
+              onClick={() => setSlotPreview(null)}
+            >
+              <Undo2 className="h-3 w-3" />
+              Reset
+            </button>
+          </div>
+          <ul className="mt-2 space-y-1 text-[11px] text-blue-800">
+            {slotPreview.slots.slice(0, 4).map((slot) => (
+              <li key={`${slot.start}-${slot.end}`} className="flex items-center justify-between rounded-md bg-white px-2 py-1 shadow-sm">
+                <span>{format(new Date(slot.start), 'EEE, MMM d')}</span>
+                <span className="font-medium">
+                  {format(new Date(slot.start), 'hh:mm a')} – {format(new Date(slot.end), 'hh:mm a')}
+                </span>
+              </li>
+            ))}
+            {slotPreview.slots.length === 0 ? (
+              <li className="rounded-md bg-white px-2 py-1 text-[11px] text-blue-600">No open slots returned.</li>
+            ) : null}
+          </ul>
+        </div>
+      ) : null}
     </div>
   );
 
@@ -292,49 +355,61 @@ export default function AvailabilityGrid({ date, onSelectRange, unavailableDates
                         if (slotEnd < now && slotStatus !== 'scheduled') {
                           slotStatus = 'unavailable';
                         }
-                        if ((slotStatus === 'available' && !showAvailable) || (slotStatus === 'unavailable' && !showUnavailable) || (slotStatus === 'scheduled' && !showScheduled)) {
+                        const slotDateStr = `${slotTime.getFullYear()}-${String(slotTime.getMonth() + 1).padStart(2, '0')}-${String(slotTime.getDate()).padStart(2, '0')}`;
+                        const isFacilityUnavailable = unavailableDates.includes(slotDateStr);
+                        if (slotStatus === 'available' && isFacilityUnavailable) {
+                          slotStatus = 'unavailable';
+                        }
+                        const slotMatchesView =
+                          availabilityView === 'all' ||
+                          (availabilityView === 'available' && slotStatus === 'available') ||
+                          (availabilityView === 'unavailable' && slotStatus !== 'available');
+
+                        if (!slotMatchesView || (slotStatus === 'scheduled' && !showScheduled)) {
                           return <div key={hIdx} className="h-10 md:h-12 border-b border-gray-100 bg-gray-50"></div>;
                         }
-                        // Show unavailable tag if this day is marked unavailable and showUnavailable is true
-                        const slotDateStr = `${slotTime.getFullYear()}-${String(slotTime.getMonth() + 1).padStart(2, '0')}-${String(slotTime.getDate()).padStart(2, '0')}`;
                         if (slotStatus === 'available') {
-                          if (showUnavailable && unavailableDates.includes(slotDateStr)) {
-                            return (
-                              <div
-                                key={hIdx}
-                                className="h-10 md:h-12 flex items-center justify-center border-b border-gray-100 bg-red-100 text-xs text-red-700 font-semibold rounded-md m-0.5 md:m-1 shadow-sm"
-                                style={{ minHeight: 36 }}
-                                title="Unavailable"
-                              >
-                                Unavailable
-                              </div>
-                            );
-                          }
+                          const slotIsUnavailableBadge = isFacilityUnavailable;
                           return (
                             <div
                               key={hIdx}
-                              className="h-10 md:h-12 cursor-pointer bg-white"
+                              className={cn(
+                                'group relative h-10 md:h-12 cursor-pointer rounded-md border border-transparent bg-white transition hover:border-blue-300 hover:bg-blue-50',
+                                slotIsUnavailableBadge && 'border-red-200 bg-red-50/60 text-red-600'
+                              )}
                               tabIndex={0}
                               style={{ minHeight: 36 }}
                               onClick={() => {
                                 if (typeof onSelectRange === 'function') {
                                   onSelectRange(facility.facility.id, slot?.start || slotTime.toISOString(), slot?.end || new Date(slotTime.getTime() + 60 * 60000).toISOString());
                                 }
+                                setSlotPreview({
+                                  facilityId: facility.facility.id,
+                                  slots: facility.slots
+                                    .filter((s) => s.status === 'available')
+                                    .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
+                                });
                               }}
+                              aria-label={`Available slot ${format(slotTime, 'hh:mm a')} at ${format(date, 'EEEE, MMMM d')}`}
                             />
                           );
                         }
-                        // Leave scheduled and unavailable slots unchanged
-                        const color = slotStatus === 'scheduled' ? 'bg-yellow-400/80 hover:bg-yellow-500' : 'bg-red-400/80 hover:bg-red-500';
+                        const color = slotStatus === 'scheduled' ? 'bg-amber-300/90 text-amber-900 hover:bg-amber-300' : 'bg-red-400/90 text-white hover:bg-red-500';
+                        const slotLabel = slotStatus === 'scheduled'
+                          ? format(slotTime, 'hh:mm a')
+                          : (isFacilityUnavailable ? 'Unavailable' : format(slotTime, 'hh:mm a'));
                         return (
                           <div
                             key={hIdx}
-                            className={`h-10 md:h-12 border-b border-gray-100 flex items-center justify-center transition-all duration-150 ${color} text-xs md:text-xs text-white font-semibold rounded-md m-0.5 md:m-1 shadow-sm`}
+                            className={cn(
+                              'h-10 md:h-12 border-b border-gray-100 flex items-center justify-center rounded-md m-0.5 md:m-1 text-xs md:text-xs font-semibold shadow-sm transition-all duration-150',
+                              color
+                            )}
                             title={`${slotStatus.charAt(0).toUpperCase() + slotStatus.slice(1)}: ${format(slotTime, 'hh:mm a')}`}
                             tabIndex={0}
                             style={{ minHeight: 36 }}
                           >
-                            {format(slotTime, 'hh:mm a')}
+                            {slotLabel}
                           </div>
                         );
                       })}

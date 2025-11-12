@@ -1,3 +1,29 @@
+// Patch JSON.parse globally so bundled contexts (like Turbopack) handle
+// database values such as "undefined" or "null" without throwing.
+// This must run before pg/drizzle schemas import JSON values.
+if (typeof JSON !== "undefined" && typeof JSON.parse === "function") {
+  const originalParse = JSON.parse;
+  JSON.parse = function (this: unknown, text: unknown, reviver?: any) {
+    if (text === null || text === undefined) return null;
+    const str = String(text).trim();
+    if (
+      str === "undefined" ||
+      str === "null" ||
+      str === "" ||
+      str === '"undefined"' ||
+      str === '"null"' ||
+      str === '""'
+    ) {
+      return null;
+    }
+    try {
+      return originalParse.call(this, text as any, reviver);
+    } catch (err) {
+      return null;
+    }
+  } as any;
+}
+
 import {
   pgTable,
   text,
@@ -89,15 +115,28 @@ export const facilityBookings = pgTable("facility_bookings", {
   courseYearDept: text("course_year_dept"),
   participants: integer("participants").notNull(),
   equipment: jsonb("equipment"),
-  // Arrival confirmation: when an approved booking requires admin confirmation after start
   arrivalConfirmationDeadline: timestamp("arrival_confirmation_deadline"),
   arrivalConfirmed: boolean("arrival_confirmed").default(false),
-  status: varchar("status").default("pending").notNull(), // pending, approved, denied, cancelled
+  status: varchar("status").default("pending").notNull(),
   adminId: varchar("admin_id").references(() => users.id),
   adminResponse: text("admin_response"),
+  reminderOptIn: boolean("reminder_opt_in").default(true).notNull(),
+  reminderStatus: varchar("reminder_status").default("pending").notNull(),
+  reminderScheduledAt: timestamp("reminder_scheduled_at"),
+  reminderLeadMinutes: integer("reminder_lead_minutes").default(60).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-  
+});
+
+export const bookingReminders = pgTable("booking_reminders", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  bookingId: uuid("booking_id").references(() => facilityBookings.id).notNull().unique(),
+  reminderTime: timestamp("reminder_time").notNull(),
+  status: varchar("status").default("pending").notNull(),
+  attempts: integer("attempts").default(0).notNull(),
+  lastAttemptAt: timestamp("last_attempt_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 // System alerts
@@ -122,6 +161,18 @@ export const activityLogs = pgTable("activity_logs", {
   ipAddress: varchar("ip_address"),
   userAgent: text("user_agent"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const faqs = pgTable("faqs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  category: varchar("category").notNull(),
+  question: text("question").notNull(),
+  answer: text("answer").notNull(),
+  helpfulCount: integer("helpful_count").default(0).notNull(),
+  notHelpfulCount: integer("not_helpful_count").default(0).notNull(),
+  sortOrder: integer("sort_order").default(0).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 // Relations

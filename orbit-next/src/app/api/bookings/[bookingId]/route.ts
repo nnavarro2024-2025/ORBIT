@@ -1,3 +1,5 @@
+import { randomUUID } from "crypto";
+
 import { NextResponse, type NextRequest } from "next/server";
 
 import { requireActiveUser } from "@/server/auth";
@@ -211,6 +213,21 @@ export async function PUT(
       } catch (error) {
         console.warn("[bookings] Failed to persist equipment via db", error);
       }
+    }
+
+    try {
+      const facility = await storage.getFacility(parsedFacilityId).catch(() => null);
+      await storage.createActivityLog({
+        id: randomUUID(),
+        action: "Booking Updated",
+        details: `Booking ${bookingId} for ${facility?.name || `Facility ${parsedFacilityId}`} updated to ${parsedStartTime.toLocaleString()} - ${parsedEndTime.toLocaleString()}`,
+        userId: bookingOwnerId,
+        ipAddress: request.headers.get("x-forwarded-for") || request.ip || null,
+        userAgent: request.headers.get("user-agent"),
+        createdAt: new Date(),
+      });
+    } catch (logError) {
+      console.warn("[bookings] Failed to log booking update", logError);
     }
 
     const refreshed = await refreshBooking(bookingId);

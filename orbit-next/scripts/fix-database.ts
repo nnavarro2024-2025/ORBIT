@@ -33,8 +33,21 @@ async function fixDatabase() {
   try {
     console.log("🔧 Connecting to database...");
     
+    // First, let's see what we have
+    console.log("📊 Inspecting current equipment data...");
+    const inspect = await pool.query(`
+      SELECT id, equipment::text as equipment_text
+      FROM facility_bookings 
+      WHERE equipment IS NOT NULL
+      LIMIT 10;
+    `);
+    console.log(`Found ${inspect.rowCount} rows with equipment data`);
+    inspect.rows.forEach(row => {
+      console.log(`  ID ${row.id}: ${row.equipment_text}`);
+    });
+    
     // Fix equipment column with "undefined" strings
-    console.log("🧹 Cleaning up invalid JSONB data in facility_bookings.equipment...");
+    console.log("\n🧹 Cleaning up invalid JSONB data in facility_bookings.equipment...");
     
     const result1 = await pool.query(`
       UPDATE facility_bookings 
@@ -59,6 +72,15 @@ async function fixDatabase() {
       RETURNING id;
     `);
     console.log(`✅ Fixed ${result3.rowCount || 0} rows with "null"`);
+    
+    // Also fix rows where equipment contains undefined in JSON
+    const result4 = await pool.query(`
+      UPDATE facility_bookings 
+      SET equipment = NULL 
+      WHERE equipment::text LIKE '%undefined%'
+      RETURNING id;
+    `);
+    console.log(`✅ Fixed ${result4.rowCount || 0} rows containing "undefined" in JSON`);
 
     // Count final NULL values
     const countResult = await pool.query(`
@@ -66,7 +88,7 @@ async function fixDatabase() {
       FROM facility_bookings 
       WHERE equipment IS NULL;
     `);
-    console.log(`📊 Total rows with NULL equipment: ${countResult.rows[0].count}`);
+    console.log(`\n📊 Total rows with NULL equipment: ${countResult.rows[0].count}`);
 
     console.log("✨ Database cleanup complete!");
   } catch (error) {

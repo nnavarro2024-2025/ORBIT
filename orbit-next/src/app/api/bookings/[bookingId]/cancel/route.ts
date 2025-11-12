@@ -4,13 +4,19 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { requireActiveUser } from "@/server/auth";
 import { storage } from "@/server/storage";
+import { isBuildTime } from "@/server/build-guard";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function POST(
   request: NextRequest,
   context: { params: Promise<{ bookingId: string }> },
 ) {
+  if (isBuildTime()) {
+    return NextResponse.json({ success: false, build: true }, { status: 200 });
+  }
+
   const authResult = await requireActiveUser(request.headers);
   if (!authResult.ok) {
     return authResult.response;

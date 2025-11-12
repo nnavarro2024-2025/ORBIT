@@ -1,5 +1,5 @@
 import { CustomTextarea } from "@/components/ui/custom-textarea";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -7,7 +7,7 @@ import { z } from "zod";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
-import { Calendar as CalendarIcon, Plus, Minus, Send, X, Loader2 } from "lucide-react"; // Added Plus, Minus, Send, X, Loader2 icons
+import { Calendar as CalendarIcon, Plus, Minus, Send, X, Loader2, TriangleAlert } from "lucide-react"; // Added Plus, Minus, Send, X, Loader2, TriangleAlert icons
 import type { Facility } from "@shared/schema";
 import {
   Dialog,
@@ -49,6 +49,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { Switch } from "@/components/ui/switch";
 
 // Small helper: return a short description for known facility names
 const getFacilityDescriptionByName = (name?: string) => {
@@ -273,6 +274,8 @@ export default function BookingModal({
       purpose: z.string().min(1, "Purpose is required"),
       courseYearDept: z.string().min(1, "Course & Year/Department is required"),
       participants: z.number().min(1, "Number of participants is required"),
+      reminderOptIn: z.boolean().optional(),
+      reminderLeadMinutes: z.number().optional(),
     })
     .superRefine((val, ctx) => {
       try {
@@ -313,19 +316,24 @@ export default function BookingModal({
   const PURPOSE_MAX = 200;
   const COURSE_MAX = 100;
   const OTHERS_MAX = 50;
+  const REMINDER_LEAD_MINUTES = 60;
 
   const form = useForm<BookingFormData>({
     resolver: zodResolver(bookingSchema),
     mode: 'onChange',
     defaultValues: {
       facilityId: "",
-      startTime: initialStartTime ?? new Date(new Date().getTime() + 5 * 60 * 1000), // Default: initialStartTime or now + 5 minutes
-      endTime: initialEndTime ?? new Date(Date.now() + 35 * 60 * 1000), // Default: initialEndTime or start + 30 minutes
+      startTime: initialStartTime ?? new Date(Date.now() + 60 * 60 * 1000), // Default: initialStartTime or now + 1 hour
+      endTime: initialEndTime ?? new Date(Date.now() + 90 * 60 * 1000), // Default: initialEndTime or start + 30 minutes
       purpose: "",
       courseYearDept: "",
       participants: 1,
+      reminderOptIn: true,
+      reminderLeadMinutes: REMINDER_LEAD_MINUTES,
     },
   });
+
+  const reminderOptIn = form.watch("reminderOptIn") ?? true;
 
   // If the modal receives new initial times while open, update the form fields
   useEffect(() => {
@@ -337,6 +345,174 @@ export default function BookingModal({
   const [formValidationWarnings, setFormValidationWarnings] = useState<Array<{title: string; description: string}>>([]);
   // Track whether the user manually edited the date/time so we don't overwrite their choices
   const [userEditedTime, setUserEditedTime] = useState(false);
+  type AvailableSlot = { start: Date; end: Date; source: "api" | "fallback" };
+  const slotCacheRef = useRef<Map<string, AvailableSlot[]>>(new Map());
+  const [availableSlots, setAvailableSlots] = useState<AvailableSlot[]>([]);
+  const [slotsLoading, setSlotsLoading] = useState(false);
+  const [slotsError, setSlotsError] = useState<string | null>(null);
+
+  const startTimeValue = form.watch("startTime");
+  const facilityIdValue = form.watch("facilityId");
+  const selectedDateKey = startTimeValue ? format(startTimeValue, "yyyy-MM-dd") : null;
+
+  const computeFallbackSlots = useCallback((facilityIdNum: number, dateKey: string): AvailableSlot[] => {
+    try {
+      const [yearStr, monthStr, dayStr] = dateKey.split("-");
+      const year = parseInt(yearStr, 10);
+      const month = parseInt(monthStr, 10) - 1;
+      const day = parseInt(dayStr, 10);
+      const startWindow = new Date(year, month, day, 7, 30, 0, 0);
+      const endWindow = new Date(year, month, day, 19, 0, 0, 0);
+      const SLOT_MS = 30 * 60 * 1000;
+      const slots: AvailableSlot[] = [];
+      const blockingStatuses = new Set(["approved", "pending"]);
+      const facilityBookings = (allBookings || []).filter((booking: any) => booking.facilityId === facilityIdNum && blockingStatuses.has(booking.status));
+
+      for (let cursor = new Date(startWindow); cursor.getTime() + SLOT_MS <= endWindow.getTime(); cursor = new Date(cursor.getTime() + SLOT_MS)) {
+        const slotStart = new Date(cursor);
+        const slotEnd = new Date(cursor.getTime() + SLOT_MS);
+        const conflict = facilityBookings.some((booking: any) => {
+          const existingStart = new Date(booking.startTime).getTime();
+          const existingEnd = new Date(booking.endTime).getTime();
+          return slotStart.getTime() < existingEnd && slotEnd.getTime() > existingStart;
+        });
+
+        if (!conflict) {
+          slots.push({ start: slotStart, end: slotEnd, source: "fallback" });
+        }
+      }
+
+      return slots;
+    } catch (error) {
+      console.warn('[BookingModal] Failed to build fallback slots', error);
+      return [];
+    }
+  }, [allBookings]);
+
+  useEffect(() => {
+    slotCacheRef.current.clear();
+  }, [allBookings]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setAvailableSlots([]);
+      setSlotsError(null);
+      setSlotsLoading(false);
+      return;
+    }
+
+    if (!facilityIdValue || !selectedDateKey) {
+      setAvailableSlots([]);
+      setSlotsError(null);
+      setSlotsLoading(false);
+      return;
+    }
+
+    const facilityIdNum = parseInt(facilityIdValue, 10);
+    if (Number.isNaN(facilityIdNum)) {
+      setAvailableSlots([]);
+      setSlotsError(null);
+      setSlotsLoading(false);
+      return;
+    }
+
+    const cacheKey = `${facilityIdNum}-${selectedDateKey}`;
+    if (slotCacheRef.current.has(cacheKey)) {
+      const cachedSlots = slotCacheRef.current.get(cacheKey) ?? [];
+      setAvailableSlots(cachedSlots);
+      setSlotsError(cachedSlots.length === 0 ? "No available time slots for this date." : null);
+      setSlotsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setSlotsLoading(true);
+    setSlotsError(null);
+
+    const loadSlots = async () => {
+      try {
+        const resp = await apiRequest('GET', `/api/availability?date=${selectedDateKey}`);
+        const json = await resp.json();
+        const facilityEntry = Array.isArray(json?.data)
+          ? json.data.find((entry: any) => entry?.facility?.id === facilityIdNum)
+          : null;
+
+        const now = new Date();
+        const todayKey = format(now, "yyyy-MM-dd");
+        const isToday = todayKey === selectedDateKey;
+
+        let slots: AvailableSlot[] = [];
+        if (facilityEntry && Array.isArray(facilityEntry.slots)) {
+          slots = facilityEntry.slots
+            .filter((slot: any) => slot?.status === 'available')
+            .map((slot: any) => ({ start: new Date(slot.start), end: new Date(slot.end), source: "api" as const }));
+        }
+
+        if (slots.length === 0) {
+          slots = computeFallbackSlots(facilityIdNum, selectedDateKey);
+        }
+
+        if (isToday) {
+          slots = slots.filter((slot) => slot.end.getTime() > now.getTime() && slot.start.getTime() >= now.getTime());
+        }
+
+        slots.sort((a, b) => a.start.getTime() - b.start.getTime());
+
+        if (!cancelled) {
+          slotCacheRef.current.set(cacheKey, slots);
+          setAvailableSlots(slots);
+          setSlotsError(slots.length === 0 ? "No available time slots for this date." : null);
+        }
+      } catch (error) {
+        console.warn('[BookingModal] Failed to load availability slots', error);
+        if (!cancelled) {
+          setAvailableSlots([]);
+          setSlotsError("Unable to load available time slots. Please try again.");
+        }
+      } finally {
+        if (!cancelled) {
+          setSlotsLoading(false);
+        }
+      }
+    };
+
+    loadSlots();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, facilityIdValue, selectedDateKey, computeFallbackSlots]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (userEditedTime) return;
+    if (availableSlots.length === 0) return;
+
+    const firstSlot = availableSlots[0];
+    const currentStart = form.getValues('startTime');
+    const currentEnd = form.getValues('endTime');
+
+    const startMatches = currentStart && Math.abs(currentStart.getTime() - firstSlot.start.getTime()) < 60 * 1000;
+    const endMatches = currentEnd && Math.abs(currentEnd.getTime() - firstSlot.end.getTime()) < 60 * 1000;
+
+    if (!startMatches) {
+      form.setValue('startTime', firstSlot.start);
+    }
+    if (!endMatches) {
+      form.setValue('endTime', firstSlot.end);
+    }
+  }, [availableSlots, userEditedTime, isOpen, form]);
+
+  const handleSlotSelect = (slot: AvailableSlot) => {
+    form.setValue('startTime', slot.start, { shouldDirty: true });
+    form.setValue('endTime', slot.end, { shouldDirty: true });
+    setUserEditedTime(true);
+  };
+
+  const isSlotSelected = (slot: AvailableSlot) => {
+    if (!startTimeValue) return false;
+    return Math.abs(startTimeValue.getTime() - slot.start.getTime()) < 60 * 1000;
+  };
 
   // Auto-select facility when modal opens with a specific facility ID
   useEffect(() => {
@@ -444,6 +620,8 @@ export default function BookingModal({
           items: preparedItems,
           others: equipmentOtherText.trim() || null,
         },
+        reminderOptIn: data.reminderOptIn,
+        reminderLeadMinutes: data.reminderLeadMinutes,
       };
       
       console.log('Final equipment payload:', bookingData.equipment);
@@ -460,9 +638,14 @@ export default function BookingModal({
       ]);
       setIsSubmitting(false);
       setLastSubmissionTime(Date.now());
+      const selectedFacilityName = selectedFacility?.name
+        || visibleFacilities.find((facility) => String(facility.id) === form.getValues("facilityId"))?.name
+        || "Facility";
+      const scheduledStart = form.getValues("startTime");
+      const formattedStart = scheduledStart ? new Date(scheduledStart).toLocaleString() : "";
       toast({
         title: "Booking Scheduled",
-        description: "Your booking has been scheduled successfully.",
+        description: formattedStart ? `${selectedFacilityName} on ${formattedStart}.` : `${selectedFacilityName} scheduled successfully.`,
         variant: "default",
       });
       form.reset();
@@ -574,6 +757,7 @@ export default function BookingModal({
       setIsSubmitting(true);
       // Send the same payload with forceCancelConflicts flag so server will cancel user's existing bookings
       const preparedItems = Object.keys(equipmentState).filter(k => k !== 'others' && equipmentState[k] === 'prepared');
+      
       const payload = {
         ...confirmPendingData,
         facilityId: parseInt(confirmPendingData.facilityId),
@@ -583,6 +767,8 @@ export default function BookingModal({
           items: preparedItems,
           others: equipmentOtherText.trim() || null,
         },
+        reminderOptIn: confirmPendingData.reminderOptIn ?? true,
+        reminderLeadMinutes: confirmPendingData.reminderLeadMinutes ?? REMINDER_LEAD_MINUTES,
         forceCancelConflicts: true,
       };
       const response = await apiRequest('POST', '/api/bookings', payload);
@@ -684,15 +870,32 @@ export default function BookingModal({
       });
     }
 
+    const maxDurationMs = 2 * 60 * 60 * 1000;
+    if (data.startTime && data.endTime) {
+      const durationMs = data.endTime.getTime() - data.startTime.getTime();
+      if (durationMs > maxDurationMs) {
+        validationErrors.push({
+          title: "Maximum Duration Exceeded",
+          description: "Bookings exceeding the maximum allowed duration are not permitted.",
+        });
+      }
+    }
+
     // Show validation errors inline in the modal
     if (validationErrors.length > 0) {
       setFormValidationWarnings(validationErrors);
+      try {
+        const summary = document.getElementById("booking-form-errors");
+        summary?.scrollIntoView({ behavior: "smooth", block: "start" });
+      } catch (e) {
+        // ignore scroll failures
+      }
       return;
     }
 
     // Clear any previous inline warnings and proceed to confirmation
     setFormValidationWarnings([]);
-    setConfirmPendingData(data);
+    setConfirmPendingData({ ...data, reminderOptIn: data.reminderOptIn ?? reminderOptIn, reminderLeadMinutes: data.reminderLeadMinutes ?? REMINDER_LEAD_MINUTES });
     setShowConfirmDialog(true);
   };
 
@@ -1185,6 +1388,46 @@ export default function BookingModal({
 
             </div>
 
+            <div className="md:col-span-2">
+              <div className="flex items-center justify-between mb-2">
+                <FormLabel className="text-sm font-medium text-gray-700">Available Time Slots</FormLabel>
+                {slotsLoading ? (
+                  <span className="flex items-center gap-1 text-xs text-gray-500">
+                    <Loader2 className="h-3 w-3 animate-spin" /> Loading
+                  </span>
+                ) : null}
+              </div>
+              {slotsError ? (
+                <p className="text-xs text-red-600">{slotsError}</p>
+              ) : availableSlots.length === 0 ? (
+                <p className="text-xs text-gray-500">No available slots for this date. Please choose another date or facility.</p>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {availableSlots.map((slot, idx) => {
+                    const selected = isSlotSelected(slot);
+                    return (
+                      <button
+                        key={`slot-${slot.start.toISOString()}-${idx}`}
+                        type="button"
+                        onClick={() => handleSlotSelect(slot)}
+                        className={cn(
+                          "rounded-lg border px-3 py-2 text-sm transition focus:outline-none focus:ring-2 focus:ring-blue-500",
+                          selected
+                            ? "border-blue-500 bg-blue-50 text-blue-700 font-semibold"
+                            : "border-gray-200 bg-white text-gray-700 hover:border-blue-300 hover:text-blue-700"
+                        )}
+                      >
+                        <span>{`${format(slot.start, "hh:mm a")} – ${format(slot.end, "hh:mm a")}`}</span>
+                        {slot.source === "fallback" ? (
+                          <span className="block text-[10px] text-gray-400">Estimated</span>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
             <div className="grid md:grid-cols-2 gap-6">
               {/* Start Date + Time split */}
               <FormField
@@ -1323,7 +1566,11 @@ export default function BookingModal({
               if (!conflicts) return null;
               
               return (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <div id="booking-form-errors" className="space-y-3 rounded-lg border border-red-200 bg-red-50 p-4">
+                  <div className="flex items-center gap-2 text-red-700">
+                    <TriangleAlert className="h-5 w-5" />
+                    <span className="font-semibold">Please review the following issues</span>
+                  </div>
                   <div className="flex items-start gap-2">
                     <div className="w-2 h-2 rounded-full bg-red-500 mt-2"></div>
                     <div className="flex-1">
@@ -1407,6 +1654,7 @@ export default function BookingModal({
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Course & Year/Department <span className="text-red-500">*</span></FormLabel>
+                  <p className="text-xs text-gray-500">Example: BSIT – 3rd Year (Dept. of Computing)</p>
                   <div style={{ display: 'block', width: '100%', maxWidth: '100%' }}>
                     <CustomTextarea
                       value={field.value || ""}
@@ -1434,7 +1682,7 @@ export default function BookingModal({
 
             {/* Booking Summary - Show different sections based on what's filled */}
             {(selectedFacility || form.watch("startTime") || form.watch("endTime") || form.watch("purpose")) && (
-              <div className="border-t pt-6">
+              <div id="booking-summary" className="border-t pt-6">
                 <h3 className="font-medium mb-4">Booking Summary</h3>
                 <div className="bg-accent/50 p-4 rounded-lg space-y-2">
                   {selectedFacility && (
@@ -1698,7 +1946,11 @@ export default function BookingModal({
 
                       // Final safety: rely on server validation; do not preemptively block submission here.
 
-                      createBookingMutation.mutate(confirmPendingData);
+                      createBookingMutation.mutate({
+                        ...confirmPendingData,
+                        reminderOptIn: confirmPendingData.reminderOptIn ?? true,
+                        reminderLeadMinutes: confirmPendingData.reminderLeadMinutes ?? REMINDER_LEAD_MINUTES,
+                      });
                       setConfirmPendingData(null);
                       setShowConfirmDialog(false);
                     }}>Confirm</AlertDialogAction>
@@ -1740,14 +1992,13 @@ export default function BookingModal({
             {/* Inline validation warnings (replaces toasts for form validation) */}
             {(() => {
               const durationWarning = !isDurationValid(form.watch('startTime'), form.watch('endTime'))
-                ? [{ title: 'Bookings must be at least 30 minutes long', description: 'Please adjust the times before saving.' }]
-                : [];
-
-              const warnings = durationWarning.concat(formValidationWarnings || []);
+            ? [{ title: 'Bookings must be at least 30 minutes long', description: 'Please adjust the times before saving.' }]
+            : [];
+          const warnings = durationWarning.concat(formValidationWarnings || []);
               if (warnings.length === 0) return null;
 
               return (
-                <div className="mt-3 text-sm rounded-b-lg px-4 py-3 bg-white border-t border-gray-200">
+                <div id="booking-form-errors" className="mt-3 text-sm rounded-b-lg px-4 py-3 bg-white border-t border-gray-200">
                   {warnings.map((w, idx) => (
                     <div key={idx} className="mb-2 flex items-start gap-3">
                       {/* larger yellow warning icon to match design */}

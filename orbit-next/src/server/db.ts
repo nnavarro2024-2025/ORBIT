@@ -1,3 +1,5 @@
+import "./json-parse-patch";
+
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { types } from "pg";
@@ -13,11 +15,24 @@ function setupJSONBParser() {
   const parseJSONB = (val: string) => {
     if (val === null || val === undefined) return null;
     const trimmed = String(val).trim();
-    if (trimmed === "undefined" || trimmed === "null" || trimmed === "") return null;
+    
+    // Handle both quoted and unquoted "undefined", "null", empty string
+    // PostgreSQL JSONB stores strings WITH quotes, so "undefined" becomes '"undefined"'
+    if (
+      trimmed === "undefined" || 
+      trimmed === '"undefined"' ||  // JSON-quoted string
+      trimmed === "null" || 
+      trimmed === '"null"' ||       // JSON-quoted string  
+      trimmed === '""' ||           // Empty JSON string
+      trimmed === ""
+    ) {
+      return null;
+    }
+    
     try {
       return JSON.parse(trimmed);
     } catch (e) {
-      console.warn("[DB] Failed to parse JSONB, returning null");
+      console.warn("[DB] Failed to parse JSONB, returning null:", trimmed.substring(0, 50));
       return null;
     }
   };
@@ -32,8 +47,12 @@ setupJSONBParser();
 function getPool() {
   if (_pool) return _pool;
   
-  const connectionString = process.env.DATABASE_URL || "postgresql://localhost:5432/postgres";
-  
+  const rawConnectionString = process.env.DATABASE_URL || "postgresql://localhost:5432/postgres";
+  const connectionString = rawConnectionString.trim();
+  if (rawConnectionString !== connectionString) {
+    console.warn("[db] Trimmed whitespace from DATABASE_URL env var");
+  }
+
   _pool = new Pool({
     connectionString,
     ssl: connectionString.includes("localhost") ? undefined : { rejectUnauthorized: false },
@@ -50,6 +69,46 @@ export const pool = new Proxy({} as Pool, {
 
 export const db = new Proxy({} as ReturnType<typeof drizzle<typeof schema>>, {
   get(_, prop) {
+    // During build time, return mock implementations that don't access the database
+    if (process.env.npm_lifecycle_event === 'build' || process.env.NEXT_PHASE === 'phase-production-build') {
+      // Return a mock drizzle instance with common methods
+      return {
+        select: () => ({
+          from: () => ({
+            where: () => ({ then: () => Promise.resolve([]) }),
+            orderBy: () => ({ then: () => Promise.resolve([]) }),
+            then: () => Promise.resolve([]),
+          }),
+          then: () => Promise.resolve([]),
+        }),
+        insert: () => ({
+          values: () => ({
+            returning: () => ({ then: () => Promise.resolve([]) }),
+            onConflictDoUpdate: () => ({ returning: () => ({ then: () => Promise.resolve([]) }) }),
+            then: () => Promise.resolve([]),
+          }),
+          then: () => Promise.resolve([]),
+        }),
+        update: () => ({
+          set: () => ({
+            where: () => ({ then: () => Promise.resolve({ rowCount: 0 }) }),
+            then: () => Promise.resolve({ rowCount: 0 }),
+          }),
+          then: () => Promise.resolve({ rowCount: 0 }),
+        }),
+        delete: () => ({
+          where: () => ({ then: () => Promise.resolve({ rowCount: 0 }) }),
+          then: () => Promise.resolve({ rowCount: 0 }),
+        }),
+        transaction: (cb: any) => Promise.resolve(cb({
+          select: () => ({ from: () => ({ where: () => Promise.resolve([]) }) }),
+          insert: () => ({ values: () => ({ returning: () => Promise.resolve([]) }) }),
+          update: () => ({ set: () => ({ where: () => Promise.resolve({ rowCount: 0 }) }) }),
+          delete: () => ({ where: () => Promise.resolve({ rowCount: 0 }) }),
+        })),
+      }[prop as string] || (() => Promise.resolve([]));
+    }
+    
     if (!_db) {
       _db = drizzle(getPool(), { schema, logger: false });
     }

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,19 +29,34 @@ export default function EditFacilityModal({
   facility,
   onSave,
 }: EditFacilityModalProps) {
-  const [name, setName] = useState(facility?.name || "");
-  const [description, setDescription] = useState(facility?.description || "");
-  const [capacity, setCapacity] = useState(facility?.capacity || 0);
-  const [isActive, setIsActive] = useState(facility?.isActive || false);
+  const resetKey = useMemo(
+    () => `${facility?.id ?? "unknown"}-${isOpen ? "open" : "closed"}`,
+    [facility?.id, isOpen]
+  );
 
-  useEffect(() => {
-    if (facility) {
-      setName(facility.name);
-      setDescription(facility.description);
-      setCapacity(facility.capacity);
-      setIsActive(facility.isActive);
-    }
-  }, [facility]);
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <EditFacilityModalContent
+        key={resetKey}
+        facility={facility}
+        onClose={onClose}
+        onSave={onSave}
+      />
+    </Dialog>
+  );
+}
+
+interface EditFacilityModalContentProps {
+  facility: Facility | null;
+  onClose: () => void;
+  onSave: () => void;
+}
+
+function EditFacilityModalContent({ facility, onClose, onSave }: EditFacilityModalContentProps) {
+  const [name, setName] = useState(facility?.name ?? "");
+  const [description, setDescription] = useState(facility?.description ?? "");
+  const [capacity, setCapacity] = useState(facility?.capacity ?? 0);
+  const [isActive, setIsActive] = useState(facility?.isActive ?? false);
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -86,65 +101,63 @@ export default function EditFacilityModal({
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[425px]">
-        <DialogHeader>
-          <DialogTitle>Edit Facility</DialogTitle>
-        </DialogHeader>
-        <div className="grid gap-4 py-4">
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="name" className="text-right">
-              Name
-            </Label>
-            <Input
-              id="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="col-span-3"
-            />
-          </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="description" className="text-right">
-              Description
-            </Label>
-            <Input
-              id="description"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="col-span-3"
-            />
-          </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="capacity" className="text-right">
-              Capacity
-            </Label>
-            <Input
-              id="capacity"
-              type="number"
-              value={capacity}
-              onChange={(e) => setCapacity(Number(e.target.value))}
-              className="col-span-3"
-            />
-          </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="isActive" className="text-right">
-              Active
-            </Label>
-            <Switch
-              id="isActive"
-              checked={isActive}
-              onCheckedChange={setIsActive}
-              className="col-span-3"
-            />
-          </div>
+    <DialogContent className="sm:max-w-[425px]">
+      <DialogHeader>
+        <DialogTitle>Edit Facility</DialogTitle>
+      </DialogHeader>
+      <div className="grid gap-4 py-4">
+        <div className="grid grid-cols-4 items-center gap-4">
+          <Label htmlFor="name" className="text-right">
+            Name
+          </Label>
+          <Input
+            id="name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="col-span-3"
+          />
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button onClick={handleSave}>Save Changes</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        <div className="grid grid-cols-4 items-center gap-4">
+          <Label htmlFor="description" className="text-right">
+            Description
+          </Label>
+          <Input
+            id="description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            className="col-span-3"
+          />
+        </div>
+        <div className="grid grid-cols-4 items-center gap-4">
+          <Label htmlFor="capacity" className="text-right">
+            Capacity
+          </Label>
+          <Input
+            id="capacity"
+            type="number"
+            value={capacity}
+            onChange={(e) => setCapacity(Number(e.target.value))}
+            className="col-span-3"
+          />
+        </div>
+        <div className="grid grid-cols-4 items-center gap-4">
+          <Label htmlFor="isActive" className="text-right">
+            Active
+          </Label>
+          <Switch
+            id="isActive"
+            checked={isActive}
+            onCheckedChange={setIsActive}
+            className="col-span-3"
+          />
+        </div>
+      </div>
+      <DialogFooter>
+        <Button variant="outline" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button onClick={handleSave}>Save Changes</Button>
+      </DialogFooter>
+    </DialogContent>
   );
 }

@@ -9,6 +9,7 @@ import { facilityBookings, type Facility, type FacilityBooking } from "@shared/s
 
 const LIBRARY_OPEN_MINUTES = 7 * 60 + 30; // 7:30 AM
 const LIBRARY_CLOSE_MINUTES = 19 * 60; // 7:00 PM
+export const MAX_BOOKING_DURATION_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 export interface ValidationError {
   status: number;
@@ -138,21 +139,17 @@ export async function ensureFacilityIsBookable(
     console.warn("[bookings] Failed to determine user role", error);
   }
 
-  const facilityName = String(facility.name || "").toLowerCase();
-  const isCollaborative = facilityName.includes("collaborative learning") || [1, 2].includes(facility.id);
-  if (isCollaborative) {
-    const twoHoursMs = 2 * 60 * 60 * 1000;
-    if (durationMs > twoHoursMs) {
-      return {
-        ok: false,
-        error: {
-          status: 400,
-          body: { message: "Collaborative Learning Rooms are limited to 2 hours per booking. Please shorten your reservation." },
-        },
-      };
-    }
+  if (durationMs > MAX_BOOKING_DURATION_MS) {
+    return {
+      ok: false,
+      error: {
+        status: 400,
+        body: { message: "Bookings exceeding the maximum allowed duration are not permitted." },
+      },
+    };
   }
 
+  const facilityName = String(facility.name || "").toLowerCase();
   const restrictedByName = facilityName.includes("board room") || facilityName.includes("lounge");
   if (restrictedByName && !isFacultyOrAdmin) {
     return {
