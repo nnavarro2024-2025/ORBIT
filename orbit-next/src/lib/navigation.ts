@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 type NavigateOptions = {
@@ -13,11 +13,40 @@ export function useLegacyLocation(): [string, (path: string, options?: NavigateO
   const searchParams = useSearchParams();
   const search = searchParams?.toString() ?? "";
 
-  const location = useMemo(() => {
+  const [hash, setHash] = useState<string>(() => {
+    if (typeof window === "undefined") {
+      return "";
+    }
+    return window.location.hash ?? "";
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const updateHash = () => {
+      const next = window.location.hash ?? "";
+      setHash((current) => (current === next ? current : next));
+    };
+
+    updateHash();
+    window.addEventListener("hashchange", updateHash);
+    return () => {
+      window.removeEventListener("hashchange", updateHash);
+    };
+  }, []);
+
+  const [location, setLocationState] = useState<string>(() => {
     const query = search ? `?${search}` : "";
-    const hash = window.location.hash ?? "";
     return `${pathname ?? "/"}${query}${hash}`;
-  }, [pathname, search]);
+  });
+
+  useEffect(() => {
+    const query = search ? `?${search}` : "";
+    const next = `${pathname ?? "/"}${query}${hash}`;
+    setLocationState((current) => (current === next ? current : next));
+  }, [pathname, search, hash]);
 
   const setLocation = useCallback(
     (path: string, options?: NavigateOptions) => {

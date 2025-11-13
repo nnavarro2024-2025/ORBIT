@@ -161,7 +161,7 @@ export default function BookingModal({
   // inline errors beneath the form. Keeping only lightweight helpers.
 
   // Get all current bookings to show facility availability
-  const { data: allBookings = [] } = useQuery<any[]>({
+  const { data: allBookingsRaw } = useQuery<any[]>({
     queryKey: ["/api/bookings/all"],
     queryFn: async () => {
       const response = await apiRequest("GET", "/api/bookings/all");
@@ -170,34 +170,42 @@ export default function BookingModal({
     enabled: isOpen, // Only fetch when modal is open
   });
 
+  const allBookings = useMemo(() => allBookingsRaw ?? [], [allBookingsRaw]);
+
   // Note: server-side validation is authoritative for overlapping/limit rules.
   // We intentionally avoid preemptive client-side blocking which can cause UX
   // surprises and duplicate-check race conditions.
 
   const predefinedFacilities = [
-  { id: 1, name: "Collaborative Learning Room 1", isActive: true, capacity: 8 },
-  { id: 2, name: "Collaborative Learning Room 2", isActive: true, capacity: 8 },
+    { id: 1, name: "Collaborative Learning Room 1", isActive: true, capacity: 8 },
+    { id: 2, name: "Collaborative Learning Room 2", isActive: true, capacity: 8 },
     { id: 3, name: "Board Room", isActive: true, capacity: 12 },
   ];
 
-  const allFacilities = facilities.length > 0 ? facilities : predefinedFacilities;
+  const allFacilities = useMemo(() => (facilities.length > 0 ? facilities : predefinedFacilities), [facilities]);
   // Filter out restricted facilities for non-faculty/admin users
-  const visibleFacilities = allFacilities.filter(facility => {
-    const name = String(facility.name || '').toLowerCase();
-    const restricted = /board room|boardroom|lounge/.test(name);
-    const allowedByRole = (user?.role === 'faculty' || user?.role === 'admin');
-    return facility.isActive && !(restricted && !allowedByRole);
-  });
+  const visibleFacilities = useMemo(() => {
+    return allFacilities.filter(facility => {
+      const name = String(facility.name || '').toLowerCase();
+      const restricted = /board room|boardroom|lounge/.test(name);
+      const allowedByRole = (user?.role === 'faculty' || user?.role === 'admin');
+      return facility.isActive && !(restricted && !allowedByRole);
+    });
+  }, [allFacilities, user?.role]);
   const fallbackFacilities = visibleFacilities;
+  const fallbackFacilitiesKey = useMemo(
+    () => fallbackFacilities.map((facility) => facility.id).join("|"),
+    [fallbackFacilities]
+  );
 
-  const getFacilityMaxCapacity = (facility?: Facility | { id: number; name: string; isActive: boolean; capacity: number; } | null) => {
+  const getFacilityMaxCapacity = useCallback((facility?: Facility | { id: number; name: string; isActive: boolean; capacity: number; } | null) => {
     if (!facility) return 8; // Default fallback for unknown facilities
     // Problem 3 Fix: Better null safety - ensure capacity is a valid number
     const capacity = facility.capacity;
     return (typeof capacity === 'number' && capacity > 0) ? capacity : 8;
-  };
+  }, []);
 
-  const getFacilityCurrentStatus = (facilityId: number) => {
+  const getFacilityCurrentStatus = useCallback((facilityId: number) => {
     const now = new Date();
     
     // Check for both pending and approved bookings to show accurate facility status
@@ -243,7 +251,7 @@ export default function BookingModal({
     }
 
     return null;
-  };
+  }, [allBookings]);
 
   // getUserFacilityBookings removed - server-side checks are authoritative and
   // this client helper was unused. Kept logic centralized on server/storage.ts.
@@ -338,9 +346,25 @@ export default function BookingModal({
   // If the modal receives new initial times while open, update the form fields
   useEffect(() => {
     if (!isOpen) return;
-    if (initialStartTime) form.setValue('startTime', initialStartTime);
-    if (initialEndTime) form.setValue('endTime', initialEndTime);
-  }, [isOpen, initialStartTime, initialEndTime]);
+
+    if (initialStartTime) {
+      const currentStart = form.getValues('startTime');
+      const currentStartMs = currentStart instanceof Date ? currentStart.getTime() : undefined;
+      const nextStartMs = initialStartTime.getTime();
+      if (currentStartMs !== nextStartMs) {
+        form.setValue('startTime', initialStartTime);
+      }
+    }
+
+    if (initialEndTime) {
+      const currentEnd = form.getValues('endTime');
+      const currentEndMs = currentEnd instanceof Date ? currentEnd.getTime() : undefined;
+      const nextEndMs = initialEndTime.getTime();
+      if (currentEndMs !== nextEndMs) {
+        form.setValue('endTime', initialEndTime);
+      }
+    }
+  }, [isOpen, initialStartTime, initialEndTime, form]);
 
   const [formValidationWarnings, setFormValidationWarnings] = useState<Array<{title: string; description: string}>>([]);
   // Track whether the user manually edited the date/time so we don't overwrite their choices
@@ -395,24 +419,24 @@ export default function BookingModal({
 
   useEffect(() => {
     if (!isOpen) {
-      setAvailableSlots([]);
-      setSlotsError(null);
-      setSlotsLoading(false);
+      setAvailableSlots((prev) => (prev.length > 0 ? [] : prev));
+      setSlotsError((prev) => (prev === null ? prev : null));
+      setSlotsLoading((prev) => (prev ? false : prev));
       return;
     }
 
     if (!facilityIdValue || !selectedDateKey) {
-      setAvailableSlots([]);
-      setSlotsError(null);
-      setSlotsLoading(false);
+      setAvailableSlots((prev) => (prev.length > 0 ? [] : prev));
+      setSlotsError((prev) => (prev === null ? prev : null));
+      setSlotsLoading((prev) => (prev ? false : prev));
       return;
     }
 
     const facilityIdNum = parseInt(facilityIdValue, 10);
     if (Number.isNaN(facilityIdNum)) {
-      setAvailableSlots([]);
-      setSlotsError(null);
-      setSlotsLoading(false);
+      setAvailableSlots((prev) => (prev.length > 0 ? [] : prev));
+      setSlotsError((prev) => (prev === null ? prev : null));
+      setSlotsLoading((prev) => (prev ? false : prev));
       return;
     }
 
@@ -514,28 +538,6 @@ export default function BookingModal({
     return Math.abs(startTimeValue.getTime() - slot.start.getTime()) < 60 * 1000;
   };
 
-  // Auto-select facility when modal opens with a specific facility ID
-  useEffect(() => {
-    if (isOpen && selectedFacilityId) {
-      const facility = facilities.find(f => f.id === selectedFacilityId);
-      if (facility && facility.isActive) {
-        setSelectedFacility(facility);
-        // Also update the form field
-        form.setValue('facilityId', facility.id.toString());
-      }
-      } else if (isOpen && !selectedFacilityId) {
-      // Reset selection when modal opens without a specific facility
-      setSelectedFacility(null);
-      // Only auto-select first facility if no specific facility was requested
-      const currentFacilityId = form.getValues("facilityId");
-      if (fallbackFacilities.length > 0 && !currentFacilityId) {
-        const firstId = fallbackFacilities[0].id.toString();
-        form.setValue("facilityId", firstId);
-        handleFacilityChange(firstId);
-      }
-    }
-  }, [isOpen, selectedFacilityId, facilities]);
-
   // Dev-only debug: log current user's bookings when modal opens or facility changes
   useEffect(() => {
     if (process.env.NODE_ENV === 'production') return;
@@ -566,15 +568,102 @@ export default function BookingModal({
     return () => subscription.unsubscribe();
   }, [form]);
 
-  const handleFacilityChange = (facilityId: string) => {
+  // Helper: round up a date to the next 30-minute boundary
+  const roundUpToNext30 = (d: Date) => {
+    const out = new Date(d);
+    out.setSeconds(0, 0);
+    const mins = out.getMinutes();
+    const rem = mins % 30;
+    if (rem === 0) return out;
+    out.setMinutes(mins + (30 - rem));
+    return out;
+  };
+
+  // Find next available 30-minute slot for a given facility, searching today then next day
+  const findNextAvailableSlot = useCallback(async (facilityId: number | null, fromDate = new Date()): Promise<{ start: Date; end: Date } | null> => {
+    if (!facilityId) return null;
+    const MAX_DAYS = 2; // today and next day
+    const SLOT_MS = 30 * 60 * 1000;
+
+    for (let dayOffset = 0; dayOffset < MAX_DAYS; dayOffset++) {
+      const candidateDay = new Date(fromDate.getFullYear(), fromDate.getMonth(), fromDate.getDate() + dayOffset, 0, 0, 0, 0);
+      const startWindow = new Date(candidateDay.getFullYear(), candidateDay.getMonth(), candidateDay.getDate(), 7, 30, 0, 0);
+      const endWindow = new Date(candidateDay.getFullYear(), candidateDay.getMonth(), candidateDay.getDate(), 19, 0, 0, 0);
+
+      // Query server availability for this day to get authoritative slots
+      try {
+        const dateStr = candidateDay.toISOString().slice(0,10);
+        const resp = await apiRequest('GET', `/api/availability?date=${dateStr}`);
+        const availJson = await resp.json();
+        const facilityEntry = Array.isArray(availJson?.data) ? availJson.data.find((d: any) => d.facility && d.facility.id === facilityId) : null;
+        if (facilityEntry && Array.isArray(facilityEntry.slots)) {
+          // Look for the first 'available' slot starting at or after 'fromDate' (rounded to 30)
+          const normalizedFrom = dayOffset === 0 ? roundUpToNext30(new Date(Math.max(fromDate.getTime(), Date.now()))) : startWindow;
+          for (const slot of facilityEntry.slots) {
+            try {
+              if (slot.status !== 'available') continue;
+              const slotStart = new Date(slot.start);
+              const slotEnd = new Date(slot.end);
+              if (slotStart.getTime() >= normalizedFrom.getTime() && slotEnd.getTime() <= endWindow.getTime()) {
+                // Return first available 30-min block
+                return { start: slotStart, end: slotEnd };
+              }
+            } catch (e) { /* ignore parse errors */ }
+          }
+        }
+      } catch (e) {
+        // If availability API fails, fall back to the client-side search below
+      }
+
+      // Fallback to client-side search (checks pending and approved bookings) if availability API not usable
+      let cursor = dayOffset === 0 ? roundUpToNext30(new Date(Math.max(fromDate.getTime(), Date.now()))) : new Date(startWindow);
+      if (cursor < startWindow) cursor = new Date(startWindow);
+      while (cursor.getTime() + SLOT_MS <= endWindow.getTime()) {
+        const slotStart = new Date(cursor);
+        const slotEnd = new Date(cursor.getTime() + SLOT_MS);
+
+        // check conflicts against pending AND approved bookings for this facility
+        const blockingStatuses = ['approved', 'pending'];
+        const facilityBookings = (allBookings || []).filter((b: any) => 
+          b.facilityId === facilityId && blockingStatuses.includes(b.status)
+        );
+        const conflict = facilityBookings.some((b: any) => {
+          const s = new Date(b.startTime).getTime();
+          const e = new Date(b.endTime).getTime();
+          return slotStart.getTime() < e && slotEnd.getTime() > s;
+        });
+
+        if (!conflict) {
+          return { start: slotStart, end: slotEnd };
+        }
+
+        cursor = new Date(cursor.getTime() + SLOT_MS);
+      }
+    }
+    return null;
+  }, [allBookings]);
+
+  const handleFacilityChange = useCallback((facilityId: string) => {
     const facility = facilities.find((f) => f.id === parseInt(facilityId));
-    setSelectedFacility(facility || null);
+
+    if (facility) {
+      setSelectedFacility((prev) => {
+        if (prev && prev.id === facility.id) {
+          return prev;
+        }
+        return facility;
+      });
+    } else {
+      setSelectedFacility((prev) => (prev ? null : prev));
+    }
+
     // Cap participants to selected facility's max
     const currentParticipants = form.getValues("participants");
     const maxCap = getFacilityMaxCapacity(facility || null);
     if (currentParticipants > maxCap) {
       form.setValue("participants", maxCap);
     }
+
     // If the user hasn't manually edited the time, auto-fill the next available slot for this facility
     if (!userEditedTime) {
       (async () => {
@@ -590,7 +679,69 @@ export default function BookingModal({
         } catch (e) { /* ignore */ }
       })();
     }
-  };
+  }, [facilities, form, getFacilityMaxCapacity, userEditedTime, findNextAvailableSlot]);
+
+  // Auto-select facility when modal opens with a specific facility ID
+  useEffect(() => {
+    if (!isOpen) return;
+
+    if (selectedFacilityId) {
+      const facility = facilities.find((f) => f.id === selectedFacilityId);
+      if (facility && facility.isActive) {
+        const facilityIdString = facility.id.toString();
+        const currentFacilityId = form.getValues('facilityId');
+        const facilityChanged = currentFacilityId !== facilityIdString;
+        const selectionChanged = selectedFacility?.id !== facility.id;
+
+        if (selectionChanged) {
+          setSelectedFacility(facility);
+        }
+
+        if (facilityChanged) {
+          form.setValue('facilityId', facilityIdString);
+          handleFacilityChange(facilityIdString);
+        } else if (selectionChanged) {
+          handleFacilityChange(facilityIdString);
+        }
+      }
+      return;
+    }
+
+    const currentFacilityId = form.getValues('facilityId');
+    if (currentFacilityId) {
+      if (!selectedFacility || selectedFacility.id.toString() !== currentFacilityId) {
+        const facility = facilities.find((f) => f.id.toString() === currentFacilityId) || null;
+        if (facility?.isActive) {
+          setSelectedFacility(facility);
+        } else if (selectedFacility) {
+          setSelectedFacility(null);
+        }
+      }
+      return;
+    }
+
+    const firstFallback = fallbackFacilities[0];
+    if (firstFallback) {
+      const firstId = firstFallback.id.toString();
+      const currentId = form.getValues('facilityId');
+      const selectionMatches = selectedFacility?.id === firstFallback.id;
+
+      if (currentId !== firstId) {
+        form.setValue('facilityId', firstId);
+        handleFacilityChange(firstId);
+      } else if (!selectionMatches) {
+        handleFacilityChange(firstId);
+      }
+    }
+  }, [
+    isOpen,
+    selectedFacilityId,
+    facilities,
+    fallbackFacilitiesKey,
+    form,
+    handleFacilityChange,
+    selectedFacility,
+  ]);
 
   const createBookingMutation = useMutation({
     mutationFn: async (data: BookingFormData) => {
@@ -944,81 +1095,6 @@ export default function BookingModal({
     return diff >= 30 * 60 * 1000; // at least 30 minutes
   };
 
-  // Helper: round up a date to the next 30-minute boundary
-  const roundUpToNext30 = (d: Date) => {
-    const out = new Date(d);
-    out.setSeconds(0, 0);
-    const mins = out.getMinutes();
-    const rem = mins % 30;
-    if (rem === 0) return out;
-    out.setMinutes(mins + (30 - rem));
-    return out;
-  };
-
-  // Find next available 30-minute slot for a given facility, searching today then next day
-  const findNextAvailableSlot = async (facilityId: number | null, fromDate = new Date()): Promise<{ start: Date; end: Date } | null> => {
-    if (!facilityId) return null;
-    const MAX_DAYS = 2; // today and next day
-    const SLOT_MS = 30 * 60 * 1000;
-
-    for (let dayOffset = 0; dayOffset < MAX_DAYS; dayOffset++) {
-      const candidateDay = new Date(fromDate.getFullYear(), fromDate.getMonth(), fromDate.getDate() + dayOffset, 0, 0, 0, 0);
-      const startWindow = new Date(candidateDay.getFullYear(), candidateDay.getMonth(), candidateDay.getDate(), 7, 30, 0, 0);
-      const endWindow = new Date(candidateDay.getFullYear(), candidateDay.getMonth(), candidateDay.getDate(), 19, 0, 0, 0);
-
-      // Query server availability for this day to get authoritative slots
-      try {
-        const dateStr = candidateDay.toISOString().slice(0,10);
-        const resp = await apiRequest('GET', `/api/availability?date=${dateStr}`);
-        const availJson = await resp.json();
-        const facilityEntry = Array.isArray(availJson?.data) ? availJson.data.find((d: any) => d.facility && d.facility.id === facilityId) : null;
-        if (facilityEntry && Array.isArray(facilityEntry.slots)) {
-          // Look for the first 'available' slot starting at or after 'fromDate' (rounded to 30)
-          const normalizedFrom = dayOffset === 0 ? roundUpToNext30(new Date(Math.max(fromDate.getTime(), Date.now()))) : startWindow;
-          for (const slot of facilityEntry.slots) {
-            try {
-              if (slot.status !== 'available') continue;
-              const slotStart = new Date(slot.start);
-              const slotEnd = new Date(slot.end);
-              if (slotStart.getTime() >= normalizedFrom.getTime() && slotEnd.getTime() <= endWindow.getTime()) {
-                // Return first available 30-min block
-                return { start: slotStart, end: slotEnd };
-              }
-            } catch (e) { /* ignore parse errors */ }
-          }
-        }
-      } catch (e) {
-        // If availability API fails, fall back to the client-side search below
-      }
-
-      // Fallback to client-side search (checks pending and approved bookings) if availability API not usable
-      let cursor = dayOffset === 0 ? roundUpToNext30(new Date(Math.max(fromDate.getTime(), Date.now()))) : new Date(startWindow);
-      if (cursor < startWindow) cursor = new Date(startWindow);
-      while (cursor.getTime() + SLOT_MS <= endWindow.getTime()) {
-        const slotStart = new Date(cursor);
-        const slotEnd = new Date(cursor.getTime() + SLOT_MS);
-
-        // check conflicts against pending AND approved bookings for this facility
-        const blockingStatuses = ['approved', 'pending'];
-        const facilityBookings = (allBookings || []).filter((b: any) => 
-          b.facilityId === facilityId && blockingStatuses.includes(b.status)
-        );
-        const conflict = facilityBookings.some((b: any) => {
-          const s = new Date(b.startTime).getTime();
-          const e = new Date(b.endTime).getTime();
-          return slotStart.getTime() < e && slotEnd.getTime() > s;
-        });
-
-        if (!conflict) {
-          return { start: slotStart, end: slotEnd };
-        }
-
-        cursor = new Date(cursor.getTime() + SLOT_MS);
-      }
-    }
-    return null;
-  };
-
   // Auto-fill an available time slot when the modal opens (today or next day)
   useEffect(() => {
     if (!isOpen) return;
@@ -1074,9 +1150,29 @@ export default function BookingModal({
           if (providedStartValid && providedEndValid && !providedHasConflict && !availabilityConflict) {
             // Use the provided slot and do not override with the auto-fill logic.
             // programmatic set - do not mark as user edited
-            form.setValue('startTime', initialStartTime);
-            form.setValue('endTime', initialEndTime);
-            setUserEditedTime(false);
+            const latestStart = form.getValues('startTime');
+            const latestEnd = form.getValues('endTime');
+            const latestStartMs = latestStart instanceof Date ? latestStart.getTime() : undefined;
+            const latestEndMs = latestEnd instanceof Date ? latestEnd.getTime() : undefined;
+            const nextStartMs = initialStartTime.getTime();
+            const nextEndMs = initialEndTime.getTime();
+
+            let updated = false;
+
+            if (latestStartMs !== nextStartMs) {
+              form.setValue('startTime', initialStartTime);
+              updated = true;
+            }
+
+            if (latestEndMs !== nextEndMs) {
+              form.setValue('endTime', initialEndTime);
+              updated = true;
+            }
+
+            if (updated) {
+              setUserEditedTime(false);
+            }
+
             return;
           }
           // If the provided slot is invalid (outside hours or conflicting), fall through
@@ -1095,22 +1191,48 @@ export default function BookingModal({
             .some((b: any) => currentStart < new Date(b.endTime) && currentEnd > new Date(b.startTime));
           return conflicts;
         })();
-
-        // Only auto-fill if user hasn't manually edited times
         if (!userEditedTime && (!startValid || !endValid || hasConflict)) {
           const next = await findNextAvailableSlot(facId, new Date());
           if (next) {
-            // programmatic set - ensure we don't mark as user-edited
-            form.setValue('startTime', next.start);
-            form.setValue('endTime', next.end);
-            setUserEditedTime(false);
+            const latestStart = form.getValues('startTime');
+            const latestEnd = form.getValues('endTime');
+            const latestStartMs = latestStart instanceof Date ? latestStart.getTime() : undefined;
+            const latestEndMs = latestEnd instanceof Date ? latestEnd.getTime() : undefined;
+            const nextStartMs = next.start.getTime();
+            const nextEndMs = next.end.getTime();
+
+            let updated = false;
+
+            if (latestStartMs !== nextStartMs) {
+              form.setValue('startTime', next.start);
+              updated = true;
+            }
+
+            if (latestEndMs !== nextEndMs) {
+              form.setValue('endTime', next.end);
+              updated = true;
+            }
+
+            if (updated) {
+              setUserEditedTime(false);
+            }
           }
         }
       } catch (e) {
         // ignore
       }
     })();
-  }, [isOpen, allBookings, selectedFacilityId, initialStartTime, initialEndTime]);
+  }, [
+    isOpen,
+    allBookings,
+    selectedFacilityId,
+    initialStartTime,
+    initialEndTime,
+    form,
+    fallbackFacilities,
+    findNextAvailableSlot,
+    userEditedTime,
+  ]);
 
   // Helper function to format booking conflict error messages
   const formatBookingConflictMessage = (errorMessage: string) => {

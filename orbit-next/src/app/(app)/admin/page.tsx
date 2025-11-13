@@ -81,6 +81,23 @@ type WeeklyTrendDatum = { week: string; total: number; approved: number; pending
 const PIE_CHART_COLORS = ["#f472b6", "#fb7185", "#3b82f6", "#22c55e", "#f59e0b", "#8b5cf6", "#14b8a6"]; // tailwind palette
 const FACILITY_BAR_COLORS = { hours: "#10b981", bookings: "#6366f1" };
 const WEEKLY_LINE_COLORS = { total: "#6366f1", approved: "#10b981", pending: "#f59e0b" };
+const ENABLE_QUICK_ACTIONS = true;
+const DEBUG_MINIMAL_RENDER = false;
+const DEBUG_OVERVIEW_SECTIONS = {
+  stats: true,
+  quickActions: true,
+  analytics: true,
+  availability: true,
+  scheduled: true,
+  recent: true,
+  alerts: true,
+};
+const DEBUG_ANALYTICS_CHARTS = {
+  department: true,
+  facility: true,
+  weekly: true,
+};
+const ANY_ANALYTICS_ENABLED = Object.values(DEBUG_ANALYTICS_CHARTS).some(Boolean);
 
 function getIsoWeekLabel(date: Date): string {
   const target = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -137,6 +154,16 @@ function Countdown({ expiry, onExpire }: { expiry: string | Date | undefined; on
 }
 
 export default function AdminDashboard() {
+  if (DEBUG_MINIMAL_RENDER) {
+    return (
+      <div className="p-6">
+        <h1 className="text-xl font-semibold">Admin Dashboard (debug stub)</h1>
+        <p className="text-sm text-gray-500 mt-2">
+          Full dashboard temporarily disabled while isolating the render loop.
+        </p>
+      </div>
+    );
+  }
 
   // Silence unused-import errors during iterative refactor: reference imports in no-op ways
   void useQuery; void useMutation; void useQueryClient;
@@ -351,18 +378,7 @@ export default function AdminDashboard() {
     if (isExportingPdf) return;
     setIsExportingPdf(true);
     try {
-      const res = await fetch('/api/admin/reports/export', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ reportType: 'booking-overview' }),
-      });
-
-      if (!res.ok) {
-        const message = await res.text();
-        throw new Error(message || 'Failed to export report');
-      }
+      const res = await apiRequest('POST', '/api/admin/reports/export', { reportType: 'booking-overview' });
 
       const blob = await res.blob();
       const url = window.URL.createObjectURL(blob);
@@ -374,9 +390,15 @@ export default function AdminDashboard() {
       link.remove();
       window.URL.revokeObjectURL(url);
 
-      toast({ title: 'Export complete', description: 'PDF report downloaded successfully.' });
+      if (process.env.NODE_ENV !== 'production') {
+        toast({ title: 'Export complete', description: 'PDF report downloaded successfully.' });
+      }
     } catch (error: any) {
-      toast({ title: 'Export failed', description: error?.message || 'Unable to generate PDF export.', variant: 'destructive' });
+      if (process.env.NODE_ENV !== 'production') {
+        toast({ title: 'Export failed', description: error?.message || 'Unable to generate PDF export.', variant: 'destructive' });
+      } else {
+        console.error('[AdminDashboard] Export PDF failed', error);
+      }
     } finally {
       setIsExportingPdf(false);
     }
@@ -384,6 +406,9 @@ export default function AdminDashboard() {
 
   // Loading state for navigation to booking dashboard
   const [isNavigatingToBooking, setIsNavigatingToBooking] = useState(false);
+  
+  // Mobile sidebar state
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   
   // silence unused setters where appropriate
   void setActiveBookingsPage; void setUpcomingBookingsPage; void setApprovedAndDeniedBookingsPage; void setPendingBookingsDashboardPage; void setPendingBookingsPage; void setBookingUsersPage; void setBannedUsersPage; void setActivitiesPage;
@@ -957,26 +982,22 @@ export default function AdminDashboard() {
                   <div key={idx} className="truncate">{coloredSpan(it)}</div>
                 ))}
               </div>
-              {hasMore && (() => {
-                const extra = allItems.slice(displayItems.length);
-                const count = extra.length;
-                return (
-                  <div className="mt-1">
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <button className="text-xs text-blue-600 hover:underline">+{count} more</button>
-                      </PopoverTrigger>
-                      <PopoverContent side="top" align="start" className="w-56 p-2 z-50">
-                        <div className="text-sm">
-                          {extra.map((it: string, idx: number) => (
-                            <div key={idx} className="py-1">{coloredSpan(it)}</div>
-                          ))}
-                        </div>
-                      </PopoverContent>
-                    </Popover>
-                  </div>
-                );
-              })()}
+              {hasMore && (
+                <div className="mt-1">
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button className="text-xs text-blue-600 hover:underline">+{allItems.length - displayItems.length} more</button>
+                    </PopoverTrigger>
+                    <PopoverContent side="top" align="start" className="w-56 p-2 z-50">
+                      <div className="text-sm">
+                        {allItems.slice(displayItems.length).map((it: string, idx: number) => (
+                          <div key={idx} className="py-1">{coloredSpan(it)}</div>
+                        ))}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1108,10 +1129,21 @@ export default function AdminDashboard() {
 
   const authUserId = authUser?.id ?? null;
 
-  // Invalidate admin queries once when the authenticated admin changes
-  useEffect(() => {
-    if (!authUserId || !isAdmin) return;
+  // Track previous data to prevent unnecessary re-renders
+  const prevUsersDataQRef = useRef<any[] | undefined>(undefined);
+  const prevActivitiesDataRef = useRef<any[] | undefined>(undefined);
+  const prevFacilitiesDataRef = useRef<any[] | undefined>(undefined);
+  const prevReportSchedulesDataRef = useRef<any[] | undefined>(undefined);
+  const prevCurrentUserDataRef = useRef<any | undefined>(undefined);
+  const prevAdminBookingsDataRef = useRef<any[] | undefined>(undefined);
+  const prevPendingBookingsDataRef = useRef<any[] | undefined>(undefined);
 
+  // Invalidate admin queries once when the authenticated admin changes
+  const hasInvalidatedRef = useRef(false);
+  useEffect(() => {
+    if (!authUserId || !isAdmin || hasInvalidatedRef.current) return;
+
+    hasInvalidatedRef.current = true;
     queryClient.invalidateQueries({ queryKey: ['/api/facilities'] });
     queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] });
     queryClient.invalidateQueries({ queryKey: ['/api/admin/bookings'] });
@@ -1125,29 +1157,55 @@ export default function AdminDashboard() {
   useEffect(() => {
     try {
       if (!Array.isArray(usersDataQ)) return;
-      // Compare by IDs to avoid creating a new state object every render
-      const same = Array.isArray(usersData) && usersData.length === usersDataQ.length && usersData.every((u: any, i: number) => String(u?.id) === String(usersDataQ[i]?.id));
-      if (!same) setUsersData(usersDataQ);
+      
+      // Check if data actually changed by comparing IDs
+      const prevData = prevUsersDataQRef.current;
+      const hasChanged = !prevData || 
+        prevData.length !== usersDataQ.length || 
+        !prevData.every((u: any, i: number) => String(u?.id) === String(usersDataQ[i]?.id));
+      
+      if (!hasChanged) return;
+      
+      prevUsersDataQRef.current = usersDataQ;
+      setUsersData(usersDataQ);
     } catch (e) {
       // ignore
     }
-  }, [usersDataQ, usersData]);
+  }, [usersDataQ]);
 
   useEffect(() => {
     try {
       if (!Array.isArray(activitiesData)) return;
-      const same = Array.isArray(activities) && activities.length === activitiesData.length && activities.every((a: any, i: number) => String(a?.id) === String(activitiesData[i]?.id));
-      if (!same) setActivities(activitiesData);
+      
+      // Check if data actually changed
+      const prevData = prevActivitiesDataRef.current;
+      const hasChanged = !prevData || 
+        prevData.length !== activitiesData.length || 
+        !prevData.every((a: any, i: number) => String(a?.id) === String(activitiesData[i]?.id));
+      
+      if (!hasChanged) return;
+      
+      prevActivitiesDataRef.current = activitiesData;
+      setActivities(activitiesData);
     } catch (e) {
       // ignore
     }
-  }, [activitiesData, activities]);
+  }, [activitiesData]);
 
   useEffect(() => {
     try {
       if (!Array.isArray(facilitiesData)) return;
-      const same = Array.isArray(facilities) && facilities.length === facilitiesData.length && facilities.every((f: any, i: number) => String(f?.id) === String(facilitiesData[i]?.id));
-      if (!same) setFacilities(facilitiesData);
+      
+      // Check if data actually changed
+      const prevData = prevFacilitiesDataRef.current;
+      const hasChanged = !prevData || 
+        prevData.length !== facilitiesData.length || 
+        !prevData.every((f: any, i: number) => String(f?.id) === String(facilitiesData[i]?.id));
+      
+      if (!hasChanged) return;
+      
+      prevFacilitiesDataRef.current = facilitiesData;
+      setFacilities(facilitiesData);
 
       // Canonicalize unavailableDatesByFacility from backend
       const newUnavailable: Record<string, string[]> = {};
@@ -1175,29 +1233,45 @@ export default function AdminDashboard() {
     } catch (e) {
       // ignore
     }
-  }, [facilitiesData, facilities]);
+  }, [facilitiesData]);
 
   useEffect(() => {
     try {
       if (!Array.isArray(reportSchedulesData)) return;
-      const existing = reportSchedules || [];
-      const sameLength = existing.length === reportSchedulesData.length;
-      const sameIds = sameLength && existing.every((s, idx) => String(s.id) === String(reportSchedulesData[idx]?.id));
-      if (!sameIds) setReportSchedules(reportSchedulesData);
+      
+      // Check if data actually changed
+      const prevData = prevReportSchedulesDataRef.current;
+      const hasChanged = !prevData || 
+        prevData.length !== reportSchedulesData.length || 
+        !prevData.every((s, idx) => String(s.id) === String(reportSchedulesData[idx]?.id));
+      
+      if (!hasChanged) return;
+      
+      prevReportSchedulesDataRef.current = reportSchedulesData;
+      setReportSchedules(reportSchedulesData);
     } catch (e) {
       // ignore
     }
-  }, [reportSchedulesData, reportSchedules]);
+  }, [reportSchedulesData]);
 
   useEffect(() => {
     try {
       if (!currentUserData) return;
-      const different = !user || String(currentUserData?.id) !== String(user?.id) || String(currentUserData?.email) !== String(user?.email);
-      if (different) setUser(currentUserData);
+      
+      // Check if data actually changed
+      const prevData = prevCurrentUserDataRef.current;
+      const hasChanged = !prevData || 
+        String(currentUserData?.id) !== String(prevData?.id) || 
+        String(currentUserData?.email) !== String(prevData?.email);
+      
+      if (!hasChanged) return;
+      
+      prevCurrentUserDataRef.current = currentUserData;
+      setUser(currentUserData);
     } catch (e) {
       // ignore
     }
-  }, [currentUserData, user]);
+  }, [currentUserData]);
 
   // Derived lists used in the UI
   const allBookings: FacilityBooking[] = Array.isArray(adminBookingsData) ? adminBookingsData : [];
@@ -1620,6 +1694,25 @@ export default function AdminDashboard() {
   // The server currently stores a marker like "Needs: Prepared" or "Needs: Not Available" inside adminResponse.
   // Parse that marker into our local map so the UI reflects persisted status after refresh.
   useEffect(() => {
+    if (!adminBookingsData && !pendingBookingsData) return;
+    
+    // Check if booking data actually changed
+    const prevAdmin = prevAdminBookingsDataRef.current;
+    const prevPending = prevPendingBookingsDataRef.current;
+    const adminChanged = !prevAdmin || 
+      (Array.isArray(adminBookingsData) && 
+       (prevAdmin.length !== adminBookingsData.length || 
+        !prevAdmin.every((b: any, i: number) => String(b?.id) === String(adminBookingsData[i]?.id))));
+    const pendingChanged = !prevPending || 
+      (Array.isArray(pendingBookingsData) && 
+       (prevPending.length !== pendingBookingsData.length || 
+        !prevPending.every((b: any, i: number) => String(b?.id) === String(pendingBookingsData[i]?.id))));
+    
+    if (!adminChanged && !pendingChanged) return;
+    
+    if (adminChanged && Array.isArray(adminBookingsData)) prevAdminBookingsDataRef.current = adminBookingsData;
+    if (pendingChanged && Array.isArray(pendingBookingsData)) prevPendingBookingsDataRef.current = pendingBookingsData;
+    
     try {
       const derived: Record<string, 'prepared' | 'not_available'> = {};
       const all = Array.isArray(adminBookingsData) ? adminBookingsData.concat(pendingBookingsData || []) : (pendingBookingsData || []);
@@ -1635,18 +1728,23 @@ export default function AdminDashboard() {
           // ignore per-book parse errors
         }
       });
-      // merge server-derived values into local optimistic map (server should be canonical)
+      
+      // Only update if there are changes
       setNeedsStatusById(prev => {
         try {
-          // if no derived keys, avoid creating a new object
           const derivedKeys = Object.keys(derived);
           if (derivedKeys.length === 0) return prev;
-          // check if any derived value actually differs from prev
-          let changed = false;
+          
+          // Check if any derived value actually differs from prev
+          let hasChanges = false;
           for (const k of derivedKeys) {
-            if (String(prev[k]) !== String(derived[k])) { changed = true; break; }
+            if (prev[k] !== derived[k]) {
+              hasChanges = true;
+              break;
+            }
           }
-          if (!changed) return prev;
+          
+          if (!hasChanges) return prev;
           return { ...prev, ...derived };
         } catch (e) {
           return prev;
@@ -1658,6 +1756,22 @@ export default function AdminDashboard() {
   }, [adminBookingsData, pendingBookingsData]);
   // Hydrate per-item booking statuses from adminResponse JSON block when bookings arrive
   useEffect(() => {
+    if (!adminBookingsData && !pendingBookingsData) return;
+    
+    // Reuse the same check from the previous effect
+    const prevAdmin = prevAdminBookingsDataRef.current;
+    const prevPending = prevPendingBookingsDataRef.current;
+    const adminChanged = !prevAdmin || 
+      (Array.isArray(adminBookingsData) && 
+       (prevAdmin.length !== adminBookingsData.length || 
+        !prevAdmin.every((b: any, i: number) => String(b?.id) === String(adminBookingsData[i]?.id))));
+    const pendingChanged = !prevPending || 
+      (Array.isArray(pendingBookingsData) && 
+       (prevPending.length !== pendingBookingsData.length || 
+        !prevPending.every((b: any, i: number) => String(b?.id) === String(pendingBookingsData[i]?.id))));
+    
+    if (!adminChanged && !pendingChanged) return;
+    
     try {
       const map: Record<string, Record<string, 'prepared'|'not_available'>> = {};
       const all = Array.isArray(adminBookingsData) ? adminBookingsData.concat(pendingBookingsData || []) : (pendingBookingsData || []);
@@ -1683,30 +1797,53 @@ export default function AdminDashboard() {
           // ignore per-book parse errors
         }
       });
-      // merge into bookingItemStatus but avoid no-op updates
+      
+      // Only update if there are actual changes
       setBookingItemStatus(prev => {
         try {
-          const next = { ...prev } as Record<string, Record<string, 'prepared'|'not_available'>>;
-          let changed = false;
+          if (Object.keys(map).length === 0) return prev;
+          
+          let hasChanges = false;
+          const next: Record<string, Record<string, 'prepared'|'not_available'>> = {};
+          
+          // Check each booking in the map
           for (const bid of Object.keys(map)) {
             const existing = prev[bid] || {};
             const incoming = map[bid] || {};
-            // quick shallow equality check for keys and values
+            
+            // Quick shallow equality check for keys and values
             const existingKeys = Object.keys(existing).sort();
             const incomingKeys = Object.keys(incoming).sort();
+            
+            let bookingChanged = false;
             if (existingKeys.length !== incomingKeys.length) {
-              changed = true;
+              bookingChanged = true;
             } else {
-              for (let i = 0; i < existingKeys.length && !changed; i++) {
+              for (let i = 0; i < existingKeys.length; i++) {
                 const k = existingKeys[i];
-                if (String(existing[k]) !== String(incoming[k])) { changed = true; break; }
+                if (existing[k] !== incoming[k]) {
+                  bookingChanged = true;
+                  break;
+                }
               }
             }
-            if (changed) {
-              next[bid] = { ...(next[bid] || {}), ...(incoming || {}) };
+            
+            if (bookingChanged) {
+              hasChanges = true;
+              next[bid] = incoming;
+            } else {
+              next[bid] = existing;
             }
           }
-          if (!changed) return prev;
+          
+          // Also preserve bookings that weren't in the map
+          for (const bid of Object.keys(prev)) {
+            if (!map[bid]) {
+              next[bid] = prev[bid];
+            }
+          }
+          
+          if (!hasChanges) return prev;
           return next;
         } catch (e) {
           return prev;
@@ -5033,213 +5170,228 @@ export default function AdminDashboard() {
         );
         break;
 
-      default: // Dashboard overview
+      default:
         return (
           <div className="space-y-4 sm:space-y-6">
             {/* Stats Overview */}
-            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-3 gap-3 sm:gap-4 md:gap-6">
-              <OverviewTile
-                title="Active Bookings"
-                count={activeBookings?.length || 0}
-                subtitle="Currently in progress"
-                onClick={() => { setSelectedView("booking-management"); setBookingTab('active'); }}
-                icon={<CheckCircle className="h-6 w-6 text-green-600" />}
-              />
+            {DEBUG_OVERVIEW_SECTIONS.stats && (
+              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-3 gap-3 sm:gap-4 md:gap-6">
+                <OverviewTile
+                  title="Active Bookings"
+                  count={activeBookings?.length || 0}
+                  subtitle="Currently in progress"
+                  onClick={() => { setSelectedView("booking-management"); setBookingTab('active'); }}
+                  icon={<CheckCircle className="h-6 w-6 text-green-600" />}
+                />
 
-              <OverviewTile
-                title="Scheduled Bookings"
-                count={upcomingBookings?.length || 0}
-                subtitle="Auto-scheduled reservations"
-                onClick={() => { setSelectedView("booking-management"); setBookingTab('pendingList'); }}
-                icon={<Clock className="h-6 w-6 text-green-600" />}
-              />
+                <OverviewTile
+                  title="Scheduled Bookings"
+                  count={upcomingBookings?.length || 0}
+                  subtitle="Auto-scheduled reservations"
+                  onClick={() => { setSelectedView("booking-management"); setBookingTab('pendingList'); }}
+                  icon={<Clock className="h-6 w-6 text-green-600" />}
+                />
 
-              <OverviewTile
-                title="System Alerts"
-                count={userManagementAlerts.length}
-                subtitle="Requiring attention"
-                onClick={() => setSelectedView("security")}
-                icon={<TriangleAlert className="h-6 w-6 text-orange-600" />}
-              />
-            </div>
+                <OverviewTile
+                  title="System Alerts"
+                  count={userManagementAlerts.length}
+                  subtitle="Requiring attention"
+                  onClick={() => setSelectedView("security")}
+                  icon={<TriangleAlert className="h-6 w-6 text-orange-600" />}
+                />
+              </div>
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-[3fr_minmax(0,1fr)] gap-3 sm:gap-4 md:gap-6">
               {/* Quick Actions Bar */}
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                  <div>
-                    <h3 className="text-base sm:text-lg font-bold text-gray-900">Quick Actions</h3>
-                    <p className="text-xs sm:text-sm text-gray-600 mt-1">Generate reports and manage system</p>
-                  </div>
-                  <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-                    <Button 
-                      size="default" 
-                      className="bg-pink-600 hover:bg-pink-700 text-white shadow-sm text-sm"
-                      onClick={() => generateBookingWeeklyReport?.()} 
-                      aria-label="Generate weekly booking report"
-                    >
-                      <BarChart3 className="h-4 w-4 mr-2" />
-                      Export Excel
-                    </Button>
-                    <Button
-                      size="default"
-                      variant="outline"
-                      className="text-sm"
-                      onClick={handleExportPdf}
-                      disabled={isExportingPdf}
-                      aria-label="Export PDF overview"
-                    >
-                      {isExportingPdf ? (
-                        <span className="inline-flex items-center gap-2">
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          Generating PDF…
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-2">
-                          <Download className="h-4 w-4" />
-                          Export PDF
-                        </span>
-                      )}
-                    </Button>
+              {DEBUG_OVERVIEW_SECTIONS.quickActions && ENABLE_QUICK_ACTIONS && (
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                    <div>
+                      <h3 className="text-base sm:text-lg font-bold text-gray-900">Quick Actions</h3>
+                      <p className="text-xs sm:text-sm text-gray-600 mt-1">Generate reports and manage system</p>
+                    </div>
+                    <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                      <Button 
+                        size="default" 
+                        className="bg-pink-600 hover:bg-pink-700 text-white shadow-sm text-sm"
+                        onClick={() => generateBookingWeeklyReport?.()} 
+                        aria-label="Generate weekly booking report"
+                      >
+                        <BarChart3 className="h-4 w-4 mr-2" />
+                        Export Excel
+                      </Button>
+                      <Button
+                        size="default"
+                        variant="outline"
+                        className="text-sm"
+                        onClick={handleExportPdf}
+                        disabled={isExportingPdf}
+                        aria-label="Export PDF overview"
+                      >
+                        {isExportingPdf ? (
+                          <span className="inline-flex items-center gap-2">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Generating PDF…
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-2">
+                            <Download className="h-4 w-4" />
+                            Export PDF
+                          </span>
+                        )}
+                      </Button>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
 
               {/* Course/Year Controls */}
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 flex flex-col gap-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-base font-bold text-gray-900">Course / Year Filters</h3>
-                  <button
-                    onClick={() => {
-                      setCourseYearFilter('all');
-                      setCourseYearSort('desc');
-                    }}
-                    className="text-xs font-medium text-pink-600 hover:text-pink-700"
-                  >
-                    Reset
-                  </button>
-                </div>
-                <div className="flex flex-col gap-3">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-xs uppercase tracking-wide text-gray-500">Filter</span>
-                    <Select value={courseYearFilter} onValueChange={setCourseYearFilter}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="All courses" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All courses</SelectItem>
-                        {courseYearOptions.map(option => (
-                          <SelectItem key={option} value={option}>
-                            {option}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-xs uppercase tracking-wide text-gray-500">Sort</span>
+              {DEBUG_OVERVIEW_SECTIONS.quickActions && (
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 flex flex-col gap-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-base font-bold text-gray-900">Course / Year Filters</h3>
                     <button
-                      onClick={() => setCourseYearSort(prev => (prev === 'asc' ? 'desc' : 'asc'))}
-                      className="inline-flex items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm hover:bg-muted"
-                      aria-label="Toggle course/year sort order"
+                      onClick={() => {
+                        setCourseYearFilter('all');
+                        setCourseYearSort('desc');
+                      }}
+                      className="text-xs font-medium text-pink-600 hover:text-pink-700"
                     >
-                      <span className="mr-2">{courseYearSort === 'asc' ? 'A → Z' : 'Z → A'}</span>
-                      <ArrowUpDown className="h-4 w-4 text-gray-500" />
+                      Reset
                     </button>
                   </div>
+                  <div className="flex flex-col gap-3">
+                    <div className="flex flex-col gap-1">
+                      <span className="text-xs uppercase tracking-wide text-gray-500">Filter</span>
+                      <Select value={courseYearFilter} onValueChange={setCourseYearFilter}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="All courses" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All courses</SelectItem>
+                          {courseYearOptions.map(option => (
+                            <SelectItem key={option} value={option}>
+                              {option}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <span className="text-xs uppercase tracking-wide text-gray-500">Sort</span>
+                      <button
+                        onClick={() => setCourseYearSort(prev => (prev === 'asc' ? 'desc' : 'asc'))}
+                        className="inline-flex items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm hover:bg-muted"
+                        aria-label="Toggle course/year sort order"
+                      >
+                        <span className="mr-2">{courseYearSort === 'asc' ? 'A → Z' : 'Z → A'}</span>
+                        <ArrowUpDown className="h-4 w-4 text-gray-500" />
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
             {/* Analytics Overview */}
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-3 sm:gap-4 md:gap-6">
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h3 className="text-base sm:text-lg font-bold text-gray-900">Bookings by Department</h3>
-                    <p className="text-xs sm:text-sm text-gray-600 mt-1">Top departments by booking count</p>
+            {DEBUG_OVERVIEW_SECTIONS.analytics && ANY_ANALYTICS_ENABLED && (
+              <div className="grid grid-cols-1 xl:grid-cols-3 gap-3 sm:gap-4 md:gap-6">
+                {DEBUG_ANALYTICS_CHARTS.department && (
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <h3 className="text-base sm:text-lg font-bold text-gray-900">Bookings by Department</h3>
+                        <p className="text-xs sm:text-sm text-gray-600 mt-1">Top departments by booking count</p>
+                      </div>
+                    </div>
+                    {departmentChartData.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={260}>
+                        <PieChart>
+                          <Pie
+                            data={departmentChartData}
+                            dataKey="value"
+                            nameKey="name"
+                            innerRadius="45%"
+                            outerRadius="75%"
+                            paddingAngle={2}
+                            label={({ name, value }) => `${name} (${value})`}
+                          >
+                            {departmentChartData.map((entry, index) => (
+                              <Cell key={`dept-${entry.name}`} fill={PIE_CHART_COLORS[index % PIE_CHART_COLORS.length]} />
+                            ))}
+                          </Pie>
+                          <RechartsTooltip formatter={(value: number, _name: string, entry: any) => [`${value} bookings`, entry.name]} />
+                          <RechartsLegend wrapperStyle={{ fontSize: 12 }} verticalAlign="bottom" height={36} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <EmptyState Icon={Users} message="No department data yet" />
+                    )}
                   </div>
-                </div>
-                {departmentChartData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={260}>
-                    <PieChart>
-                      <Pie
-                        data={departmentChartData}
-                        dataKey="value"
-                        nameKey="name"
-                        innerRadius="45%"
-                        outerRadius="75%"
-                        paddingAngle={2}
-                        label={({ name, value }) => `${name} (${value})`}
-                      >
-                        {departmentChartData.map((entry, index) => (
-                          <Cell key={`dept-${entry.name}`} fill={PIE_CHART_COLORS[index % PIE_CHART_COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <RechartsTooltip formatter={(value: number, _name: string, entry: any) => [`${value} bookings`, entry.name]} />
-                      <RechartsLegend wrapperStyle={{ fontSize: 12 }} verticalAlign="bottom" height={36} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <EmptyState Icon={Users} message="No department data yet" />
                 )}
-              </div>
 
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h3 className="text-base sm:text-lg font-bold text-gray-900">Facility Utilization</h3>
-                    <p className="text-xs sm:text-sm text-gray-600 mt-1">Top facilities by usage hours</p>
+                {DEBUG_ANALYTICS_CHARTS.facility && (
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <h3 className="text-base sm:text-lg font-bold text-gray-900">Facility Utilization</h3>
+                        <p className="text-xs sm:text-sm text-gray-600 mt-1">Top facilities by usage hours</p>
+                      </div>
+                    </div>
+                    {facilityUtilizationData.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={260}>
+                        <BarChart data={facilityUtilizationData} margin={{ top: 10, right: 10, left: 0, bottom: 40 }}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-25} textAnchor="end" height={60} />
+                          <YAxis tick={{ fontSize: 12 }} />
+                          <RechartsTooltip formatter={(value: number, name: string) => {
+                            if (name === 'hours') return [`${value} hrs`, 'Usage'];
+                            if (name === 'bookings') return [`${value} bookings`, 'Bookings'];
+                            return [value, name];
+                          }} />
+                          <RechartsLegend wrapperStyle={{ fontSize: 12 }} />
+                          <Bar dataKey="hours" name="Hours" fill={FACILITY_BAR_COLORS.hours} radius={[4, 4, 0, 0]} />
+                          <Bar dataKey="bookings" name="Bookings" fill={FACILITY_BAR_COLORS.bookings} radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <EmptyState Icon={MapPin} message="No facility usage records" />
+                    )}
                   </div>
-                </div>
-                {facilityUtilizationData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={260}>
-                    <BarChart data={facilityUtilizationData} margin={{ top: 10, right: 10, left: 0, bottom: 40 }}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-25} textAnchor="end" height={60} />
-                      <YAxis tick={{ fontSize: 12 }} />
-                      <RechartsTooltip formatter={(value: number, name: string) => {
-                        if (name === 'hours') return [`${value} hrs`, 'Usage'];
-                        if (name === 'bookings') return [`${value} bookings`, 'Bookings'];
-                        return [value, name];
-                      }} />
-                      <RechartsLegend wrapperStyle={{ fontSize: 12 }} />
-                      <Bar dataKey="hours" name="Hours" fill={FACILITY_BAR_COLORS.hours} radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="bookings" name="Bookings" fill={FACILITY_BAR_COLORS.bookings} radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <EmptyState Icon={MapPin} message="No facility usage records" />
                 )}
-              </div>
 
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h3 className="text-base sm:text-lg font-bold text-gray-900">Weekly Booking Trends</h3>
-                    <p className="text-xs sm:text-sm text-gray-600 mt-1">Rolling 12-week activity snapshot</p>
+                {DEBUG_ANALYTICS_CHARTS.weekly && (
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <h3 className="text-base sm:text-lg font-bold text-gray-900">Weekly Booking Trends</h3>
+                        <p className="text-xs sm:text-sm text-gray-600 mt-1">Rolling 12-week activity snapshot</p>
+                      </div>
+                    </div>
+                    {weeklyTrendData.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={260}>
+                        <LineChart data={weeklyTrendData} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="week" tick={{ fontSize: 12 }} interval={0} angle={-25} textAnchor="end" height={50} />
+                          <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+                          <RechartsTooltip formatter={(value: number, name: string) => [`${value} bookings`, name.charAt(0).toUpperCase() + name.slice(1)]} />
+                          <RechartsLegend wrapperStyle={{ fontSize: 12 }} />
+                          <Line type="monotone" dataKey="total" name="Total" stroke={WEEKLY_LINE_COLORS.total} strokeWidth={2} dot={false} />
+                          <Line type="monotone" dataKey="approved" name="Approved" stroke={WEEKLY_LINE_COLORS.approved} strokeWidth={2} dot={false} />
+                          <Line type="monotone" dataKey="pending" name="Pending" stroke={WEEKLY_LINE_COLORS.pending} strokeWidth={2} dot={false} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <EmptyState Icon={BarChart3} message="No weekly trend data" />
+                    )}
                   </div>
-                </div>
-                {weeklyTrendData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={260}>
-                    <LineChart data={weeklyTrendData} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="week" tick={{ fontSize: 12 }} interval={0} angle={-25} textAnchor="end" height={50} />
-                      <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                      <RechartsTooltip formatter={(value: number, name: string) => [`${value} bookings`, name.charAt(0).toUpperCase() + name.slice(1)]} />
-                      <RechartsLegend wrapperStyle={{ fontSize: 12 }} />
-                      <Line type="monotone" dataKey="total" name="Total" stroke={WEEKLY_LINE_COLORS.total} strokeWidth={2} dot={false} />
-                      <Line type="monotone" dataKey="approved" name="Approved" stroke={WEEKLY_LINE_COLORS.approved} strokeWidth={2} dot={false} />
-                      <Line type="monotone" dataKey="pending" name="Pending" stroke={WEEKLY_LINE_COLORS.pending} strokeWidth={2} dot={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <EmptyState Icon={BarChart3} message="No weekly trend data" />
                 )}
               </div>
-            </div>
+            )}
 
             {/* Overview Sections */}
+            {DEBUG_OVERVIEW_SECTIONS.availability && (
               <div className="mb-4">
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                   <div className="flex items-center justify-between mb-4">
@@ -5253,7 +5405,9 @@ export default function AdminDashboard() {
                   </div>
                 </div>
               </div>
+            )}
 
+            {DEBUG_OVERVIEW_SECTIONS.scheduled && (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 md:gap-6">
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 flex flex-col justify-between">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4 sm:mb-6">
@@ -5392,132 +5546,112 @@ export default function AdminDashboard() {
                 )}
               </div>
             </div>
+            )}
 
             {/* Recent System Activity & Recent System Alerts (stacked) */}
-            <div className="space-y-6">
-              {/* Block 1: Recent System Alerts with two preview tabs */}
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-xl sm:text-2xl font-bold text-gray-900">Recent System Alerts</h3>
-                    <p className="text-xs sm:text-sm text-gray-600 mt-1">Booking and user management alerts</p>
+            {DEBUG_OVERVIEW_SECTIONS.alerts && (
+              <div className="space-y-6">
+                {/* Block 1: Recent System Alerts with two preview tabs */}
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-xl sm:text-2xl font-bold text-gray-900">Recent System Alerts</h3>
+                      <p className="text-xs sm:text-sm text-gray-600 mt-1">Booking and user management alerts</p>
+                    </div>
+                    <div className="bg-pink-100 text-pink-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center self-start">
+                      {alerts?.length || 0} alerts
+                    </div>
                   </div>
-                  <div className="bg-pink-100 text-pink-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center self-start">
-                    {alerts?.length || 0} alerts
-                  </div>
-                </div>
 
-                <div className="mb-4">
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                    <button
-                      onClick={() => setAlertsPreviewTab('booking')}
-                      className={`px-3 py-2 rounded-lg text-xs sm:text-sm font-medium ${alertsPreviewTab === 'booking' ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-700'}`}
-                    >
-                      Booking Alerts
-                    </button>
-                    <button
-                      onClick={() => setAlertsPreviewTab('users')}
-                      className={`px-3 py-2 rounded-lg text-xs sm:text-sm font-medium ${alertsPreviewTab === 'users' ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-700'}`}
-                    >
-                      User Management Alerts
-                    </button>
+                  <div className="mb-4">
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                      <button
+                        onClick={() => setAlertsPreviewTab('booking')}
+                        className={`px-3 py-2 rounded-lg text-xs sm:text-sm font-medium ${alertsPreviewTab === 'booking' ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+                      >
+                        Booking Alerts
+                      </button>
+                      <button
+                        onClick={() => setAlertsPreviewTab('users')}
+                        className={`px-3 py-2 rounded-lg text-xs sm:text-sm font-medium ${alertsPreviewTab === 'users' ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+                      >
+                        User Management Alerts
+                      </button>
+                    </div>
                   </div>
-                </div>
 
-                <div>
-                  {alertsPreviewTab === 'booking' ? (
-                    <div className="space-y-2">
-                      {alerts?.filter(a => {
-                        if (a.type === 'booking') return true;
-                        const t = (a.title || '').toLowerCase();
-                        const m = (a.message || '').toLowerCase();
-                        return t.includes('booking') || m.includes('booking');
-                      }).slice(0,5).map((alert: SystemAlert) => {
-                        // Helper function to parse equipment data from message
-                        const parseEquipmentFromMessage = (message: string) => {
-                          const equipmentMarker = message.indexOf('[Equipment:');
-                          if (equipmentMarker !== -1) {
-                            try {
-                              const baseMessage = message.substring(0, equipmentMarker).trim();
-                              const jsonStart = message.indexOf('{', equipmentMarker);
-                              if (jsonStart === -1) {
-                                return { baseMessage, equipment: null };
-                              }
-                              let depth = 0;
-                              let jsonEnd = -1;
-                              for (let i = jsonStart; i < message.length; i++) {
-                                if (message[i] === '{') depth++;
-                                if (message[i] === '}') {
-                                  depth--;
-                                  if (depth === 0) {
-                                    jsonEnd = i + 1;
-                                    break;
+                  <div>
+                    {alertsPreviewTab === 'booking' ? (
+                      <div className="space-y-2">
+                        {alerts?.filter(a => {
+                          if (a.type === 'booking') return true;
+                          const t = (a.title || '').toLowerCase();
+                          const m = (a.message || '').toLowerCase();
+                          return t.includes('booking') || m.includes('booking');
+                        }).slice(0,5).map((alert: SystemAlert) => {
+                          // Helper function to parse equipment data from message
+                          const parseEquipmentFromMessage = (message: string) => {
+                            const equipmentMarker = message.indexOf('[Equipment:');
+                            if (equipmentMarker !== -1) {
+                              try {
+                                const baseMessage = message.substring(0, equipmentMarker).trim();
+                                const jsonStart = message.indexOf('{', equipmentMarker);
+                                if (jsonStart === -1) {
+                                  return { baseMessage, equipment: null };
+                                }
+                                let depth = 0;
+                                let jsonEnd = -1;
+                                for (let i = jsonStart; i < message.length; i++) {
+                                  if (message[i] === '{') depth++;
+                                  if (message[i] === '}') {
+                                    depth--;
+                                    if (depth === 0) {
+                                      jsonEnd = i + 1;
+                                      break;
+                                    }
                                   }
                                 }
+                                if (jsonEnd !== -1) {
+                                  const jsonStr = message.substring(jsonStart, jsonEnd);
+                                  const equipmentData = JSON.parse(jsonStr);
+                                  return { baseMessage, equipment: equipmentData.items || equipmentData || {} };
+                                }
+                                return { baseMessage, equipment: null };
+                              } catch (e) {
+                                const baseMessage = message.substring(0, equipmentMarker).trim();
+                                return { baseMessage, equipment: null };
                               }
-                              if (jsonEnd !== -1) {
-                                const jsonStr = message.substring(jsonStart, jsonEnd);
-                                const equipmentData = JSON.parse(jsonStr);
-                                return { baseMessage, equipment: equipmentData.items || equipmentData || {} };
-                              }
-                              return { baseMessage, equipment: null };
-                            } catch (e) {
-                              const baseMessage = message.substring(0, equipmentMarker).trim();
-                              return { baseMessage, equipment: null };
                             }
-                          }
-                          return { baseMessage: message, equipment: null };
-                        };
+                            return { baseMessage: message, equipment: null };
+                          };
 
-                        // Helper function to get color for equipment status
-                        const getEquipmentStatusColor = (status: string) => {
-                          const normalized = status.toLowerCase().replace(/_/g, ' ');
-                          if (normalized === 'prepared' || normalized === 'available') {
-                            return 'bg-green-100 text-green-800';
-                          } else if (normalized === 'not available') {
-                            return 'bg-red-100 text-red-800';
-                          }
-                          return 'bg-gray-100 text-gray-800';
-                        };
+                          // Helper function to get color for equipment status
+                          const getEquipmentStatusColor = (status: string) => {
+                            const normalized = status.toLowerCase().replace(/_/g, ' ');
+                            if (normalized === 'prepared' || normalized === 'available') {
+                              return 'bg-green-100 text-green-800';
+                            } else if (normalized === 'not available') {
+                              return 'bg-red-100 text-red-800';
+                            }
+                            return 'bg-gray-100 text-gray-800';
+                          };
 
-                        const { baseMessage, equipment } = parseEquipmentFromMessage(alert.message);
-                        const fm = formatAlertMessage(baseMessage);
-                        const isEquipmentRelated = /equipment|needs/i.test(String(alert.title || '') + ' ' + String(alert.message || ''));
-                        // Don't append inline time if the message already contains date/time text (e.g., booking 'from ... to ...')
-                        const hasDateLike = /\d{1,2}\/\d{1,2}\/\d{4}/.test(fm) || /\bfrom\b[\s\S]*\bto\b/i.test(fm) || /\bat\s*\d{1,2}:\d{2}/i.test(fm);
-                        const shouldAppendTime = isEquipmentRelated && !hasDateLike && !equipment;
-                        const fmWithTime = shouldAppendTime ? `${fm} at ${formatDateTime(alert.createdAt)}` : fm;
-                        return (
-                          <div key={alert.id} className="bg-white rounded-md p-3 border border-gray-200 hover:border-gray-300 transition-colors duration-150">
-                            {/* Mobile Layout */}
-                            <div className="flex flex-col gap-2 md:hidden">
-                              <h4 className="font-medium text-gray-900 text-sm break-words">{alert.title}</h4>
-                              <div className="text-xs text-gray-500">{formatDateTime(alert.createdAt)}</div>
-                              <p className="text-xs text-gray-600 break-words">{fmWithTime}</p>
-                              {equipment && (
-                                <div className="flex flex-wrap gap-1.5">
-                                  {Object.entries(equipment).map(([key, value]: [string, any]) => {
-                                    const displayKey = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-                                    return (
-                                      <span
-                                        key={key}
-                                        className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}
-                                      >
-                                        {displayKey}
-                                      </span>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                            </div>
-                            
-                            {/* Desktop Layout */}
-                            <div className="hidden md:flex items-start justify-between">
-                              <div className="flex-1 min-w-0 pr-4">
-                                <h4 className="font-medium text-gray-900 text-sm">{alert.title}</h4>
+                          const { baseMessage, equipment } = parseEquipmentFromMessage(alert.message);
+                          const fm = formatAlertMessage(baseMessage);
+                          const isEquipmentRelated = /equipment|needs/i.test(String(alert.title || '') + ' ' + String(alert.message || ''));
+                          // Don't append inline time if the message already contains date/time text (e.g., booking 'from ... to ...')
+                          const hasDateLike = /\d{1,2}\/\d{1,2}\/\d{4}/.test(fm) || /\bfrom\b[\s\S]*\bto\b/i.test(fm) || /\bat\s*\d{1,2}:\d{2}/i.test(fm);
+                          const shouldAppendTime = isEquipmentRelated && !hasDateLike && !equipment;
+                          const fmWithTime = shouldAppendTime ? `${fm} at ${formatDateTime(alert.createdAt)}` : fm;
+                          return (
+                            <div key={alert.id} className="bg-white rounded-md p-3 border border-gray-200 hover:border-gray-300 transition-colors duration-150">
+                              {/* Mobile Layout */}
+                              <div className="flex flex-col gap-2 md:hidden">
+                                <h4 className="font-medium text-gray-900 text-sm break-words">{alert.title}</h4>
+                                <div className="text-xs text-gray-500">{formatDateTime(alert.createdAt)}</div>
                                 <p className="text-xs text-gray-600 break-words">{fmWithTime}</p>
                                 {equipment && (
-                                  <div className="mt-2 flex flex-wrap gap-1.5">
+                                  <div className="flex flex-wrap gap-1.5">
                                     {Object.entries(equipment).map(([key, value]: [string, any]) => {
                                       const displayKey = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
                                       return (
@@ -5532,106 +5666,85 @@ export default function AdminDashboard() {
                                   </div>
                                 )}
                               </div>
-                              <div className="text-xs text-gray-500 whitespace-nowrap flex-shrink-0">{formatDateTime(alert.createdAt)}</div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {alerts?.filter(a => {
-                        const t = (a.title || '').toLowerCase();
-                        const m = (a.message || '').toLowerCase();
-                        // Include user management events and equipment/needs submission alerts
-                        return t.includes('user') || m.includes('banned') || m.includes('unbanned') || t.includes('suspension') ||
-                               t.includes('equipment') || t.includes('needs') || m.includes('equipment') || m.includes('needs');
-                      }).slice(0,5).map((alert: SystemAlert) => {
-                        // Helper function to parse equipment data from message
-                        const parseEquipmentFromMessage = (message: string) => {
-                          const equipmentMarker = message.indexOf('[Equipment:');
-                          if (equipmentMarker !== -1) {
-                            try {
-                              const baseMessage = message.substring(0, equipmentMarker).trim();
-                              const jsonStart = message.indexOf('{', equipmentMarker);
-                              if (jsonStart === -1) {
-                                return { baseMessage, equipment: null };
-                              }
-                              let depth = 0;
-                              let jsonEnd = -1;
-                              for (let i = jsonStart; i < message.length; i++) {
-                                if (message[i] === '{') depth++;
-                                if (message[i] === '}') {
-                                  depth--;
-                                  if (depth === 0) {
-                                    jsonEnd = i + 1;
-                                    break;
-                                  }
-                                }
-                              }
-                              if (jsonEnd !== -1) {
-                                const jsonStr = message.substring(jsonStart, jsonEnd);
-                                const equipmentData = JSON.parse(jsonStr);
-                                return { baseMessage, equipment: equipmentData.items || equipmentData || {} };
-                              }
-                              return { baseMessage, equipment: null };
-                            } catch (e) {
-                              const baseMessage = message.substring(0, equipmentMarker).trim();
-                              return { baseMessage, equipment: null };
-                            }
-                          }
-                          return { baseMessage: message, equipment: null };
-                        };
-
-                        // Helper function to get color for equipment status
-                        const getEquipmentStatusColor = (status: string) => {
-                          const normalized = status.toLowerCase().replace(/_/g, ' ');
-                          if (normalized === 'prepared' || normalized === 'available') {
-                            return 'bg-green-100 text-green-800';
-                          } else if (normalized === 'not available') {
-                            return 'bg-red-100 text-red-800';
-                          }
-                          return 'bg-gray-100 text-gray-800';
-                        };
-
-                        const { baseMessage, equipment } = parseEquipmentFromMessage(alert.message);
-                        const fm = formatAlertMessage(baseMessage);
-                        const isEquipmentRelated = /equipment|needs/i.test(String(alert.title || '') + ' ' + String(alert.message || ''));
-                        // Don't append inline time if the message already contains date/time text (e.g., booking 'from ... to ...')
-                        const hasDateLike = /\d{1,2}\/\d{1,2}\/\d{4}/.test(fm) || /\bfrom\b[\s\S]*\bto\b/i.test(fm) || /\bat\s*\d{1,2}:\d{2}/i.test(fm);
-                        const shouldAppendTime = isEquipmentRelated && !hasDateLike && !equipment;
-                        const fmWithTime = shouldAppendTime ? `${fm} at ${formatDateTime(alert.createdAt)}` : fm;
-                        return (
-                          <div key={alert.id} className="bg-white rounded-md p-3 border border-gray-200 hover:border-gray-300 transition-colors duration-150">
-                            {/* Mobile Layout */}
-                            <div className="flex flex-col gap-2 md:hidden">
-                              <h4 className="font-medium text-gray-900 text-sm break-words">{alert.title}</h4>
-                              <div className="text-xs text-gray-500">{formatDateTime(alert.createdAt)}</div>
-                              <p className="text-xs text-gray-600 break-words">{fmWithTime}</p>
-                              {equipment && (
-                                <div className="flex flex-wrap gap-1.5">
-                                  {Object.entries(equipment).map(([key, value]: [string, any]) => {
-                                    const displayKey = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-                                    return (
-                                      <span
-                                        key={key}
-                                        className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}
-                                      >
-                                        {displayKey}
-                                      </span>
-                                    );
-                                  })}
+                              
+                              {/* Desktop Layout */}
+                              <div className="hidden md:flex items-start justify-between">
+                                <div className="flex-1 min-w-0 pr-4">
+                                  <h4 className="font-medium text-gray-900 text-sm">{alert.title}</h4>
+                                  <p className="text-xs text-gray-600 break-words">{fmWithTime}</p>
+                                  {equipment && (
+                                    <div className="mt-2 flex flex-wrap gap-1.5">
+                                      {Object.entries(equipment).map(([key, value]: [string, any]) => {
+                                        const displayKey = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                                        return (
+                                          <span
+                                            key={key}
+                                            className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}
+                                          >
+                                            {displayKey}
+                                          </span>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
                                 </div>
-                              )}
+                                <div className="text-xs text-gray-500 whitespace-nowrap flex-shrink-0">{formatDateTime(alert.createdAt)}</div>
+                              </div>
                             </div>
-                            
-                            {/* Desktop Layout */}
-                            <div className="hidden md:flex items-start justify-between">
-                              <div className="flex-1 min-w-0 pr-4">
-                                <h4 className="font-medium text-gray-900 text-sm">{alert.title}</h4>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {alerts?.filter(a => {
+                          const t = (a.title || '').toLowerCase();
+                          const m = (a.message || '').toLowerCase();
+                          // Include user management events and equipment/needs submission alerts
+                          return t.includes('user') || m.includes('banned') || m.includes('unbanned') || t.includes('suspension') ||
+                                 t.includes('equipment') || t.includes('needs') || m.includes('equipment') || m.includes('needs');
+                        }).slice(0,5).map((alert: SystemAlert) => {
+                          // Helper function to parse equipment data from message
+                          const parseEquipmentFromMessage = (message: string) => {
+                            const equipmentMatch = message.match(/\[Equipment:\s*(\{.*\})\]/i);
+                            if (equipmentMatch) {
+                              try {
+                                const baseMessage = message.substring(0, equipmentMatch.index).trim();
+                                const equipmentData = safeJsonParse(equipmentMatch[1]);
+                                return { baseMessage, equipment: equipmentData.items || {} };
+                              } catch (e) {
+                                return { baseMessage: message, equipment: null };
+                              }
+                            }
+                            return { baseMessage: message, equipment: null };
+                          };
+
+                          // Helper function to get color for equipment status
+                          const getEquipmentStatusColor = (status: string) => {
+                            const normalized = status.toLowerCase().replace(/_/g, ' ');
+                            if (normalized === 'prepared' || normalized === 'available') {
+                              return 'bg-green-100 text-green-800';
+                            } else if (normalized === 'not available') {
+                              return 'bg-red-100 text-red-800';
+                            }
+                            return 'bg-gray-100 text-gray-800';
+                          };
+
+                          const { baseMessage, equipment } = parseEquipmentFromMessage(alert.message);
+                          const fm = formatAlertMessage(baseMessage);
+                          const isEquipmentRelated = /equipment|needs/i.test(String(alert.title || '') + ' ' + String(alert.message || ''));
+                          // Don't append inline time if the message already contains date/time text (e.g., booking 'from ... to ...')
+                          const hasDateLike = /\d{1,2}\/\d{1,2}\/\d{4}/.test(fm) || /\bfrom\b[\s\S]*\bto\b/i.test(fm) || /\bat\s*\d{1,2}:\d{2}/i.test(fm);
+                          const shouldAppendTime = isEquipmentRelated && !hasDateLike && !equipment;
+                          const fmWithTime = shouldAppendTime ? `${fm} at ${formatDateTime(alert.createdAt)}` : fm;
+                          return (
+                            <div key={alert.id} className="bg-white rounded-md p-3 border border-gray-200 hover:border-gray-300 transition-colors duration-150">
+                              {/* Mobile Layout */}
+                              <div className="flex flex-col gap-2 md:hidden">
+                                <h4 className="font-medium text-gray-900 text-sm break-words">{alert.title}</h4>
+                                <div className="text-xs text-gray-500">{formatDateTime(alert.createdAt)}</div>
                                 <p className="text-xs text-gray-600 break-words">{fmWithTime}</p>
                                 {equipment && (
-                                  <div className="mt-2 flex flex-wrap gap-1.5">
+                                  <div className="flex flex-wrap gap-1.5">
                                     {Object.entries(equipment).map(([key, value]: [string, any]) => {
                                       const displayKey = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
                                       return (
@@ -5646,24 +5759,46 @@ export default function AdminDashboard() {
                                   </div>
                                 )}
                               </div>
-                              <div className="text-xs text-gray-500 whitespace-nowrap flex-shrink-0">{formatDateTime(alert.createdAt)}</div>
+                              
+                              {/* Desktop Layout */}
+                              <div className="hidden md:flex items-start justify-between">
+                                <div className="flex-1 min-w-0 pr-4">
+                                  <h4 className="font-medium text-gray-900 text-sm">{alert.title}</h4>
+                                  <p className="text-xs text-gray-600 break-words">{fmWithTime}</p>
+                                  {equipment && (
+                                    <div className="mt-2 flex flex-wrap gap-1.5">
+                                      {Object.entries(equipment).map(([key, value]: [string, any]) => {
+                                        const displayKey = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                                        return (
+                                          <span
+                                            key={key}
+                                            className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}
+                                          >
+                                            {displayKey}
+                                          </span>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="text-xs text-gray-500 whitespace-nowrap flex-shrink-0">{formatDateTime(alert.createdAt)}</div>
+                              </div>
                             </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                          );
+                        })}
+                      </div>
+                    )}
 
-                  <div className="pt-4 border-t border-gray-200 flex justify-end">
-                    <button
-                      onClick={() => { setSelectedView('admin-activity-logs'); setSettingsTab('system'); }}
-                      className="inline-flex items-center gap-2 px-4 py-2 bg-pink-600 text-white rounded-lg text-sm font-medium hover:bg-pink-700 transition-colors duration-150"
-                    >
-                      View All
-                    </button>
+                    <div className="pt-4 border-t border-gray-200 flex justify-end">
+                      <button
+                        onClick={() => { setSelectedView('admin-activity-logs'); setSettingsTab('system'); }}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-pink-600 text-white rounded-lg text-sm font-medium hover:bg-pink-700 transition-colors duration-150"
+                      >
+                        View All
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
 
               {/* Block 2: Recent System Activity (preview of activities) */}
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
@@ -5680,7 +5815,6 @@ export default function AdminDashboard() {
                 {activities && activities.length > 0 ? (
                   <div className="space-y-2">
                     {activities.slice(0, 5).map((a: any, idx: number) => {
-                      // Helper function to parse equipment data from message
                       const parseEquipmentFromMessage = (message: string) => {
                         const equipmentMatch = message.match(/\[Equipment:\s*(\{.*\})\]/i);
                         if (equipmentMatch) {
@@ -5688,118 +5822,118 @@ export default function AdminDashboard() {
                             const baseMessage = message.substring(0, equipmentMatch.index).trim();
                             const equipmentData = safeJsonParse(equipmentMatch[1]);
                             return { baseMessage, equipment: equipmentData.items || {} };
-                          } catch (e) {
+                          } catch (_e) {
                             return { baseMessage: message, equipment: null };
                           }
                         }
                         return { baseMessage: message, equipment: null };
                       };
 
-                      // Helper function to get color for equipment status
                       const getEquipmentStatusColor = (status: string) => {
                         const normalized = status.toLowerCase().replace(/_/g, ' ');
                         if (normalized === 'prepared' || normalized === 'available') {
                           return 'bg-green-100 text-green-800';
-                        } else if (normalized === 'not available') {
+                        }
+                        if (normalized === 'not available') {
                           return 'bg-red-100 text-red-800';
                         }
                         return 'bg-gray-100 text-gray-800';
                       };
 
-                      return (
-                      (() => {
-                        // Use the same rich formatting logic as the System Activity list so the preview matches
-                        // Resolve actor email
-                        let actorEmail = '';
-                        try {
-                          if (a.userId) actorEmail = getUserEmail(a.userId);
-                          if (!actorEmail) {
-                            const details = String(a.details || a.message || '');
-                            const match = details.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
-                            if (match) actorEmail = match[1];
+                      let actorEmail = '';
+                      try {
+                        if (a.userId) actorEmail = getUserEmail(a.userId);
+                        if (!actorEmail) {
+                          const details = String(a.details || a.message || '');
+                          const match = details.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+                          if (match) actorEmail = match[1];
+                        }
+                        if (!actorEmail) {
+                          const details = String(a.details || a.message || '');
+                          const adminIdMatch = details.match(/Admin\s+([0-9a-f-]{8,36})/i);
+                          if (adminIdMatch) {
+                            const id = adminIdMatch[1];
+                            const found = usersMap.get(id) || (usersData || []).find((u: User) => String(u.id) === String(id));
+                            actorEmail = found?.email || '';
                           }
-                          if (!actorEmail) {
-                            const details = String(a.details || a.message || '');
-                            const adminIdMatch = details.match(/Admin\s+([0-9a-f-]{8,36})/i);
-                            if (adminIdMatch) {
-                              const id = adminIdMatch[1];
-                              const found = usersMap.get(id) || (usersData || []).find((u: User) => String(u.id) === String(id));
-                              actorEmail = found?.email || '';
+                        }
+                      } catch (_e) {
+                        actorEmail = '';
+                      }
+                      if (!actorEmail) actorEmail = user?.email || '';
+
+                      let visibleTitle = String(a.title || a.action || '');
+                      try {
+                        if (/equipment\s*needs?/i.test(visibleTitle) || /equipment needs submitted/i.test(visibleTitle)) {
+                          visibleTitle = 'Equipment or Needs Request';
+                        }
+                      } catch (_e) {}
+
+                      const rawMsg = a.message || a.details || '';
+                      let formatted = formatAlertMessage(rawMsg);
+
+                      let appendedEmail: string | null = null;
+                      let appendedIsTarget = false;
+                      try {
+                        const m = visibleTitle.match(/[—–-]\s*([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\s*$/);
+                        if (m && m[1]) {
+                          appendedEmail = m[1];
+                          appendedIsTarget = true;
+                          visibleTitle = visibleTitle.replace(/[—–-]\s*[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\s*$/, '').trim();
+                        }
+                      } catch (_e) {}
+
+                      try {
+                        if (/needs request/i.test(visibleTitle)) {
+                          const emailRegex = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+                          const rawEmails = (String(formatted).match(emailRegex) || []);
+                          const uniqueEmails: string[] = [];
+                          for (const email of rawEmails) {
+                            if (!uniqueEmails.includes(email)) uniqueEmails.push(email);
+                          }
+
+                          let targetEmailCandidate = '';
+                          if (appendedIsTarget && appendedEmail && appendedEmail.toLowerCase() !== actorEmail.toLowerCase()) {
+                            targetEmailCandidate = appendedEmail;
+                          }
+                          if (!targetEmailCandidate) {
+                            for (const email of uniqueEmails) {
+                              if (actorEmail && email.toLowerCase() === actorEmail.toLowerCase()) continue;
+                              targetEmailCandidate = email;
+                              break;
                             }
                           }
-                        } catch (e) { actorEmail = '' }
-                        if (!actorEmail) actorEmail = user?.email || '';
-
-                        // Title normalization
-                        let visibleTitle = String(a.title || a.action || '');
-                        try {
-                          if (/equipment\s*needs?/i.test(visibleTitle) || /equipment needs submitted/i.test(visibleTitle)) {
-                            visibleTitle = 'Equipment or Needs Request';
+                          if (!targetEmailCandidate && uniqueEmails.length > 0) {
+                            targetEmailCandidate = uniqueEmails[0];
                           }
-                        } catch (e) {}
 
-                        let formatted = formatAlertMessage(a.message || a.details || '');
-                        // If appendedEmail present, prefer using it as the target when appropriate
-
-                        // Reuse the same 'Needs:' JSON parsing and 'Requested equipment' mapping as in the main system activity
-                        try {
-                          const needsMatch = (a.message || a.details || '').toString().match(/Needs:\s*(\{[\s\S]*\})/i);
-                          if (needsMatch && needsMatch[1]) {
-                            let needsObj: any = null;
-                            const jsonText = needsMatch[1];
-                            needsObj = safeJsonParse(jsonText);
-                            if (needsObj && Array.isArray(needsObj.items)) {
-                              let othersTextFromItems = '';
-                              const mappedItems = needsObj.items.map((s: string) => {
-                                const raw = String(s).replace(/_/g, ' ').trim();
-                                const lower = raw.toLowerCase();
-                                if (lower.includes('others')) {
-                                  const trailing = raw.replace(/.*?others[:\s-]*/i, '').trim();
-                                  if (trailing && !othersTextFromItems) othersTextFromItems = trailing;
-                                  return null;
-                                }
-                                if (lower === 'whiteboard') return 'Whiteboard & Markers';
-                                if (lower === 'projector') return 'Projector';
-                                if (lower === 'extension cord' || lower === 'extension_cord') return 'Extension Cord';
-                                if (lower === 'hdmi') return 'HDMI Cable';
-                                if (lower === 'extra chairs' || lower === 'extra_chairs') return 'Extra Chairs';
-                                return raw;
-                              }).filter(Boolean) as string[];
-                              for (let i = mappedItems.length - 1; i >= 0; i--) {
-                                if (/others/i.test(String(mappedItems[i]))) mappedItems.splice(i, 1);
-                                else mappedItems[i] = String(mappedItems[i]).replace(/[.,;]+$/g, '').trim();
-                              }
-                              const others = needsObj.others ? String(needsObj.others).trim() : '';
-                              const othersText = othersTextFromItems || others || '';
-                              const joinWithAnd = (arr: string[]) => { if (!arr || arr.length === 0) return ''; if (arr.length === 1) return arr[0]; if (arr.length === 2) return `${arr[0]} and ${arr[1]}`; return `${arr.slice(0, -1).join(', ')} and ${arr.slice(-1)[0]}`; };
-                              const equipmentText = joinWithAnd(mappedItems);
-                              const buildWithOthers = (items: string[]) => {
-                                if (!items || items.length === 0) return 'others';
-                                if (items.length === 1) return `${items[0]} and others`;
-                                const head = items.slice(0, -1).join(', ');
-                                const last = items[items.length - 1];
-                                return `${head}, ${last} and others`;
-                              };
-                              const replacement = othersText
-                                ? (mappedItems.length ? `Needs: ${buildWithOthers(mappedItems)}` : `Needs: others`)
-                                : `Needs: ${equipmentText}`;
-                              try { formatted = String(formatted).replace(/Needs:\s*\{[\s\S]*\}\s*/i, replacement).trim(); } catch (e) {}
-                            }
+                          let rest = String(formatted).replace(emailRegex, '').trim();
+                          rest = rest.replace(/^[:\-\s,]+/, '').trim();
+                          if (!/^(requested|requested equipment|requested equipment:)/i.test(rest)) {
+                            rest = `requested equipment: ${rest}`.trim();
                           }
-                        } catch (e) { /* ignore */ }
 
-                        try {
-                          const eqMatch = (a.message || a.details || '').toString().match(/Requested equipment:\s*([^\[]+)/i);
-                          if (eqMatch && eqMatch[1]) {
-                            const rawList = String(eqMatch[1]).trim();
-                            const parts = rawList.split(/[,;]+/).map(s => String(s).trim()).filter(Boolean);
-                            let othersText = '';
-                            const mapped = parts.map((it) => {
-                              const raw = String(it).trim();
+                          if (targetEmailCandidate) {
+                            formatted = `${targetEmailCandidate} ${rest}`.trim();
+                          }
+                          if (!actorEmail && appendedEmail && appendedEmail !== targetEmailCandidate) {
+                            actorEmail = appendedEmail;
+                          }
+                        }
+                      } catch (_e) {}
+
+                      try {
+                        const needsMatch = (rawMsg || '').toString().match(/Needs:\s*(\{[\s\S]*\})/i);
+                        if (needsMatch && needsMatch[1]) {
+                          const needsObj = safeJsonParse(needsMatch[1]);
+                          if (needsObj && Array.isArray(needsObj.items)) {
+                            let othersTextFromItems = '';
+                            const mappedItems = needsObj.items.map((s: string) => {
+                              const raw = String(s).replace(/_/g, ' ').trim();
                               const lower = raw.toLowerCase();
                               if (lower.includes('others')) {
                                 const trailing = raw.replace(/.*?others[:\s-]*/i, '').trim();
-                                if (trailing && !othersText) othersText = trailing;
+                                if (trailing && !othersTextFromItems) othersTextFromItems = trailing;
                                 return null;
                               }
                               if (lower === 'whiteboard') return 'Whiteboard & Markers';
@@ -5809,129 +5943,196 @@ export default function AdminDashboard() {
                               if (lower === 'extra chairs' || lower === 'extra_chairs') return 'Extra Chairs';
                               return raw;
                             }).filter(Boolean) as string[];
-                            for (let i = mapped.length - 1; i >= 0; i--) {
-                              if (/others/i.test(String(mapped[i]))) mapped.splice(i, 1);
-                              else mapped[i] = String(mapped[i]).replace(/[.,;]+$/g, '').trim();
+
+                            for (let i = mappedItems.length - 1; i >= 0; i--) {
+                              if (/others/i.test(String(mappedItems[i]))) mappedItems.splice(i, 1);
+                              else mappedItems[i] = String(mappedItems[i]).replace(/[.,;]+$/g, '').trim();
                             }
-                            const extrasMatch = rawList.match(/Others?:\s*(.*)$/i);
-                            if (!othersText && extrasMatch && extrasMatch[1]) othersText = String(extrasMatch[1]).trim();
-                            const equipmentItems = mapped;
-                            const joinWithAnd = (arr: string[]) => { if (!arr || arr.length === 0) return ''; if (arr.length === 1) return arr[0]; if (arr.length === 2) return `${arr[0]} and ${arr[1]}`; return `${arr.slice(0, -1).join(', ')} and ${arr.slice(-1)[0]}`; };
-                            const buildWithOthers = (items: string[]) => { if (!items || items.length === 0) return 'others'; if (items.length === 1) return `${items[0]} and others`; const head = items.slice(0, -1).join(', '); const last = items[items.length - 1]; return `${head}, ${last} and others`; };
-                            let replacement = '';
-                            if (othersText) {
-                              if (equipmentItems.length === 0) {
-                                replacement = `requested equipment: others`;
-                              } else {
-                                replacement = `requested equipment: ${buildWithOthers(equipmentItems)}`;
-                              }
-                            } else {
-                              replacement = `requested equipment: ${joinWithAnd(equipmentItems)}`;
-                            }
-                            try { formatted = String(formatted).replace(/Requested equipment:\s*([^\[]+)/i, replacement).trim(); } catch (e) {}
+
+                            const others = needsObj.others ? String(needsObj.others).trim() : '';
+                            const othersText = othersTextFromItems || others || '';
+                            const joinWithAnd = (arr: string[]) => {
+                              if (!arr || arr.length === 0) return '';
+                              if (arr.length === 1) return arr[0];
+                              if (arr.length === 2) return `${arr[0]} and ${arr[1]}`;
+                              return `${arr.slice(0, -1).join(', ')} and ${arr.slice(-1)[0]}`;
+                            };
+                            const buildWithOthers = (items: string[]) => {
+                              if (!items || items.length === 0) return 'others';
+                              if (items.length === 1) return `${items[0]} and others`;
+                              const head = items.slice(0, -1).join(', ');
+                              const last = items[items.length - 1];
+                              return `${head}, ${last} and others`;
+                            };
+
+                            const replacement = othersText
+                              ? (mappedItems.length ? `Needs: ${buildWithOthers(mappedItems)}` : `Needs: others`)
+                              : `Needs: ${joinWithAnd(mappedItems)}`;
+                            try { formatted = String(formatted).replace(/Needs:\s*\{[\s\S]*\}\s*/i, replacement).trim(); } catch (_e) {}
                           }
-                        } catch (e) { /* ignore */ }
-
-                        try {
-                          formatted = String(formatted).replace(/,\s*(and\s+)?others(\b)/i, ' and others$2');
-                          formatted = String(formatted).replace(/,?\s*Others?:\s*[^,\]]+/i, '').replace(/\s{2,}/g, ' ').trim();
-                          formatted = formatted.replace(/,\s*and\s+others/i, ' and others');
-                        } catch (e) {}
-
-                        try { formatted = formatted.replace(/^Admin\b[:\s,-]*/i, ''); } catch (e) {}
-                        if (actorEmail) {
-                          try {
-                            const esc = String(actorEmail).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                            formatted = String(formatted).replace(new RegExp(esc, 'gi'), '').replace(/\s{2,}/g, ' ').trim();
-                          } catch (e) {}
                         }
+                      } catch (_e) {}
 
-                        let targetEmail = '';
-                        try {
-                          const m = (a.message || a.details || '').toString().match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
-                          if (m) targetEmail = m[1];
-                        } catch (e) { /* ignore */ }
-
-                        let extractedBookingId: string | null = null;
-                        try {
-                          const bidMatch = (a.message || a.details || '').toString().match(/booking\s+([0-9a-zA-Z-]{6,64})/i);
-                          if (bidMatch) extractedBookingId = bidMatch[1];
-                        } catch (e) { extractedBookingId = null; }
-
-                        let lookedUpBooking: FacilityBooking | undefined;
-                        if (extractedBookingId) {
-                          try { lookedUpBooking = allBookings.find(b => String(b.id) === String(extractedBookingId)); } catch (e) { lookedUpBooking = undefined; }
-                        }
-
-                        const title = String((a.title || a.action || '')).toLowerCase();
-                        const isRequest = title.includes('request') || title.includes('requested') || title.includes('new booking');
-                        const isApproved = title.includes('approve') || title.includes('approved');
-                        const isDenied = title.includes('deny') || title.includes('denied');
-                        const isCancelled = title.includes('cancel');
-                        const isArrival = title.includes('arrival') || title.includes('confirmed');
-
-                        let subLine = formatted;
-                        try {
-                          if (isRequest) {
-                            if (targetEmail && !/^\s*\S+@/.test(subLine)) subLine = `${targetEmail} ${subLine}`.trim();
-                          } else if (isApproved || isDenied || isCancelled || isArrival) {
-                            if (isArrival && lookedUpBooking) {
-                              const who = getUserEmail(lookedUpBooking.userId);
-                              const where = getFacilityName(lookedUpBooking.facilityId);
-                              const when = `${formatDateTime(lookedUpBooking.startTime)} to ${formatDateTime(lookedUpBooking.endTime)}`;
-                              subLine = `${actorEmail} confirmed arrival for ${who} at ${where} from ${when}`;
-                            } else if (actorEmail && !subLine.toLowerCase().startsWith(actorEmail.toLowerCase())) {
-                              subLine = `${actorEmail} ${subLine}`.trim();
+                      try {
+                        const eqMatch = (rawMsg || '').toString().match(/Requested equipment:\s*([^\[]+)/i);
+                        if (eqMatch && eqMatch[1]) {
+                          const rawList = String(eqMatch[1]).trim();
+                          const parts = rawList.split(/[,;]+/).map(s => String(s).trim()).filter(Boolean);
+                          let othersText = '';
+                          const mapped = parts.map((it) => {
+                            const raw = String(it).trim();
+                            const lower = raw.toLowerCase();
+                            if (lower.includes('others')) {
+                              const trailing = raw.replace(/.*?others[:\s-]*/i, '').trim();
+                              if (trailing && !othersText) othersText = trailing;
+                              return null;
                             }
+                            if (lower === 'whiteboard') return 'Whiteboard & Markers';
+                            if (lower === 'projector') return 'Projector';
+                            if (lower === 'extension cord' || lower === 'extension_cord') return 'Extension Cord';
+                            if (lower === 'hdmi') return 'HDMI Cable';
+                            if (lower === 'extra chairs' || lower === 'extra_chairs') return 'Extra Chairs';
+                            return raw;
+                          }).filter(Boolean) as string[];
+
+                          for (let i = mapped.length - 1; i >= 0; i--) {
+                            if (/others/i.test(String(mapped[i]))) mapped.splice(i, 1);
+                            else mapped[i] = String(mapped[i]).replace(/[.,;]+$/g, '').trim();
+                          }
+
+                          const extrasMatch = rawList.match(/Others?:\s*(.*)$/i);
+                          if (!othersText && extrasMatch && extrasMatch[1]) othersText = String(extrasMatch[1]).trim();
+
+                          const joinWithAnd = (arr: string[]) => {
+                            if (!arr || arr.length === 0) return '';
+                            if (arr.length === 1) return arr[0];
+                            if (arr.length === 2) return `${arr[0]} and ${arr[1]}`;
+                            return `${arr.slice(0, -1).join(', ')} and ${arr.slice(-1)[0]}`;
+                          };
+                          const buildWithOthers = (items: string[]) => {
+                            if (!items || items.length === 0) return 'others';
+                            if (items.length === 1) return `${items[0]} and others`;
+                            const head = items.slice(0, -1).join(', ');
+                            const last = items[items.length - 1];
+                            return `${head}, ${last} and others`;
+                          };
+
+                          let replacement = '';
+                          if (othersText) {
+                            replacement = mapped.length === 0
+                              ? 'requested equipment: others'
+                              : `requested equipment: ${buildWithOthers(mapped)}`;
                           } else {
-                            if (actorEmail && !/^\s*\S+@/.test(subLine)) {
-                              subLine = `${actorEmail} ${subLine}`.trim();
-                            }
+                            replacement = `requested equipment: ${joinWithAnd(mapped)}`;
                           }
-                        } catch (e) {}
 
+                          try { formatted = String(formatted).replace(/Requested equipment:\s*([^\[]+)/i, replacement).trim(); } catch (_e) {}
+                        }
+                      } catch (_e) {}
+
+                      try {
+                        formatted = String(formatted).replace(/,\s*(and\s+)?others(\b)/i, ' and others$2');
+                        formatted = String(formatted).replace(/,?\s*Others?:\s*[^,\]]+/i, '').replace(/\s{2,}/g, ' ').trim();
+                        formatted = formatted.replace(/,\s*and\s+others/i, ' and others');
+                      } catch (_e) {}
+
+                      try { formatted = formatted.replace(/^Admin\b[:\s,-]*/i, ''); } catch (_e) {}
+                      if (actorEmail) {
                         try {
-                          const actionLower = String((a.title || a.action || '')).toLowerCase();
-                          const isEquipmentAction = /equipment|needs/i.test(actionLower) || /needs request/i.test(visibleTitle.toLowerCase());
-                          const hasDateLike = /\d{1,2}\/\d{1,2}\/\d{4}|\d{1,2}:\d{2}:\d{2}/.test(subLine);
-                          if (isEquipmentAction && a.createdAt && !hasDateLike) {
-                            const t = formatDateTime(a.createdAt);
-                            if (t) subLine = `${subLine} at ${t}`.trim();
+                          const esc = String(actorEmail).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                          formatted = String(formatted).replace(new RegExp(esc, 'gi'), '').replace(/\s{2,}/g, ' ').trim();
+                        } catch (_e) {}
+                      }
+
+                      let targetEmail = '';
+                      try {
+                        const match = (a.message || a.details || '').toString().match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+                        if (match) targetEmail = match[1];
+                      } catch (_e) {}
+
+                      let extractedBookingId: string | null = null;
+                      try {
+                        const bidMatch = (a.message || a.details || '').toString().match(/booking\s+([0-9a-zA-Z-]{6,64})/i);
+                        if (bidMatch) extractedBookingId = bidMatch[1];
+                      } catch (_e) {
+                        extractedBookingId = null;
+                      }
+
+                      let lookedUpBooking: FacilityBooking | undefined;
+                      if (extractedBookingId) {
+                        try {
+                          lookedUpBooking = allBookings.find(b => String(b.id) === String(extractedBookingId));
+                        } catch (_e) {
+                          lookedUpBooking = undefined;
+                        }
+                      }
+
+                      const title = String((a.title || a.action || '')).toLowerCase();
+                      const isRequest = title.includes('request') || title.includes('requested') || title.includes('new booking');
+                      const isApproved = title.includes('approve') || title.includes('approved');
+                      const isDenied = title.includes('deny') || title.includes('denied');
+                      const isCancelled = title.includes('cancel');
+                      const isArrival = title.includes('arrival') || title.includes('confirmed');
+
+                      let subLine = formatted;
+                      try {
+                        if (isRequest) {
+                          if (targetEmail && !/^\s*\S+@/.test(subLine)) {
+                            subLine = `${targetEmail} ${subLine}`.trim();
                           }
-                        } catch (e) {}
+                        } else if (isApproved || isDenied || isCancelled || isArrival) {
+                          if (isArrival && lookedUpBooking) {
+                            const who = getUserEmail(lookedUpBooking.userId);
+                            const where = getFacilityName(lookedUpBooking.facilityId);
+                            const when = `${formatDateTime(lookedUpBooking.startTime)} to ${formatDateTime(lookedUpBooking.endTime)}`;
+                            subLine = `${actorEmail} confirmed arrival for ${who} at ${where} from ${when}`;
+                          } else if (actorEmail && !subLine.toLowerCase().startsWith(actorEmail.toLowerCase())) {
+                            subLine = `${actorEmail} ${subLine}`.trim();
+                          }
+                        } else if (actorEmail && !/^\s*\S+@/.test(subLine)) {
+                          subLine = `${actorEmail} ${subLine}`.trim();
+                        }
+                      } catch (_e) {}
 
-                        // Parse equipment from the message
-                        const { baseMessage, equipment } = parseEquipmentFromMessage(a.message || a.details || '');
-                        const displaySubLine = equipment ? baseMessage : subLine;
+                      try {
+                        const actionLower = String((a.title || a.action || '')).toLowerCase();
+                        const isEquipmentAction = /equipment|needs/i.test(actionLower) || /needs request/i.test(visibleTitle.toLowerCase());
+                        const hasDateLike = /\d{1,2}\/\d{1,2}\/\d{4}|\d{1,2}:\d{2}:\d{2}/.test(subLine);
+                        if (isEquipmentAction && a.createdAt && !hasDateLike) {
+                          const timestamp = formatDateTime(a.createdAt);
+                          if (timestamp) subLine = `${subLine} at ${timestamp}`.trim();
+                        }
+                      } catch (_e) {}
 
-                        return (
-                          <div key={a.id || idx} className="bg-white rounded-md p-3 border border-gray-200 hover:border-gray-300 transition-colors duration-150">
-                            <div className="flex items-start justify-between">
-                              <div className="flex-1">
-                                <h4 className="font-medium text-sm text-gray-900">{(visibleTitle || (a.title || a.action)) ?? 'System Event'}</h4>
-                                <p className="text-xs text-gray-600 mt-1 break-words">{displaySubLine}</p>
-                                {equipment && (
-                                  <div className="mt-2 flex flex-wrap gap-1.5">
-                                    {Object.entries(equipment).map(([key, value]: [string, any]) => {
-                                      const displayKey = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-                                      return (
-                                        <span
-                                          key={key}
-                                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}
-                                        >
-                                          {displayKey}
-                                        </span>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                              </div>
+                      const { baseMessage, equipment } = parseEquipmentFromMessage(a.message || a.details || '');
+                      const displaySubLine = equipment ? baseMessage : subLine;
 
-                              <div className="text-xs text-gray-500 ml-4">{a.createdAt ? formatDateTime(a.createdAt) : ''}</div>
+                      return (
+                        <div key={a.id || idx} className="bg-white rounded-md p-3 border border-gray-200 hover:border-gray-300 transition-colors duration-150">
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <h4 className="font-medium text-sm text-gray-900">{(visibleTitle || (a.title || a.action)) ?? 'System Event'}</h4>
+                              <p className="text-xs text-gray-600 mt-1 break-words">{displaySubLine}</p>
+                              {equipment && (
+                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                  {Object.entries(equipment).map(([key, value]: [string, any]) => {
+                                    const displayKey = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                                    return (
+                                      <span
+                                        key={key}
+                                        className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}
+                                      >
+                                        {displayKey}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              )}
                             </div>
+
+                            <div className="text-xs text-gray-500 ml-4">{a.createdAt ? formatDateTime(a.createdAt) : ''}</div>
                           </div>
-                        );
-                      })()
+                        </div>
                       );
                     })}
 
@@ -5954,14 +6155,12 @@ export default function AdminDashboard() {
                 )}
               </div>
             </div>
-
-            {/* Equipment check modal moved to top-level to avoid being clipped by parent transforms/overflow */}
+            )}
           </div>
         );
+        break;
     }
   };
-
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   // Safely close the mobile sidebar: blur any active element first so focus isn't hidden
   const closeMobileSidebar = () => {
