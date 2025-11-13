@@ -436,7 +436,29 @@ export class DatabaseStorage implements IStorage {
 
   async getAllFacilityBookings(): Promise<FacilityBooking[]> {
     try {
-      const bookings = await db.select().from(facilityBookings).orderBy(desc(facilityBookings.createdAt));
+      // Explicitly select all columns to ensure admin_response is included
+      const bookings = await db.select({
+        id: facilityBookings.id,
+        facilityId: facilityBookings.facilityId,
+        userId: facilityBookings.userId,
+        startTime: facilityBookings.startTime,
+        endTime: facilityBookings.endTime,
+        purpose: facilityBookings.purpose,
+        courseYearDept: facilityBookings.courseYearDept,
+        participants: facilityBookings.participants,
+        equipment: facilityBookings.equipment,
+        arrivalConfirmationDeadline: facilityBookings.arrivalConfirmationDeadline,
+        arrivalConfirmed: facilityBookings.arrivalConfirmed,
+        status: facilityBookings.status,
+        adminId: facilityBookings.adminId,
+        adminResponse: facilityBookings.adminResponse,
+        reminderOptIn: facilityBookings.reminderOptIn,
+        reminderStatus: facilityBookings.reminderStatus,
+        reminderScheduledAt: facilityBookings.reminderScheduledAt,
+        reminderLeadMinutes: facilityBookings.reminderLeadMinutes,
+        createdAt: facilityBookings.createdAt,
+        updatedAt: facilityBookings.updatedAt,
+      }).from(facilityBookings).orderBy(desc(facilityBookings.createdAt));
       // Sanitize equipment field in case database has string "undefined" or invalid JSON
       return bookings.map((booking: any) => {
         if (typeof booking.equipment === "string") {
@@ -704,9 +726,13 @@ export class DatabaseStorage implements IStorage {
         } catch (e) { return String(text || '').trim(); }
       };
 
-      // Skip deduplication for "Booking Created" and "Equipment Needs Submitted" notifications 
+      // Skip deduplication for booking and equipment notifications 
       // to ensure each booking/equipment request gets its own notification
-      const skipDedup = alert.title === 'Booking Created' || alert.title === 'Equipment Needs Submitted';
+      // Note: Bookings are auto-approved, so only "Booking Created" (admin) and "Booking Scheduled" (user) are used
+      const skipDedup = alert.title === 'Booking Created' || 
+                        alert.title === 'Booking Scheduled' || 
+                        alert.title === 'Equipment Needs Submitted' ||
+                        alert.title === 'Equipment or Needs Request';
       
       if (!skipDedup) {
         // Choose a lookback window: admin/global alerts get a longer window

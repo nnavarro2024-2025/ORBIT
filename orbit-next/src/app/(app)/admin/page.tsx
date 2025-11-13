@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback, Suspense } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest } from "@/lib/queryClient";
@@ -11,8 +11,10 @@ import Sidebar from "@/components/Sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import BanUserModal from "@/components/modals/BanUserModal";
 import UnavailableReasonModal from "@/components/modals/UnavailableReasonModal";
+import MakeAvailableModal from "@/components/modals/MakeAvailableModal";
 import UserEmailDisplay from "@/components/UserEmailDisplay";
 import AdminFaqManager from "@/components/faq/AdminFaqManager";
+import { SkeletonStatsCard, SkeletonTableRows } from "@/components/ui/skeleton-presets";
 import {
   Shield,
   Dock,
@@ -69,7 +71,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/ui/input"; // still used elsewhere
+import AdminSearchBar from "../../../components/AdminSearchBar";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
@@ -153,7 +156,7 @@ function Countdown({ expiry, onExpire }: { expiry: string | Date | undefined; on
   return <span className="font-mono text-lg font-semibold text-green-700">{hours}:{minutes}:{seconds}</span>;
 }
 
-export default function AdminDashboard() {
+function AdminDashboardInner() {
   if (DEBUG_MINIMAL_RENDER) {
     return (
       <div className="p-6">
@@ -194,6 +197,17 @@ export default function AdminDashboard() {
   function getFacilityName(id: any) {
     if (!id) return 'Unknown Facility';
     return facilities?.find(f => f.id === id)?.name || String(id);
+  }
+
+  function abbreviateFacilityName(name: string): string {
+    if (!name) return name;
+    const abbrevMap: Record<string, string> = {
+      'Collaborative Learning Room 1': 'CLR 1',
+      'Collaborative Learning Room 2': 'CLR 2',
+      'Faculty Lounge': 'Faculty Lounge',
+      'Board Room': 'Board Room',
+    };
+    return abbrevMap[name] || (name.length > 20 ? name.substring(0, 17) + '...' : name);
   }
 
   function formatDateTime(value: any) {
@@ -350,6 +364,15 @@ export default function AdminDashboard() {
   const [bookingAlertsPage, setBookingAlertsPage] = useState(0);
   const [userAlertsPage, setUserAlertsPage] = useState(0);
   const [itemsPerPage] = useState(10);
+  const [bookingAlertsSearch, setBookingAlertsSearch] = useState('');
+  const [userAlertsSearch, setUserAlertsSearch] = useState('');
+  const [activityLogsSearch, setActivityLogsSearch] = useState('');
+  const [successBookingsSearch, setSuccessBookingsSearch] = useState('');
+  const [historyBookingsSearch, setHistoryBookingsSearch] = useState('');
+  const [globalActivitySearch, setGlobalActivitySearch] = useState('');
+  const [globalSystemAlertsSearch, setGlobalSystemAlertsSearch] = useState('');
+  const [globalUserManagementSearch, setGlobalUserManagementSearch] = useState('');
+  const [globalFacilityBookingSearch, setGlobalFacilityBookingSearch] = useState('');
   // booking tab state intentionally unused here (Tabs handles internal state)
   const [securityTab, setSecurityTab] = useState<string>('booking');
   // Controlled tab state for booking-management so we can programmatically switch tabs from the overview
@@ -365,6 +388,8 @@ export default function AdminDashboard() {
   const [scheduleSearchTerm, setScheduleSearchTerm] = useState('');
   const [scheduleFilter, setScheduleFilter] = useState<'all' | 'active' | 'paused'>('all');
   const [scheduleSort, setScheduleSort] = useState<'next-run' | 'name'>('next-run');
+    // FAQ external search control for standardized header
+    const [faqSearch, setFaqSearch] = useState("");
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
   const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
   const [deleteScheduleTarget, setDeleteScheduleTarget] = useState<ReportSchedule | null>(null);
@@ -552,7 +577,7 @@ export default function AdminDashboard() {
     // fallback to previous static list - only include admin-only divider+link when the user is admin
     sidebarItems = [
       { id: 'overview', label: 'Dashboard', icon: BarChart3 },
-      { id: 'booking-management', label: 'Facility Bookings', icon: Calendar },
+      { id: 'booking-management', label: 'Facility Booking Management', icon: Calendar },
       { id: 'user-management', label: 'User Management', icon: Users },
       { id: 'security', label: 'System Alerts', icon: Shield },
       { id: 'faq-management', label: 'FAQ Management', icon: HelpCircle },
@@ -619,6 +644,8 @@ export default function AdminDashboard() {
   const [isUnavailableModalOpen, setIsUnavailableModalOpen] = useState(false);
   const [facilityForUnavailable, setFacilityForUnavailable] = useState<any | null>(null);
   const [unavailableDatesByFacility, setUnavailableDatesByFacility] = useState<Record<string, string[]>>({});
+  const [isMakeAvailableModalOpen, setIsMakeAvailableModalOpen] = useState(false);
+  const [facilityForAvailable, setFacilityForAvailable] = useState<any | null>(null);
   // Track which booking's Popover is open (persisted until user clicks away)
   const [openOthers, setOpenOthers] = useState<Record<string, boolean>>({});
   // Track which booking's Purpose popover is open
@@ -767,23 +794,15 @@ export default function AdminDashboard() {
       if (showEquipmentModal && equipmentModalBooking && String(equipmentModalBooking.id) === String(booking?.id)) {
         return;
       }
-      // Open modal first so clicks always surface the modal immediately.
-      setEquipmentModalBooking(booking);
-      setShowEquipmentModal(true);
-      try {
-        // small dev-only visual feedback so admins can see the handler fired
-        if (process.env.NODE_ENV === 'development') {
-          try { toast({ title: 'Debug', description: `Opening equipment modal for booking ${String(booking?.id)}`, variant: 'default' }); } catch (_) {}
-        }
-      } catch (_) {}
+      
       const items = parseEquipmentItemsFromBooking(booking);
+      
       // Always show modal even if items are empty so admin can see there are no items
       const existing = bookingItemStatus[String(booking.id)] || {};
       const initStatuses: Record<string, 'prepared' | 'not_available' | undefined> = {};
-      // Try to prefill from optimistic local state first
+      // Initialize ALL items (including "others" text) with undefined status so they appear in modal
       items.forEach(it => { initStatuses[it] = existing[it]; });
 
-      // If we don't have per-item statuses in local map, attempt to parse persisted adminResponse JSON
       // If we don't have per-item statuses in local map, attempt to parse persisted adminResponse JSON
       try {
         const resp = String(booking?.adminResponse || '');
@@ -797,10 +816,14 @@ export default function AdminDashboard() {
             // items may be an object mapping item->status or an array
             if (!Array.isArray(parsed.items)) {
               for (const [k, v] of Object.entries(parsed.items)) {
-                const name = String(k).replace(/_/g, ' ').trim();
-                if (items.includes(name) && !initStatuses[name]) {
+                // Match by checking if item exists in parsed list (items might have different formatting)
+                const matchingItem = items.find(item => 
+                  item.toLowerCase() === String(k).toLowerCase() || 
+                  item.replace(/_/g, ' ').toLowerCase() === String(k).replace(/_/g, ' ').toLowerCase()
+                );
+                if (matchingItem) {
                   const val = (String(v).toLowerCase().includes('prepared')) ? 'prepared' : (String(v).toLowerCase().includes('not') ? 'not_available' : undefined);
-                  if (val) initStatuses[name] = val;
+                  if (val) initStatuses[matchingItem] = val;
                 }
               }
             }
@@ -810,14 +833,16 @@ export default function AdminDashboard() {
         // keep modal open and surface debug info in dev
         try { if (process.env.NODE_ENV === 'development') console.debug('[openEquipmentModal] parse error', e, booking?.adminResponse); } catch (_) {}
       }
-
-  // (removed dev console output to avoid noisy repeated logs on click)
+      
       setEquipmentModalItemStatuses(initStatuses);
-      // booking already set above and modal opened immediately
+      // Open modal after state is set
+      setEquipmentModalBooking(booking);
+      setShowEquipmentModal(true);
     } catch (e) {
       // ensure modal is cleared on error
-      // leave modal open so admin can see the empty state; clear item statuses to avoid stale UI
       setEquipmentModalItemStatuses({});
+      setShowEquipmentModal(false);
+      setEquipmentModalBooking(null);
     }
   };
 
@@ -938,7 +963,39 @@ export default function AdminDashboard() {
   // Show up to 6 items directly, only hide if more than 6
   const displayItems = allItems.slice(0, 6);
   const hasMore = allItems.length > 6;
-      const bookingStatuses = bookingItemStatus[String(booking.id)] || {};
+      // Get statuses from local state first, then parse from adminResponse
+      let bookingStatuses = bookingItemStatus[String(booking.id)] || {};
+      
+      // If no local state, parse from adminResponse
+      if (Object.keys(bookingStatuses).length === 0 && booking?.adminResponse) {
+        try {
+          const resp = String(booking.adminResponse);
+          const m1 = resp.match(/Needs:\s*(\{[\s\S]*\})/i);
+          const m2 = resp.match(/[—\-]\s*(\{[\s\S]*\})\s*$/);
+          const jsonTxt = (m1 && m1[1]) ? m1[1] : (m2 && m2[1]) ? m2[1] : null;
+          if (jsonTxt) {
+            const parsed: any = safeJsonParse(jsonTxt);
+            if (parsed && parsed.items && typeof parsed.items === 'object' && !Array.isArray(parsed.items)) {
+              const tempStatuses: Record<string, 'prepared' | 'not_available'> = {};
+              for (const [k, v] of Object.entries(parsed.items)) {
+                // Match items with flexible formatting
+                const matchingItem = allItems.find((item: string) => 
+                  item.toLowerCase() === String(k).toLowerCase() || 
+                  item.replace(/_/g, ' ').toLowerCase() === String(k).replace(/_/g, ' ').toLowerCase()
+                );
+                if (matchingItem) {
+                  const val = (String(v).toLowerCase().includes('prepared')) ? 'prepared' : (String(v).toLowerCase().includes('not') ? 'not_available' : undefined);
+                  if (val) tempStatuses[matchingItem] = val;
+                }
+              }
+              bookingStatuses = tempStatuses;
+            }
+          }
+        } catch (e) {
+          // ignore parse errors
+        }
+      }
+      
       const coloredSpan = (it: string) => {
         const s = bookingStatuses[it];
         if (s === 'prepared') return <span className="text-green-600 font-medium">{it}</span>;
@@ -1196,15 +1253,25 @@ export default function AdminDashboard() {
     try {
       if (!Array.isArray(facilitiesData)) return;
       
-      // Check if data actually changed
+      // Check if data actually changed (facilities or bookings)
       const prevData = prevFacilitiesDataRef.current;
-      const hasChanged = !prevData || 
+      const hasFacilitiesChanged = !prevData || 
         prevData.length !== facilitiesData.length || 
         !prevData.every((f: any, i: number) => String(f?.id) === String(facilitiesData[i]?.id));
+
+      const prevAdmin = prevAdminBookingsDataRef.current;
+      const hasAdminBookingsChanged = !prevAdmin || 
+        (Array.isArray(adminBookingsData) && (
+          prevAdmin.length !== adminBookingsData.length ||
+          !prevAdmin.every((b: any, i: number) => String(b?.id) === String(adminBookingsData[i]?.id))
+        ));
       
-      if (!hasChanged) return;
+      if (!hasFacilitiesChanged && !hasAdminBookingsChanged) return;
       
       prevFacilitiesDataRef.current = facilitiesData;
+      if (hasAdminBookingsChanged && Array.isArray(adminBookingsData)) {
+        prevAdminBookingsDataRef.current = adminBookingsData;
+      }
       setFacilities(facilitiesData);
 
       // Canonicalize unavailableDatesByFacility from backend
@@ -1229,11 +1296,38 @@ export default function AdminDashboard() {
           newUnavailable[f.id] = dates;
         }
       }
+
+      // Also block dates that have any scheduled or active bookings (pending/approved)
+      try {
+        if (Array.isArray(adminBookingsData)) {
+          for (const b of adminBookingsData) {
+            try {
+              if (!b) continue;
+              const status = String(b.status || '').toLowerCase();
+              if (status !== 'approved' && status !== 'pending') continue;
+              const facilityId = b.facilityId;
+              const st = new Date(b.startTime);
+              if (Number.isNaN(st.getTime())) continue;
+              const yyyy = st.getFullYear();
+              const mm = String(st.getMonth() + 1).padStart(2, '0');
+              const dd = String(st.getDate()).padStart(2, '0');
+              const dateKey = `${yyyy}-${mm}-${dd}`;
+              const key = String(facilityId);
+              if (!newUnavailable[key]) newUnavailable[key] = [];
+              if (!newUnavailable[key].includes(dateKey)) newUnavailable[key].push(dateKey);
+            } catch {
+              // ignore bad booking rows
+            }
+          }
+        }
+      } catch {
+        // ignore booking aggregation failures
+      }
       setUnavailableDatesByFacility(newUnavailable);
     } catch (e) {
       // ignore
     }
-  }, [facilitiesData]);
+  }, [facilitiesData, adminBookingsData]);
 
   useEffect(() => {
     try {
@@ -1243,7 +1337,15 @@ export default function AdminDashboard() {
       const prevData = prevReportSchedulesDataRef.current;
       const hasChanged = !prevData || 
         prevData.length !== reportSchedulesData.length || 
-        !prevData.every((s, idx) => String(s.id) === String(reportSchedulesData[idx]?.id));
+        !prevData.every((s, idx) => {
+          const curr = reportSchedulesData[idx];
+          // Compare by id and updatedAt so UI updates when a schedule toggles
+          const prevId = s && (s as any).id;
+          const currId = curr && (curr as any).id;
+          const prevUpdated = s && (s as any).updatedAt ? String((s as any).updatedAt) : "";
+          const currUpdated = curr && (curr as any).updatedAt ? String((curr as any).updatedAt) : "";
+          return String(prevId) === String(currId) && prevUpdated === currUpdated;
+        });
       
       if (!hasChanged) return;
       
@@ -1276,65 +1378,60 @@ export default function AdminDashboard() {
   // Derived lists used in the UI
   const allBookings: FacilityBooking[] = Array.isArray(adminBookingsData) ? adminBookingsData : [];
 
-  const courseYearOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const booking of allBookings) {
-      const raw = String(booking.courseYearDept || '').trim();
-      if (raw) set.add(raw);
-    }
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [allBookings]);
+  // Facility filter options derived from facilities list
+  const facilityOptions = useMemo(() => {
+    const list = (facilities || []).map(f => ({ id: String(f.id), name: String(f.name || `Facility ${f.id}`) }));
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  }, [facilities]);
 
-  const [courseYearFilter, setCourseYearFilter] = useState<string>('all');
-  const [courseYearSort, setCourseYearSort] = useState<'asc' | 'desc'>('desc');
+  const [facilityFilter, setFacilityFilter] = useState<string>('all');
+  const [facilitySort, setFacilitySort] = useState<'asc' | 'desc'>('desc');
 
-  const filterByCourseYear = useCallback(
+  const filterByFacility = useCallback(
     (bookings: FacilityBooking[]) => {
-      if (courseYearFilter === 'all') return bookings;
-      const target = courseYearFilter;
-      return bookings.filter(b => String(b.courseYearDept || '').trim() === target);
+      if (facilityFilter === 'all') return bookings;
+      const target = facilityFilter;
+      return bookings.filter(b => String(b.facilityId) === String(target));
     },
-    [courseYearFilter]
+    [facilityFilter]
   );
 
-  const compareCourseYear = useCallback(
+  const compareFacility = useCallback(
     (a: FacilityBooking, b: FacilityBooking) => {
-      const aValRaw = String(a.courseYearDept || '').trim();
-      const bValRaw = String(b.courseYearDept || '').trim();
-      const aEmpty = !aValRaw;
-      const bEmpty = !bValRaw;
+      const aName = String(getFacilityName(a.facilityId) || '').trim();
+      const bName = String(getFacilityName(b.facilityId) || '').trim();
+      const aEmpty = !aName;
+      const bEmpty = !bName;
       if (aEmpty && bEmpty) return 0;
-      if (aEmpty) return courseYearSort === 'asc' ? 1 : -1;
-      if (bEmpty) return courseYearSort === 'asc' ? -1 : 1;
-      const aVal = aValRaw.toLowerCase();
-      const bVal = bValRaw.toLowerCase();
-      const comparison = aVal.localeCompare(bVal, undefined, { sensitivity: 'base' });
-      return courseYearSort === 'asc' ? comparison : -comparison;
+      if (aEmpty) return facilitySort === 'asc' ? 1 : -1;
+      if (bEmpty) return facilitySort === 'asc' ? -1 : 1;
+      const comparison = aName.toLowerCase().localeCompare(bName.toLowerCase(), undefined, { sensitivity: 'base' });
+      return facilitySort === 'asc' ? comparison : -comparison;
     },
-    [courseYearSort]
+    [facilitySort]
   );
 
   const activeBookings: FacilityBooking[] = useMemo(() => {
     const base = allBookings.filter(b => b.status === 'approved' && getTimestamp(b.startTime) <= Date.now() && getTimestamp(b.endTime) >= Date.now());
-    const filtered = filterByCourseYear(base);
+    const filtered = filterByFacility(base);
     return filtered.slice().sort((a, b) => {
-      const courseComparison = compareCourseYear(a, b);
-      if (courseComparison !== 0) return courseComparison;
+      const facilityComparison = compareFacility(a, b);
+      if (facilityComparison !== 0) return facilityComparison;
       return getTimestamp(a.startTime) - getTimestamp(b.startTime);
     });
-  }, [allBookings, filterByCourseYear, compareCourseYear]);
+  }, [allBookings, filterByFacility, compareFacility]);
 
   const upcomingBookings: FacilityBooking[] = useMemo(() => {
     const futureApproved = allBookings.filter(b => b.status === 'approved' && getTimestamp(b.startTime) > Date.now());
     const pendingFuture = Array.isArray(pendingBookingsData) ? pendingBookingsData.filter((b: any) => getTimestamp(b.startTime) > Date.now()) : [];
     const merged = [...futureApproved, ...pendingFuture] as FacilityBooking[];
-    const filtered = filterByCourseYear(merged);
+    const filtered = filterByFacility(merged);
     return filtered.slice().sort((a, b) => {
-      const courseComparison = compareCourseYear(a, b);
-      if (courseComparison !== 0) return courseComparison;
+      const facilityComparison = compareFacility(a, b);
+      if (facilityComparison !== 0) return facilityComparison;
       return getTimestamp(a.startTime) - getTimestamp(b.startTime);
     });
-  }, [allBookings, pendingBookingsData, filterByCourseYear, compareCourseYear]);
+  }, [allBookings, pendingBookingsData, filterByFacility, compareFacility]);
 
   const filteredReportSchedules = useMemo(() => {
     const term = scheduleSearchTerm.trim().toLowerCase();
@@ -1556,10 +1653,10 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleToggleScheduleActive = async (schedule: ReportSchedule) => {
+  const handleToggleScheduleActive = async (schedule: ReportSchedule, checked?: boolean) => {
     if (!schedule?.id) return;
     const id = String(schedule.id);
-    const nextActive = !(schedule.isActive === true);
+    const nextActive = typeof checked === 'boolean' ? checked : !(schedule.isActive === true);
     setScheduleActionLoadingId(id);
     try {
       await apiRequest('PUT', `/api/admin/report-schedules/${id}`, {
@@ -1591,37 +1688,38 @@ export default function AdminDashboard() {
       }
       return false;
     });
-    const filtered = filterByCourseYear(base);
+    const filtered = filterByFacility(base);
     return filtered.slice().sort((a, b) => {
-      const courseComparison = compareCourseYear(a, b);
-      if (courseComparison !== 0) return courseComparison;
+      const facilityComparison = compareFacility(a, b);
+      if (facilityComparison !== 0) return facilityComparison;
       return getTimestamp(b.createdAt || b.startTime) - getTimestamp(a.createdAt || a.startTime);
     });
-  }, [allBookings, filterByCourseYear, compareCourseYear]);
+  }, [allBookings, filterByFacility, compareFacility]);
 
   const pendingBookings: FacilityBooking[] = useMemo(() => {
     const base = Array.isArray(pendingBookingsData) ? pendingBookingsData : [];
-    const filtered = filterByCourseYear(base as FacilityBooking[]);
+    const filtered = filterByFacility(base as FacilityBooking[]);
     return filtered.slice().sort((a, b) => {
-      const courseComparison = compareCourseYear(a, b);
-      if (courseComparison !== 0) return courseComparison;
+      const facilityComparison = compareFacility(a, b);
+      if (facilityComparison !== 0) return facilityComparison;
       return getTimestamp(a.startTime) - getTimestamp(b.startTime);
     });
-  }, [pendingBookingsData, filterByCourseYear, compareCourseYear]);
+  }, [pendingBookingsData, filterByFacility, compareFacility]);
 
   const departmentChartData = useMemo<DepartmentChartDatum[]>(() => {
     if (!allBookings.length) return [];
     const counts = new Map<string, number>();
     for (const booking of allBookings) {
-      const raw = String(booking.courseYearDept || '').trim();
-      const key = raw || 'Unspecified';
-      counts.set(key, (counts.get(key) ?? 0) + 1);
+      const facilityId = booking?.facilityId ?? 'unknown';
+      const facilityName = getFacilityName(facilityId) || 'Unspecified';
+      const displayName = abbreviateFacilityName(facilityName);
+      counts.set(displayName, (counts.get(displayName) ?? 0) + 1);
     }
     return Array.from(counts.entries())
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 12);
-  }, [allBookings]);
+  }, [allBookings, facilities]);
 
   const facilityUtilizationData = useMemo<FacilityUtilizationDatum[]>(() => {
     if (!allBookings.length) return [];
@@ -1634,10 +1732,11 @@ export default function AdminDashboard() {
       const facilityId = booking?.facilityId ?? `unknown-${booking.id}`;
       const key = String(facilityId);
       const facilityName = getFacilityName(facilityId) || `Facility ${key}`;
-      const current = map.get(key) ?? { name: facilityName, hours: 0, bookings: 0 };
+      const displayName = abbreviateFacilityName(facilityName);
+      const current = map.get(key) ?? { name: displayName, hours: 0, bookings: 0 };
       current.hours += hours;
       current.bookings += 1;
-      current.name = facilityName; // ensure latest friendly name
+      current.name = displayName; // ensure latest friendly name
       map.set(key, current);
     }
     return Array.from(map.values())
@@ -1972,6 +2071,10 @@ export default function AdminDashboard() {
     mutationFn: async ({ facilityId, available, reason, startDate, endDate }: any) => {
       // The server expects `isActive` boolean in the payload. Include optional reason and dates when disabling.
       const payload: any = { isActive: available };
+      // When making available, request clearing of any persisted unavailable ranges
+      if (available === true) {
+        payload.clearUnavailable = true;
+      }
   if (reason) payload.reason = reason;
   if (startDate) payload.startDate = startDate;
   if (endDate) payload.endDate = endDate;
@@ -1992,9 +2095,13 @@ export default function AdminDashboard() {
           ];
           return { ...prev, [variables.facilityId]: Array.from(new Set(newDates)) };
         });
+      } else if (variables && variables.available === true) {
+        // Clear locally so Availability calendar reflects the change instantly
+        setUnavailableDatesByFacility(prev => ({ ...prev, [variables.facilityId]: [] }));
       }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['/api/facilities'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/availability'] }),
         queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] }),
       ]);
     },
@@ -2327,7 +2434,7 @@ export default function AdminDashboard() {
       wsData.push([]); // Empty row
 
       // Add column headers
-      wsData.push(['Week', 'Date', 'Day', 'Time', 'Facility', 'User Email', 'Status', 'Participants', 'Purpose', 'Booking ID']);
+      wsData.push(['Week', 'Date', 'Day', 'Time', 'Facility', 'User Email', 'Status', 'Participants', 'Course & Year', 'Purpose', 'Booking ID']);
 
       // Helper to get week key
       const getWeekKey = (isoDateStr: string) => {
@@ -2391,10 +2498,11 @@ export default function AdminDashboard() {
           }
 
           const participants = booking.participants || 0;
+          const courseYearDept = booking.courseYearDept || 'N/A';
           const purpose = (booking.purpose || 'N/A').substring(0, 200);
           const bookingId = booking.id || 'N/A';
 
-          wsData.push(['', dateStr, dayName, timeStr, facilityName, userEmail, status, participants, purpose, bookingId]);
+          wsData.push(['', dateStr, dayName, timeStr, facilityName, userEmail, status, participants, courseYearDept, purpose, bookingId]);
         }
       }
 
@@ -2411,6 +2519,7 @@ export default function AdminDashboard() {
         { wch: 25 },  // User Email
         { wch: 12 },  // Status
         { wch: 12 },  // Participants
+        { wch: 20 },  // Course & Year
         { wch: 40 },  // Purpose
         { wch: 38 }   // Booking ID
       ];
@@ -2443,7 +2552,7 @@ export default function AdminDashboard() {
 
   const renderContent = () => {
     const errorState = {
-      bookings: bookingsError,
+      bookings: allBookingsError,
       alerts: alertsError,
       activities: activitiesError,
       allBookings: allBookingsError,
@@ -2453,18 +2562,53 @@ export default function AdminDashboard() {
 
     const hasError = Object.values(errorState).some(Boolean);
 
-    if (
-      bookingsLoading ||
-      alertsLoading ||
-      activitiesLoading ||
-      allBookingsLoading ||
-      usersLoading ||
-      facilitiesLoading
-    ) {
+    // Check if initial data is still loading (no data loaded yet)
+    const isInitialLoading = (
+      (allBookingsLoading && (!adminBookingsData || adminBookingsData.length === 0)) ||
+      (alertsLoading && (!alertsData || alertsData.length === 0)) ||
+      (activitiesLoading && (!activitiesData || activitiesData.length === 0)) ||
+      (usersLoading && (!usersDataQ || usersDataQ.length === 0)) ||
+      (facilitiesLoading && (!facilitiesData || facilitiesData.length === 0))
+    );
+
+    if (isInitialLoading) {
       return (
-        <div className="flex items-center justify-center h-full text-muted-foreground">
-          <Loader2 className="h-8 w-8 animate-spin mr-2" />
-          Loading dashboard data...
+        <div className="min-h-screen bg-background flex flex-col">
+          <Header onMobileToggle={() => setMobileSidebarOpen(!mobileSidebarOpen)} />
+          
+          <div className="flex flex-1 relative">
+            <div className="hidden lg:block w-64 h-[calc(100vh-4rem)] border-r bg-card fixed top-16 left-0 z-30 overflow-y-auto">
+              <Sidebar
+                items={sidebarItems}
+                activeItem={selectedView}
+                onItemClick={handleSidebarClick}
+              />
+            </div>
+
+            <div
+              className={`lg:hidden fixed top-16 left-0 h-[calc(100vh-4rem)] w-64 bg-card border-r z-40 overflow-y-auto transition-transform duration-300 ease-in-out ${
+                mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+              }`}
+            >
+              <Sidebar
+                items={sidebarItems}
+                activeItem={selectedView}
+                onItemClick={handleSidebarClick}
+              />
+            </div>
+
+            <div className="flex-1 lg:ml-64 ml-0 p-6 space-y-6">
+              <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+                <SkeletonStatsCard />
+                <SkeletonStatsCard />
+                <SkeletonStatsCard />
+                <SkeletonStatsCard />
+              </div>
+              <div className="bg-white rounded-lg shadow p-6">
+                <SkeletonTableRows rows={8} />
+              </div>
+            </div>
+          </div>
         </div>
       );
     }
@@ -2503,61 +2647,58 @@ export default function AdminDashboard() {
 
       case "report-schedules":
         return (
-          <div className="space-y-6">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex-1 min-w-0">
-                <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                  <CalendarClock className="h-6 w-6 text-blue-600" />
-                  Report Schedules
-                </h2>
-                <p className="text-sm text-gray-600 mt-1">
-                  Automate delivery of admin insights with recurring PDF reports.
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button onClick={openCreateScheduleModal} className="inline-flex items-center gap-2">
-                  <Plus className="h-4 w-4" />
-                  Add schedule
-                </Button>
-              </div>
-            </div>
-
-            <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-4 sm:p-6">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-                <div className="flex items-center gap-2 w-full sm:w-auto">
-                  <Input
-                    value={scheduleSearchTerm}
-                    onChange={(e) => setScheduleSearchTerm(e.target.value)}
-                    placeholder="Search by name, description, recipient..."
-                    className="w-full sm:w-72"
-                    aria-label="Search report schedules"
-                  />
-                  <Select value={scheduleFilter} onValueChange={(val: 'all' | 'active' | 'paused') => { setScheduleFilter(val); setSchedulePaginationPage(0); }}>
-                    <SelectTrigger className="w-[140px]" aria-label="Filter status">
-                      <SelectValue placeholder="Status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All statuses</SelectItem>
-                      <SelectItem value="active">Active only</SelectItem>
-                      <SelectItem value="paused">Paused only</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select value={scheduleSort} onValueChange={(val: 'next-run' | 'name') => { setScheduleSort(val); setSchedulePaginationPage(0); }}>
-                    <SelectTrigger className="w-[150px]" aria-label="Sort schedules">
-                      <SelectValue placeholder="Sort" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="next-run">Next run first</SelectItem>
-                      <SelectItem value="name">Alphabetical</SelectItem>
-                    </SelectContent>
-                  </Select>
+          <div className="space-y-4 sm:space-y-6">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+              <div className="flex flex-col gap-4">
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 lg:gap-6">
+                  <div className="flex-1 min-w-0 space-y-2">
+                    <h2 className="text-xl sm:text-2xl font-bold text-gray-900 flex items-center gap-2">
+                      <CalendarClock className="h-6 w-6 text-blue-600" />
+                      Report Schedules
+                    </h2>
+                    <p className="text-sm text-gray-600">Automate delivery of admin insights with recurring PDF reports.</p>
+                    <div className="space-y-2">
+                      <AdminSearchBar
+                        value={scheduleSearchTerm}
+                        onChange={(val) => setScheduleSearchTerm(val)}
+                        placeholder="Search schedules..."
+                        ariaLabel="Search report schedules"
+                      />
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-start gap-2">
+                        <Select value={scheduleFilter} onValueChange={(val: 'all' | 'active' | 'paused') => { setScheduleFilter(val); setSchedulePaginationPage(0); }}>
+                          <SelectTrigger className="w-full sm:w-[140px]" aria-label="Filter status">
+                            <SelectValue placeholder="Status" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All statuses</SelectItem>
+                            <SelectItem value="active">Active only</SelectItem>
+                            <SelectItem value="paused">Paused only</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Select value={scheduleSort} onValueChange={(val: 'next-run' | 'name') => { setScheduleSort(val); setSchedulePaginationPage(0); }}>
+                          <SelectTrigger className="w-full sm:w-[150px]" aria-label="Sort schedules">
+                            <SelectValue placeholder="Sort" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="next-run">Next run first</SelectItem>
+                            <SelectItem value="name">Alphabetical</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button onClick={openCreateScheduleModal} className="inline-flex items-center gap-2">
+                      <Plus className="h-4 w-4" />
+                      Add schedule
+                    </Button>
+                  </div>
                 </div>
               </div>
 
               {reportSchedulesLoading ? (
-                <div className="flex items-center justify-center py-16 text-gray-500">
-                  <Loader2 className="h-5 w-5 animate-spin mr-2" />
-                  Loading schedules…
+                <div className="overflow-hidden border border-gray-200 rounded-lg">
+                  <SkeletonTableRows rows={5} />
                 </div>
               ) : reportSchedulesError ? (
                 <div className="py-10 text-center text-red-600">
@@ -2633,7 +2774,7 @@ export default function AdminDashboard() {
                                 <div className="flex flex-col items-center gap-2">
                                   <Switch
                                     checked={schedule.isActive !== false}
-                                    onCheckedChange={() => handleToggleScheduleActive(schedule)}
+                                    onCheckedChange={(val) => handleToggleScheduleActive(schedule, val)}
                                     disabled={isPending}
                                     aria-label={schedule.isActive !== false ? 'Pause schedule' : 'Activate schedule'}
                                   />
@@ -2704,41 +2845,73 @@ export default function AdminDashboard() {
         );
 
       case "booking-management":
+        // Apply global search filter (after facility filter logic already applied upstream to activeBookings / upcomingBookings)
+        const bookingSearchTerm = globalFacilityBookingSearch.trim().toLowerCase();
+        const activeBookingsFiltered = bookingSearchTerm ? (activeBookings || []).filter(b => {
+          const haystack = [getUserEmail(b.userId), getFacilityName(b.facilityId), b.purpose, b.status, b.courseYearDept, String(b.participants || '')]
+            .filter(Boolean).join(' ').toLowerCase();
+          return haystack.includes(bookingSearchTerm);
+        }) : activeBookings;
+        const upcomingBookingsFiltered = bookingSearchTerm ? (upcomingBookings || []).filter(b => {
+          const haystack = [getUserEmail(b.userId), getFacilityName(b.facilityId), b.purpose, b.status, b.courseYearDept, String(b.participants || '')]
+            .filter(Boolean).join(' ').toLowerCase();
+          return haystack.includes(bookingSearchTerm);
+        }) : upcomingBookings;
+
+        // Auto-switch tab if current tab shows no matches but the other has some
+        if (bookingSearchTerm) {
+          const activeCount = activeBookingsFiltered?.length || 0;
+          const scheduledCount = upcomingBookingsFiltered?.length || 0;
+          if (bookingTab === 'active' && activeCount === 0 && scheduledCount > 0) setBookingTab('pendingList');
+          else if (bookingTab === 'pendingList' && scheduledCount === 0 && activeCount > 0) setBookingTab('active');
+        }
+
         return (
           <div className="space-y-4 sm:space-y-6">
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4 sm:mb-6">
-                <div className="flex-1 min-w-0">
-                  <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Facility Booking Management</h2>
-                  <p className="text-sm sm:text-base text-gray-600 mt-1">Monitor active bookings, scheduled reservations, and booking history</p>
-                </div>
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                  <div className="flex flex-row flex-wrap gap-2 items-center">
-                    <div className="bg-green-100 text-green-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center">{activeBookings?.length || 0} Active</div>
-                    <div className="bg-pink-100 text-pink-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center">{(upcomingBookings?.length || pendingBookings?.length) || 0} Scheduled</div>
+              <div className="flex flex-col gap-4 mb-4 sm:mb-6">
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 lg:gap-6">
+                  <div className="flex-1 min-w-0">
+                    <div className="space-y-2">
+                      <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Facility Booking Management</h2>
+                      <p className="text-sm sm:text-base text-gray-600">Monitor active bookings, scheduled reservations, and booking history</p>
+                      <AdminSearchBar
+                        value={globalFacilityBookingSearch}
+                        onChange={(val) => { setGlobalFacilityBookingSearch(val); setActiveBookingsPage(0); setUpcomingBookingsPage(0); }}
+                        placeholder="Search bookings..."
+                        ariaLabel="Facility bookings search"
+                        className="pt-1"
+                      />
+                    </div>
                   </div>
-                  <div className="flex flex-row gap-2">
-                    <Select value={courseYearFilter} onValueChange={setCourseYearFilter}>
-                      <SelectTrigger className="w-[160px]">
-                        <SelectValue placeholder="All courses" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All courses</SelectItem>
-                        {courseYearOptions.map(option => (
-                          <SelectItem key={option} value={option}>
-                            {option}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <button
-                      onClick={() => setCourseYearSort(prev => (prev === 'asc' ? 'desc' : 'asc'))}
-                      className="inline-flex items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm hover:bg-muted"
-                      aria-label="Toggle course/year sort order"
-                    >
-                      <span className="mr-2">{courseYearSort === 'asc' ? 'A → Z' : 'Z → A'}</span>
-                      <ArrowUpDown className="h-4 w-4 text-gray-500" />
-                    </button>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div className="flex flex-row flex-wrap gap-2 items-center">
+                      <div className="bg-green-100 text-green-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center" title={bookingSearchTerm ? `${activeBookingsFiltered?.length || 0}/${activeBookings?.length || 0}` : `${activeBookings?.length || 0}`}>{bookingSearchTerm ? `${activeBookingsFiltered?.length || 0}/${activeBookings?.length || 0}` : (activeBookings?.length || 0)} Active</div>
+                      <div className="bg-pink-100 text-pink-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center" title={bookingSearchTerm ? `${upcomingBookingsFiltered?.length || 0}/${upcomingBookings?.length || 0}` : `${(upcomingBookings?.length || pendingBookings?.length) || 0}`}>{bookingSearchTerm ? `${upcomingBookingsFiltered?.length || 0}/${upcomingBookings?.length || 0}` : ((upcomingBookings?.length || pendingBookings?.length) || 0)} Scheduled</div>
+                    </div>
+                    <div className="flex flex-row gap-2">
+                      <Select value={facilityFilter} onValueChange={setFacilityFilter}>
+                        <SelectTrigger className="w-[200px]">
+                          <SelectValue placeholder="All facilities" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All facilities</SelectItem>
+                          {facilityOptions.map(option => (
+                            <SelectItem key={option.id} value={option.id}>
+                              {option.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <button
+                        onClick={() => setFacilitySort(prev => (prev === 'asc' ? 'desc' : 'asc'))}
+                        className="inline-flex items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm hover:bg-muted"
+                        aria-label="Toggle facility sort order"
+                      >
+                        <span className="mr-2">{facilitySort === 'asc' ? 'A → Z' : 'Z → A'}</span>
+                        <ArrowUpDown className="h-4 w-4 text-gray-500" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2759,12 +2932,12 @@ export default function AdminDashboard() {
                   <div className="bg-gray-50 rounded-lg p-4 sm:p-6 mt-4 md:mt-0">
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-0 mb-4">
                       <h3 className="text-base sm:text-lg font-semibold text-gray-900">Currently Active Facility Bookings</h3>
-                      <span className="text-xs sm:text-sm text-gray-600 whitespace-nowrap">{activeBookings?.length || 0} bookings</span>
+                      <span className="text-xs sm:text-sm text-gray-600 whitespace-nowrap">{bookingSearchTerm ? `${activeBookingsFiltered?.length || 0}/${activeBookings?.length || 0}` : `${activeBookingsFiltered?.length || 0}`} bookings</span>
                     </div>
                     
                     {activeBookings && activeBookings.length > 0 ? (
                       <div className="space-y-3">
-                        {activeBookings
+                        {activeBookingsFiltered
                           ?.slice(activeBookingsPage * itemsPerPage, (activeBookingsPage + 1) * itemsPerPage)
                           .map((booking: FacilityBooking) => (
                           <div key={booking.id} className="bg-white rounded-lg p-3 sm:p-4 border border-gray-200 hover:border-green-300 transition-colors duration-200">
@@ -3037,10 +3210,10 @@ export default function AdminDashboard() {
                         ))}
                         
                         {/* Pagination for active bookings */}
-                        {activeBookings.length > itemsPerPage && (
+                        {activeBookingsFiltered && activeBookingsFiltered.length > itemsPerPage && (
                           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-gray-200">
                             <p className="text-xs sm:text-sm text-gray-600 text-center sm:text-left">
-                              Showing {activeBookingsPage * itemsPerPage + 1} to {Math.min((activeBookingsPage + 1) * itemsPerPage, activeBookings.length)} of {activeBookings.length} results
+                              Showing {activeBookingsPage * itemsPerPage + 1} to {Math.min((activeBookingsPage + 1) * itemsPerPage, activeBookingsFiltered.length)} of {activeBookingsFiltered.length} results
                             </p>
                             <div className="flex items-center gap-2">
                               <button
@@ -3051,11 +3224,11 @@ export default function AdminDashboard() {
                                 <ChevronLeft className="h-4 w-4" />
                               </button>
                               <span className="px-3 py-1 text-xs sm:text-sm font-medium whitespace-nowrap">
-                                {activeBookingsPage + 1} of {Math.ceil(activeBookings.length / itemsPerPage)}
+                                {activeBookingsPage + 1} of {Math.ceil(activeBookingsFiltered.length / itemsPerPage)}
                               </span>
                               <button
-                                onClick={() => setActiveBookingsPage(prev => (activeBookings && (prev + 1) * itemsPerPage < activeBookings.length ? prev + 1 : prev))}
-                                disabled={!activeBookings || (activeBookingsPage + 1) * itemsPerPage >= activeBookings.length}
+                                onClick={() => setActiveBookingsPage(prev => (activeBookingsFiltered && (prev + 1) * itemsPerPage < activeBookingsFiltered.length ? prev + 1 : prev))}
+                                disabled={!activeBookingsFiltered || (activeBookingsPage + 1) * itemsPerPage >= activeBookingsFiltered.length}
                                 className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
                               >
                                 <ChevronRight className="h-4 w-4" />
@@ -3079,12 +3252,12 @@ export default function AdminDashboard() {
                   <div className="bg-gray-50 rounded-lg p-3 sm:p-6">
                     <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 mb-4">
                       <h3 className="text-base sm:text-lg font-semibold text-gray-900">Scheduled Facility Bookings</h3>
-                      <span className="text-xs sm:text-sm text-gray-600 whitespace-nowrap">{upcomingBookings?.length || 0} bookings</span>
+                      <span className="text-xs sm:text-sm text-gray-600 whitespace-nowrap">{bookingSearchTerm ? `${upcomingBookingsFiltered?.length || 0}/${upcomingBookings?.length || 0}` : `${upcomingBookingsFiltered?.length || 0}`} bookings</span>
                     </div>
                     
                     {upcomingBookings && upcomingBookings.length > 0 ? (
                       <div className="space-y-3">
-                        {upcomingBookings
+                        {upcomingBookingsFiltered
                           ?.slice(upcomingBookingsPage * itemsPerPage, (upcomingBookingsPage + 1) * itemsPerPage)
                           .map((booking: FacilityBooking) => (
                           <div key={booking.id} className="bg-white rounded-lg p-3 sm:p-4 border border-gray-200 hover:border-pink-200 transition-colors duration-200">
@@ -3326,10 +3499,10 @@ export default function AdminDashboard() {
                         ))}
                         
                         {/* Pagination for pending-list (upcoming) bookings */}
-                        {upcomingBookings.length > itemsPerPage && (
+                        {upcomingBookingsFiltered && upcomingBookingsFiltered.length > itemsPerPage && (
                           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-gray-200">
                             <p className="text-xs sm:text-sm text-gray-600 text-center sm:text-left">
-                              Showing {upcomingBookingsPage * itemsPerPage + 1} to {Math.min((upcomingBookingsPage + 1) * itemsPerPage, upcomingBookings.length)} of {upcomingBookings.length} results
+                              Showing {upcomingBookingsPage * itemsPerPage + 1} to {Math.min((upcomingBookingsPage + 1) * itemsPerPage, upcomingBookingsFiltered.length)} of {upcomingBookingsFiltered.length} results
                             </p>
                             <div className="flex items-center gap-2">
                               <button
@@ -3340,11 +3513,11 @@ export default function AdminDashboard() {
                                 <ChevronLeft className="h-4 w-4" />
                               </button>
                               <span className="px-3 py-1 text-xs sm:text-sm font-medium whitespace-nowrap">
-                                {upcomingBookingsPage + 1} of {Math.ceil(upcomingBookings.length / itemsPerPage)}
+                                {upcomingBookingsPage + 1} of {Math.ceil(upcomingBookingsFiltered.length / itemsPerPage)}
                               </span>
                               <button
-                                onClick={() => setUpcomingBookingsPage(prev => (upcomingBookings && (prev + 1) * itemsPerPage < upcomingBookings.length ? prev + 1 : prev))}
-                                disabled={!upcomingBookings || (upcomingBookingsPage + 1) * itemsPerPage >= upcomingBookings.length}
+                                onClick={() => setUpcomingBookingsPage(prev => (upcomingBookingsFiltered && (prev + 1) * itemsPerPage < upcomingBookingsFiltered.length ? prev + 1 : prev))}
+                                disabled={!upcomingBookingsFiltered || (upcomingBookingsPage + 1) * itemsPerPage >= upcomingBookingsFiltered.length}
                                 className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
                               >
                                 <ChevronRight className="h-4 w-4" />
@@ -3373,17 +3546,53 @@ export default function AdminDashboard() {
   const bookingUsers = usersData?.filter(user => getBookingUserStatus(user.id));
   const bannedUsers = usersData?.filter(user => user.status === "banned");
 
+  // Apply global search across both lists
+  const userMgmtTerm = globalUserManagementSearch.trim().toLowerCase();
+  const bookingUsersFiltered = userMgmtTerm ? bookingUsers?.filter(u => {
+    const haystack = [u.email, u.role, u.status].filter(Boolean).join(' ').toLowerCase();
+    return haystack.includes(userMgmtTerm);
+  }) : bookingUsers;
+  const bannedUsersFiltered = userMgmtTerm ? bannedUsers?.filter(u => {
+    const haystack = [u.email, u.role, u.status].filter(Boolean).join(' ').toLowerCase();
+    return haystack.includes(userMgmtTerm);
+  }) : bannedUsers;
+
+  // Auto-switch tab if current tab has no matches but the other does
+  if (userMgmtTerm) {
+    const bookingCount = bookingUsersFiltered?.length || 0;
+    const bannedCount = bannedUsersFiltered?.length || 0;
+    if (userTab === 'booking-users' && bookingCount === 0 && bannedCount > 0) {
+      setUserTab('banned-users');
+    } else if (userTab === 'banned-users' && bannedCount === 0 && bookingCount > 0) {
+      setUserTab('booking-users');
+    }
+  }
+
         return (
           <div className="space-y-4 sm:space-y-6">
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4 sm:mb-6">
-                <div className="flex-1 min-w-0">
-                  <h2 className="text-xl sm:text-2xl font-bold text-gray-900">User Management</h2>
-                  <p className="text-sm sm:text-base text-gray-600 mt-1">Manage facility booking users and suspended accounts</p>
-                </div>
-                <div className="flex flex-row flex-wrap sm:flex-col md:flex-row gap-2 items-start md:items-center">
-                  <div className="bg-blue-100 text-blue-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap">{bookingUsers?.length || 0} Booking Users</div>
-                  <div className="bg-red-100 text-red-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap">{bannedUsers?.length || 0} Suspended</div>
+              <div className="flex flex-col gap-4 mb-4 sm:mb-6">
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 lg:gap-6">
+                  <div className="flex-1 min-w-0">
+                    <div className="space-y-2">
+                      <h2 className="text-xl sm:text-2xl font-bold text-gray-900">User Management</h2>
+                      <p className="text-sm sm:text-base text-gray-600">Manage facility booking users and suspended accounts</p>
+                      <AdminSearchBar
+                        value={globalUserManagementSearch}
+                        onChange={(val) => {
+                          setGlobalUserManagementSearch(val);
+                          setBookingUsersPage(0); setBannedUsersPage(0);
+                        }}
+                        placeholder="Search users..."
+                        ariaLabel="User management search"
+                        className="pt-1"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex flex-row flex-wrap sm:flex-col md:flex-row gap-2 items-start md:items-center">
+                    <div className="bg-blue-100 text-blue-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap" title={userMgmtTerm ? `${bookingUsersFiltered?.length || 0}/${bookingUsers?.length || 0}` : `${bookingUsers?.length || 0}`}>{userMgmtTerm ? `${bookingUsersFiltered?.length || 0}/${bookingUsers?.length || 0}` : (bookingUsers?.length || 0)} Booking Users</div>
+                    <div className="bg-red-100 text-red-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap" title={userMgmtTerm ? `${bannedUsersFiltered?.length || 0}/${bannedUsers?.length || 0}` : `${bannedUsers?.length || 0}`}>{userMgmtTerm ? `${bannedUsersFiltered?.length || 0}/${bannedUsers?.length || 0}` : (bannedUsers?.length || 0)} Suspended</div>
+                  </div>
                 </div>
               </div>
 
@@ -3403,12 +3612,12 @@ export default function AdminDashboard() {
                   <div className="bg-gray-50 rounded-lg p-6">
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-lg font-semibold text-gray-900">Facility Booking Users</h3>
-                      <span className="text-sm text-gray-600">{bookingUsers?.length || 0} users</span>
+                      <span className="text-sm text-gray-600">{userMgmtTerm ? `${bookingUsersFiltered?.length || 0}/${bookingUsers?.length || 0}` : `${bookingUsersFiltered?.length || 0}`} users</span>
                     </div>
                     
                     {bookingUsers && bookingUsers.length > 0 ? (
                       <div className="space-y-3">
-                        {bookingUsers
+                        {bookingUsersFiltered
                           ?.slice(bookingUsersPage * itemsPerPage, (bookingUsersPage + 1) * itemsPerPage)
                           .map((userItem: User) => {
                           const userBookings = activeBookings?.filter(booking => booking.userId === userItem.id);
@@ -3458,10 +3667,10 @@ export default function AdminDashboard() {
                         })}
                         
                         {/* Pagination for booking users */}
-                        {bookingUsers.length > itemsPerPage && (
+                        {bookingUsersFiltered && bookingUsersFiltered.length > itemsPerPage && (
                           <div className="flex items-center justify-between pt-4 border-t border-gray-200">
                             <p className="text-sm text-gray-600">
-                              Showing {bookingUsersPage * itemsPerPage + 1} to {Math.min((bookingUsersPage + 1) * itemsPerPage, bookingUsers.length)} of {bookingUsers.length} results
+                              Showing {bookingUsersPage * itemsPerPage + 1} to {Math.min((bookingUsersPage + 1) * itemsPerPage, bookingUsersFiltered.length)} of {bookingUsersFiltered.length} results
                             </p>
                             <div className="flex items-center gap-2">
                               <button
@@ -3472,11 +3681,11 @@ export default function AdminDashboard() {
                                 <ChevronLeft className="h-4 w-4" />
                               </button>
                               <span className="px-3 py-1 text-sm font-medium">
-                                {bookingUsersPage + 1} of {Math.ceil(bookingUsers.length / itemsPerPage)}
+                                {bookingUsersPage + 1} of {Math.ceil(bookingUsersFiltered.length / itemsPerPage)}
                               </span>
                               <button
-                                onClick={() => setBookingUsersPage(prev => (bookingUsers && (prev + 1) * itemsPerPage < bookingUsers.length ? prev + 1 : prev))}
-                                disabled={!bookingUsers || (bookingUsersPage + 1) * itemsPerPage >= bookingUsers.length}
+                                onClick={() => setBookingUsersPage(prev => (bookingUsersFiltered && (prev + 1) * itemsPerPage < bookingUsersFiltered.length ? prev + 1 : prev))}
+                                disabled={!bookingUsersFiltered || (bookingUsersPage + 1) * itemsPerPage >= bookingUsersFiltered.length}
                                 className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
                               >
                                 <ChevronRight className="h-4 w-4" />
@@ -3502,12 +3711,12 @@ export default function AdminDashboard() {
                   <div className="bg-gray-50 rounded-lg p-6">
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-lg font-semibold text-gray-900">Suspended Users</h3>
-                      <span className="text-sm text-gray-600">{bannedUsers?.length || 0} users</span>
+                      <span className="text-sm text-gray-600">{userMgmtTerm ? `${bannedUsersFiltered?.length || 0}/${bannedUsers?.length || 0}` : `${bannedUsersFiltered?.length || 0}`} users</span>
                     </div>
                     
                     {bannedUsers && bannedUsers.length > 0 ? (
                       <div className="space-y-3">
-                        {bannedUsers
+                        {bannedUsersFiltered
                           ?.slice(bannedUsersPage * itemsPerPage, (bannedUsersPage + 1) * itemsPerPage)
                           .map((userItem: User) => (
                           <div key={userItem.id} className="bg-white rounded-lg p-4 border border-red-200 hover:border-red-300 transition-colors duration-200">
@@ -3545,10 +3754,10 @@ export default function AdminDashboard() {
                         ))}
                         
                         {/* Pagination for banned users */}
-                        {bannedUsers.length > itemsPerPage && (
+                        {bannedUsersFiltered && bannedUsersFiltered.length > itemsPerPage && (
                           <div className="flex items-center justify-between pt-4 border-t border-gray-200">
                             <p className="text-sm text-gray-600">
-                              Showing {bannedUsersPage * itemsPerPage + 1} to {Math.min((bannedUsersPage + 1) * itemsPerPage, bannedUsers.length)} of {bannedUsers.length} results
+                              Showing {bannedUsersPage * itemsPerPage + 1} to {Math.min((bannedUsersPage + 1) * itemsPerPage, bannedUsersFiltered.length)} of {bannedUsersFiltered.length} results
                             </p>
                             <div className="flex items-center gap-2">
                               <button
@@ -3559,11 +3768,11 @@ export default function AdminDashboard() {
                                 <ChevronLeft className="h-4 w-4" />
                               </button>
                               <span className="px-3 py-1 text-sm font-medium">
-                                {bannedUsersPage + 1} of {Math.ceil(bannedUsers.length / itemsPerPage)}
+                                {bannedUsersPage + 1} of {Math.ceil(bannedUsersFiltered.length / itemsPerPage)}
                               </span>
                               <button
-                                onClick={() => setBannedUsersPage(prev => (bannedUsers && (prev + 1) * itemsPerPage < bannedUsers.length ? prev + 1 : prev))}
-                                disabled={!bannedUsers || (bannedUsersPage + 1) * itemsPerPage >= bannedUsers.length}
+                                onClick={() => setBannedUsersPage(prev => (bannedUsersFiltered && (prev + 1) * itemsPerPage < bannedUsersFiltered.length ? prev + 1 : prev))}
+                                disabled={!bannedUsersFiltered || (bannedUsersPage + 1) * itemsPerPage >= bannedUsersFiltered.length}
                                 className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
                               >
                                 <ChevronRight className="h-4 w-4" />
@@ -3589,33 +3798,63 @@ export default function AdminDashboard() {
         break;
 
       case "security": // System alerts
-        // Compute badge counts based on selected inner security tab (booking | users)
+        // Build base alert lists
+        const isComputerAlert = (a: SystemAlert) => {
+          const t = (a.title || '').toLowerCase();
+          const m = (a.message || '').toLowerCase();
+          return t.includes('automatically logged out') || t.includes('auto-logout') || m.includes('inactivity');
+        };
+        const bookingAlertsAll = (alerts || []).filter((a: SystemAlert) => {
+          if (a.type === 'booking') return true;
+          const t = (a.title || '').toLowerCase();
+          const m = (a.message || '').toLowerCase();
+          return t.includes('booking cancelled') || t.includes('booking canceled') || t.includes('booking') || m.includes('booking');
+        }).filter(a => !isComputerAlert(a));
+        const userAlertsAll = (alerts || []).filter(a => {
+          const t = (a.title || '').toLowerCase();
+          const m = (a.message || '').toLowerCase();
+          return t.includes('user banned') || t.includes('user unbanned') || t.includes('suspension') || m.includes('banned') || m.includes('unbanned') ||
+                 t.includes('equipment') || t.includes('needs') || m.includes('equipment') || m.includes('needs');
+        });
 
+        const globalAlertsTerm = globalSystemAlertsSearch.trim().toLowerCase();
+
+        // Apply global search filter if term exists
+        const bookingAlertsFiltered = globalAlertsTerm ? bookingAlertsAll.filter(a => {
+          const title = (a.title || '').toLowerCase();
+          const message = (a.message || '').toLowerCase();
+          return title.includes(globalAlertsTerm) || message.includes(globalAlertsTerm);
+        }) : bookingAlertsAll;
+        const userAlertsFiltered = globalAlertsTerm ? userAlertsAll.filter(a => {
+          const title = (a.title || '').toLowerCase();
+          const message = (a.message || '').toLowerCase();
+          return title.includes(globalAlertsTerm) || message.includes(globalAlertsTerm);
+        }) : userAlertsAll;
+
+        // Auto-switch tab when typing if term present
+        if (globalAlertsTerm) {
+          const bookingMatches = bookingAlertsFiltered.length;
+          const userMatches = userAlertsFiltered.length;
+          if (securityTab === 'booking' && bookingMatches === 0 && userMatches > 0) {
+            setSecurityTab('users');
+          } else if (securityTab === 'users' && userMatches === 0 && bookingMatches > 0) {
+            setSecurityTab('booking');
+          } else if (securityTab !== 'booking' && bookingMatches > 0) {
+            setSecurityTab('booking');
+          } else if (securityTab !== 'users' && bookingMatches === 0 && userMatches > 0) {
+            setSecurityTab('users');
+          }
+        }
+
+        // Badge counts (show filtered/total when searching)
         let tabUnread = 0;
         let tabTotal = 0;
         if (securityTab === 'users') {
-          const userAlertsLocal = alerts.filter(a => {
-            const t = (a.title || '').toLowerCase();
-            const m = (a.message || '').toLowerCase();
-            return t.includes('user banned') || t.includes('user unbanned') || t.includes('suspension') || m.includes('banned') || m.includes('unbanned') ||
-                   t.includes('equipment') || t.includes('needs') || m.includes('equipment') || m.includes('needs');
-          });
-          tabUnread = userAlertsLocal.filter(a => !a.isRead).length;
-          tabTotal = userAlertsLocal.length;
+          tabUnread = userAlertsFiltered.filter(a => !a.isRead).length;
+          tabTotal = globalAlertsTerm ? `${userAlertsFiltered.length}/${userAlertsAll.length}` as any : userAlertsAll.length;
         } else {
-          const isComputerAlert = (a: SystemAlert) => {
-            const t = (a.title || '').toLowerCase();
-            const m = (a.message || '').toLowerCase();
-            return t.includes('automatically logged out') || t.includes('auto-logout') || m.includes('inactivity');
-          };
-          const bookingAlertsLocal = alerts.filter((a: SystemAlert) => {
-            if (a.type === 'booking') return true;
-            const t = (a.title || '').toLowerCase();
-            const m = (a.message || '').toLowerCase();
-            return t.includes('booking cancelled') || t.includes('booking canceled') || t.includes('booking') || m.includes('booking');
-          }).filter((a: SystemAlert) => !isComputerAlert(a));
-          tabUnread = bookingAlertsLocal.filter(a => !a.isRead).length;
-          tabTotal = bookingAlertsLocal.length;
+          tabUnread = bookingAlertsFiltered.filter(a => !a.isRead).length;
+          tabTotal = globalAlertsTerm ? `${bookingAlertsFiltered.length}/${bookingAlertsAll.length}` as any : bookingAlertsAll.length;
         }
 
         return (
@@ -3623,8 +3862,20 @@ export default function AdminDashboard() {
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4 sm:mb-6">
                 <div className="flex-1 min-w-0">
-                  <h2 className="text-xl sm:text-2xl font-bold text-gray-900">System Alerts</h2>
-                  <p className="text-xs sm:text-sm text-gray-600 mt-1">Monitor system security alerts and notifications</p>
+                  <div className="space-y-2">
+                    <h2 className="text-xl sm:text-2xl font-bold text-gray-900">System Alerts</h2>
+                    <p className="text-xs sm:text-sm text-gray-600">Monitor system security alerts and notifications</p>
+                    <AdminSearchBar
+                      value={globalSystemAlertsSearch}
+                      onChange={(val) => {
+                        setGlobalSystemAlertsSearch(val);
+                        setBookingAlertsPage(0); setUserAlertsPage(0);
+                      }}
+                      placeholder="Search alerts..."
+                      ariaLabel="System alerts search"
+                      className="pt-1"
+                    />
+                  </div>
                 </div>
                 <div className="flex flex-row flex-wrap gap-2 items-center">
                   <div className="bg-orange-100 text-orange-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center">{tabUnread || 0} alerts</div>
@@ -3656,13 +3907,11 @@ export default function AdminDashboard() {
                       </span>
                     </div>
                     
+                    {/* Per-tab search removed; global search handles filtering */}
+                    
                     <div className="space-y-3">
                       {(() => {
-                        const bookingAlerts = (alerts || []).filter(a => {
-                          if (a.type === 'booking') return true;
-                          const t = (a.title || '').toLowerCase();
-                          return t.includes('booking cancelled') || t.includes('booking canceled');
-                        }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                        const bookingAlerts = bookingAlertsFiltered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
                         const alertsPerPage = 10;
                         const page = bookingAlertsPage || 0;
                         const start = page * alertsPerPage;
@@ -3986,16 +4235,11 @@ export default function AdminDashboard() {
                       </span>
                     </div>
                     
+                    {/* Per-tab search removed; global search handles filtering */}
+                    
                     <div className="space-y-3">
                       {(() => {
-                        const userAlerts = (alerts || []).filter(a => {
-                          const t = (a.title || '').toLowerCase();
-                          const m = (a.message || '').toLowerCase();
-                          // Include user management events and equipment/needs submission alerts here
-                          return t.includes('user banned') || t.includes('user unbanned') || 
-                                 t.includes('suspension') || m.includes('banned') || m.includes('unbanned') ||
-                                 t.includes('equipment') || t.includes('needs') || m.includes('equipment') || m.includes('needs');
-                        }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                        const userAlerts = userAlertsFiltered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
                         const alertsPerPage = 10;
                         const page = userAlertsPage || 0;
                         const start = page * alertsPerPage;
@@ -4289,17 +4533,67 @@ export default function AdminDashboard() {
         break;
 
       case "faq-management":
-        return <AdminFaqManager />;
+        return (
+          <div className="space-y-4 sm:space-y-6">
+            <AdminFaqManager />
+          </div>
+        );
 
       case "admin-activity-logs":
         // Prepare lists for the activity logs view (improved with richer details)
         const successfullyBooked = allBookings.filter(b => b.status === 'approved' && b.arrivalConfirmed && new Date(b.endTime) < new Date());
         const bookingHistory = allBookings.filter(b => ['denied', 'cancelled', 'expired', 'void'].includes(b.status) || (b.status === 'approved' && new Date(b.endTime) < new Date() && !b.arrivalConfirmed));
+
+        const trimmedSuccessSearch = successBookingsSearch.trim().toLowerCase();
+        const trimmedHistorySearch = historyBookingsSearch.trim().toLowerCase();
+
+        const filteredSuccessfullyBooked = trimmedSuccessSearch
+          ? successfullyBooked.filter(b => {
+              try {
+                const haystack = [
+                  getUserEmail(b.userId),
+                  getFacilityName(b.facilityId),
+                  b.purpose,
+                  b.status,
+                  String(b.participants || '')
+                ]
+                  .filter(Boolean)
+                  .join(' ')
+                  .toLowerCase();
+                return haystack.includes(trimmedSuccessSearch);
+              } catch (e) {
+                return false;
+              }
+            })
+          : successfullyBooked;
+
+        const filteredBookingHistory = trimmedHistorySearch
+          ? bookingHistory.filter(b => {
+              try {
+                const haystack = [
+                  getUserEmail(b.userId),
+                  getFacilityName(b.facilityId),
+                  b.purpose,
+                  b.status,
+                  String(b.participants || '')
+                ]
+                  .filter(Boolean)
+                  .join(' ')
+                  .toLowerCase();
+                return haystack.includes(trimmedHistorySearch);
+              } catch (e) {
+                return false;
+              }
+            })
+          : bookingHistory;
+
+        const successCountDisplay = trimmedSuccessSearch ? `${filteredSuccessfullyBooked.length}/${successfullyBooked.length}` : `${successfullyBooked.length}`;
+        const historyCountDisplay = trimmedHistorySearch ? `${filteredBookingHistory.length}/${bookingHistory.length}` : `${bookingHistory.length}`;
         
         // Deduplicate activities and alerts by id to prevent duplicates
         const combinedActivity = [ ...(activities || []), ...(alerts || []) ];
         const seenIds = new Set();
-        const systemActivity = combinedActivity
+        const systemActivityRaw = combinedActivity
           .filter((item: any) => {
             if (seenIds.has(item.id)) {
               return false; // Skip duplicates
@@ -4308,6 +4602,42 @@ export default function AdminDashboard() {
             return true;
           })
           .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+        // Filter system activity based on search term
+        const systemActivity = (() => {
+          const searchTerm = activityLogsSearch.trim().toLowerCase();
+          if (!searchTerm) return systemActivityRaw;
+          
+          return systemActivityRaw.filter((item: any) => {
+            try {
+              // Search in title/action
+              const title = String(item.title || item.action || '').toLowerCase();
+              if (title.includes(searchTerm)) return true;
+              
+              // Search in message/details
+              const details = String(item.message || item.details || '').toLowerCase();
+              if (details.includes(searchTerm)) return true;
+              
+              // Search in user email
+              if (item.userId) {
+                const userEmail = getUserEmail(item.userId)?.toLowerCase() || '';
+                if (userEmail.includes(searchTerm)) return true;
+              }
+              
+              // Search in any email found in the message/details
+              const emailMatch = (item.message || item.details || '').match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g);
+              if (emailMatch) {
+                for (const email of emailMatch) {
+                  if (email.toLowerCase().includes(searchTerm)) return true;
+                }
+              }
+              
+              return false;
+            } catch (e) {
+              return false;
+            }
+          });
+        })();
 
         // bookingDuration removed (unused) — compute inline if needed
 
@@ -4323,15 +4653,60 @@ export default function AdminDashboard() {
         return (
           <div className="space-y-4 sm:space-y-6">
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4 sm:mb-6">
-                <div className="flex-1 min-w-0">
-                  <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Activity Logs</h2>
-                  <p className="text-xs sm:text-sm text-gray-600 mt-1">Centralized booking and system logs — detailed view for auditing and troubleshooting</p>
-                </div>
-                <div className="flex flex-row flex-wrap gap-2 items-center">
-                  <div className="bg-green-100 text-green-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center">{successfullyBooked.length || 0} Successful</div>
-                  <div className="bg-yellow-100 text-yellow-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center">{bookingHistory.length || 0} History</div>
-                  <div className="bg-gray-100 text-gray-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center">{systemActivity.length || 0} System</div>
+              <div className="flex flex-col gap-4 mb-4 sm:mb-6">
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 lg:gap-6">
+                  <div className="flex-1 min-w-0">
+                    <div className="space-y-2">
+                      <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Activity Logs</h2>
+                      <p className="text-xs sm:text-sm text-gray-600">Centralized booking and system logs — detailed view for auditing and troubleshooting</p>
+                      <AdminSearchBar
+                        value={globalActivitySearch}
+                        onChange={(term) => {
+                          setGlobalActivitySearch(term);
+                          setSuccessBookingsSearch(term);
+                          setHistoryBookingsSearch(term);
+                          setActivityLogsSearch(term);
+                          setSuccessPage(0); setHistoryPage(0); setSystemPage(0);
+                          const lower = term.trim().toLowerCase();
+                          if (lower) {
+                            const successMatches = successfullyBooked.filter(b => {
+                              try {
+                                const haystack = [getUserEmail(b.userId), getFacilityName(b.facilityId), b.purpose, b.status, String(b.participants || '')]
+                                  .filter(Boolean).join(' ').toLowerCase();
+                                return haystack.includes(lower);
+                              } catch { return false; }
+                            }).length;
+                            const historyMatches = bookingHistory.filter(b => {
+                              try {
+                                const haystack = [getUserEmail(b.userId), getFacilityName(b.facilityId), b.purpose, b.status, String(b.participants || '')]
+                                  .filter(Boolean).join(' ').toLowerCase();
+                                return haystack.includes(lower);
+                              } catch { return false; }
+                            }).length;
+                            const systemMatches = systemActivityRaw.filter((item: any) => {
+                              try {
+                                const title = String(item.title || item.action || '').toLowerCase();
+                                const details = String(item.message || item.details || '').toLowerCase();
+                                const userEmail = item.userId ? (getUserEmail(item.userId) || '').toLowerCase() : '';
+                                return title.includes(lower) || details.includes(lower) || userEmail.includes(lower);
+                              } catch { return false; }
+                            }).length;
+                            if (successMatches > 0) setSettingsTab('success');
+                            else if (historyMatches > 0) setSettingsTab('history');
+                            else if (systemMatches > 0) setSettingsTab('system');
+                          }
+                        }}
+                        placeholder="Search logs..."
+                        ariaLabel="Activity logs search"
+                        className="pt-1"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex flex-row flex-wrap gap-2 items-center">
+                    <div className="bg-green-100 text-green-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center" title={`Filtered/Total: ${successCountDisplay}`}>{successCountDisplay} Successful</div>
+                    <div className="bg-yellow-100 text-yellow-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center" title={`Filtered/Total: ${historyCountDisplay}`}>{historyCountDisplay} History</div>
+                    <div className="bg-gray-100 text-gray-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap text-center">{systemActivity.length || 0} System</div>
+                  </div>
                 </div>
               </div>
 
@@ -4355,10 +4730,10 @@ export default function AdminDashboard() {
                   <div className="bg-gray-50 rounded-lg p-6 mt-0">
                     <h3 className="text-lg font-semibold text-gray-900">Successfully Booked</h3>
                     <p className="text-sm text-gray-600 mt-1">Completed bookings which were approved and had confirmed arrival.</p>
-                    {successfullyBooked.length > 0 ? (
+                    {filteredSuccessfullyBooked.length > 0 ? (
                       <>
                         <div className="space-y-2 mt-3">
-                          {successfullyBooked.slice(successPage * itemsPerPage, (successPage + 1) * itemsPerPage).map((b: FacilityBooking) => (
+                          {filteredSuccessfullyBooked.slice(successPage * itemsPerPage, (successPage + 1) * itemsPerPage).map((b: FacilityBooking) => (
                             <div key={b.id} className="bg-white rounded-md p-3 border border-gray-200">
                               <div className="flex flex-col md:flex-row items-start md:items-center gap-4">
                                 {/* Left: user email + room + participants */}
@@ -4429,10 +4804,10 @@ export default function AdminDashboard() {
                           ))}
                         </div>
 
-                        {successfullyBooked.length > itemsPerPage && (
+                        {filteredSuccessfullyBooked.length > itemsPerPage && (
                           <div className="flex items-center justify-between pt-4 border-t border-gray-200">
                             <p className="text-sm text-gray-600">
-                              Showing {successPage * itemsPerPage + 1} to {Math.min((successPage + 1) * itemsPerPage, successfullyBooked.length)} of {successfullyBooked.length} results
+                              Showing {successPage * itemsPerPage + 1} to {Math.min((successPage + 1) * itemsPerPage, filteredSuccessfullyBooked.length)} of {filteredSuccessfullyBooked.length} results
                             </p>
                             <div className="flex items-center gap-2">
                               <button
@@ -4443,11 +4818,11 @@ export default function AdminDashboard() {
                                 <ChevronLeft className="h-4 w-4" />
                               </button>
                               <span className="px-3 py-1 text-sm font-medium">
-                                {successPage + 1} of {Math.ceil(successfullyBooked.length / itemsPerPage)}
+                                {successPage + 1} of {Math.ceil(filteredSuccessfullyBooked.length / itemsPerPage)}
                               </span>
                               <button
-                                onClick={() => setSuccessPage(prev => (successfullyBooked && (prev + 1) * itemsPerPage < successfullyBooked.length ? prev + 1 : prev))}
-                                disabled={!successfullyBooked || (successPage + 1) * itemsPerPage >= successfullyBooked.length}
+                                onClick={() => setSuccessPage(prev => (filteredSuccessfullyBooked && (prev + 1) * itemsPerPage < filteredSuccessfullyBooked.length ? prev + 1 : prev))}
+                                disabled={!filteredSuccessfullyBooked || (successPage + 1) * itemsPerPage >= filteredSuccessfullyBooked.length}
                                 className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
                               >
                                 <ChevronRight className="h-4 w-4" />
@@ -4466,10 +4841,10 @@ export default function AdminDashboard() {
                 <div className="bg-gray-50 rounded-lg p-6 mt-0">
                     <h3 className="text-lg font-semibold text-gray-900">Booking History</h3>
                     <p className="text-sm text-gray-600 mt-1">Past bookings including denied, cancelled or expired reservations for audit purposes.</p>
-                    {bookingHistory.length > 0 ? (
+                    {filteredBookingHistory.length > 0 ? (
                       <>
                         <div className="space-y-2 mt-3">
-                          {bookingHistory.slice(historyPage * itemsPerPage, (historyPage + 1) * itemsPerPage).map((b: FacilityBooking) => (
+                          {filteredBookingHistory.slice(historyPage * itemsPerPage, (historyPage + 1) * itemsPerPage).map((b: FacilityBooking) => (
                             <div key={b.id} className="bg-white rounded-md p-3 border border-gray-200">
                               <div className="flex flex-col md:flex-row items-start md:items-center gap-3">
                                 {/* Left: user email + room + participants */}
@@ -4599,10 +4974,10 @@ export default function AdminDashboard() {
                           ))}
                         </div>
 
-                        {bookingHistory.length > itemsPerPage && (
+                        {filteredBookingHistory.length > itemsPerPage && (
                           <div className="flex items-center justify-between pt-4 border-t border-gray-200">
                             <p className="text-sm text-gray-600">
-                              Showing {historyPage * itemsPerPage + 1} to {Math.min((historyPage + 1) * itemsPerPage, bookingHistory.length)} of {bookingHistory.length} results
+                              Showing {historyPage * itemsPerPage + 1} to {Math.min((historyPage + 1) * itemsPerPage, filteredBookingHistory.length)} of {filteredBookingHistory.length} results
                             </p>
                             <div className="flex items-center gap-2">
                               <button
@@ -4613,11 +4988,11 @@ export default function AdminDashboard() {
                                 <ChevronLeft className="h-4 w-4" />
                               </button>
                               <span className="px-3 py-1 text-sm font-medium">
-                                {historyPage + 1} of {Math.ceil(bookingHistory.length / itemsPerPage)}
+                                {historyPage + 1} of {Math.ceil(filteredBookingHistory.length / itemsPerPage)}
                               </span>
                               <button
-                                onClick={() => setHistoryPage(prev => (bookingHistory && (prev + 1) * itemsPerPage < bookingHistory.length ? prev + 1 : prev))}
-                                disabled={!bookingHistory || (historyPage + 1) * itemsPerPage >= bookingHistory.length}
+                                onClick={() => setHistoryPage(prev => (filteredBookingHistory && (prev + 1) * itemsPerPage < filteredBookingHistory.length ? prev + 1 : prev))}
+                                disabled={!filteredBookingHistory || (historyPage + 1) * itemsPerPage >= filteredBookingHistory.length}
                                 className="p-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
                               >
                                 <ChevronRight className="h-4 w-4" />
@@ -4636,6 +5011,7 @@ export default function AdminDashboard() {
                   <div className="bg-gray-50 rounded-lg p-6">
                     <h3 className="text-lg font-semibold text-gray-900">System Activity</h3>
                     <p className="text-sm text-gray-500 mt-1">Combined system alerts and activity logs for security and operational events.</p>
+
                     {systemActivity.length > 0 ? (
                       <>
                         <div className="space-y-2 mt-3">
@@ -4996,17 +5372,28 @@ export default function AdminDashboard() {
                                   <p className="text-xs text-gray-600 break-words">{displaySubLine}</p>
                                   {equipment && (
                                     <div className="flex flex-wrap gap-1.5">
-                                      {Object.entries(equipment).map(([key, value]: [string, any]) => {
-                                        const displayKey = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-                                        return (
+                                      {Array.isArray(equipment) ? (
+                                        (equipment as any[]).map((label, idx) => (
                                           <span
-                                            key={key}
-                                            className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}
+                                            key={idx}
+                                            className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800"
                                           >
-                                            {displayKey}
+                                            {String(label)}
                                           </span>
-                                        );
-                                      })}
+                                        ))
+                                      ) : (
+                                        Object.entries(equipment).map(([key, value]: [string, any]) => {
+                                          const displayKey = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                                          return (
+                                            <span
+                                              key={key}
+                                              className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}
+                                            >
+                                              {displayKey}
+                                            </span>
+                                          );
+                                        })
+                                      )}
                                     </div>
                                   )}
                                   {a.source && <div className="text-xs text-gray-400">Source: {a.source}</div>}
@@ -5135,20 +5522,32 @@ export default function AdminDashboard() {
                                 }`}>
                                   {facility.isActive ? 'Available' : 'Unavailable'}
                                 </span>
-                                <button
-                                  onClick={() => toggleFacilityAvailability(facility, !facility.isActive)}
-                                  disabled={toggleFacilityAvailabilityMutation.isPending}
-                                  className={`w-full md:w-auto px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
-                                    facility.isActive
-                                      ? 'bg-red-600 hover:bg-red-700 text-white'
-                                      : 'bg-green-600 hover:bg-green-700 text-white'
-                                  }`}
-                                >
-                                  {toggleFacilityAvailabilityMutation.isPending && toggleFacilityAvailabilityMutation.variables?.facilityId === facility.id
-                                    ? 'Updating...'
-                                    : facility.isActive ? 'Make Unavailable' : 'Make Available'
-                                  }
-                                </button>
+                                <div className="flex items-center gap-2 w-full md:w-auto">
+                                  {/** Determine if there are system-blocked dates for this facility */}
+                                  {(() => { return null; })()}
+                                  <button
+                                    onClick={() => toggleFacilityAvailability(facility, false)}
+                                    disabled={toggleFacilityAvailabilityMutation.isPending}
+                                    className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed bg-red-600 hover:bg-red-700 text-white`}
+                                  >
+                                    {toggleFacilityAvailabilityMutation.isPending && toggleFacilityAvailabilityMutation.variables?.facilityId === facility.id && toggleFacilityAvailabilityMutation.variables?.available === false
+                                      ? 'Updating...'
+                                      : 'Make Unavailable'}
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setFacilityForAvailable(facility);
+                                      setIsMakeAvailableModalOpen(true);
+                                    }}
+                                    disabled={(() => { const blocked = (unavailableDatesByFacility[facility.id] || []).length; return toggleFacilityAvailabilityMutation.isPending || blocked === 0; })()}
+                                    className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${'bg-green-600 hover:bg-green-700 text-white'}`}
+                                    title={(() => { const blocked = (unavailableDatesByFacility[facility.id] || []).length; return blocked === 0 ? 'No system-blocked dates to clear' : 'Make Available'; })()}
+                                  >
+                                    {toggleFacilityAvailabilityMutation.isPending && toggleFacilityAvailabilityMutation.variables?.facilityId === facility.id && toggleFacilityAvailabilityMutation.variables?.available === true
+                                      ? 'Updating...'
+                                      : 'Make Available'}
+                                  </button>
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -5246,15 +5645,15 @@ export default function AdminDashboard() {
                 </div>
               )}
 
-              {/* Course/Year Controls */}
+              {/* Facility Filters */}
               {DEBUG_OVERVIEW_SECTIONS.quickActions && (
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 flex flex-col gap-3">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-base font-bold text-gray-900">Course / Year Filters</h3>
+                    <h3 className="text-base font-bold text-gray-900">Facility Filters</h3>
                     <button
                       onClick={() => {
-                        setCourseYearFilter('all');
-                        setCourseYearSort('desc');
+                        setFacilityFilter('all');
+                        setFacilitySort('desc');
                       }}
                       className="text-xs font-medium text-pink-600 hover:text-pink-700"
                     >
@@ -5264,15 +5663,15 @@ export default function AdminDashboard() {
                   <div className="flex flex-col gap-3">
                     <div className="flex flex-col gap-1">
                       <span className="text-xs uppercase tracking-wide text-gray-500">Filter</span>
-                      <Select value={courseYearFilter} onValueChange={setCourseYearFilter}>
+                      <Select value={facilityFilter} onValueChange={setFacilityFilter}>
                         <SelectTrigger>
-                          <SelectValue placeholder="All courses" />
+                          <SelectValue placeholder="All facilities" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="all">All courses</SelectItem>
-                          {courseYearOptions.map(option => (
-                            <SelectItem key={option} value={option}>
-                              {option}
+                          <SelectItem value="all">All facilities</SelectItem>
+                          {facilityOptions.map(option => (
+                            <SelectItem key={option.id} value={option.id}>
+                              {option.name}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -5281,11 +5680,11 @@ export default function AdminDashboard() {
                     <div className="flex flex-col gap-1">
                       <span className="text-xs uppercase tracking-wide text-gray-500">Sort</span>
                       <button
-                        onClick={() => setCourseYearSort(prev => (prev === 'asc' ? 'desc' : 'asc'))}
+                        onClick={() => setFacilitySort(prev => (prev === 'asc' ? 'desc' : 'asc'))}
                         className="inline-flex items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm hover:bg-muted"
-                        aria-label="Toggle course/year sort order"
+                        aria-label="Toggle facility sort order"
                       >
-                        <span className="mr-2">{courseYearSort === 'asc' ? 'A → Z' : 'Z → A'}</span>
+                        <span className="mr-2">{facilitySort === 'asc' ? 'A → Z' : 'Z → A'}</span>
                         <ArrowUpDown className="h-4 w-4 text-gray-500" />
                       </button>
                     </div>
@@ -5301,8 +5700,8 @@ export default function AdminDashboard() {
                   <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
                     <div className="flex items-center justify-between mb-4">
                       <div>
-                        <h3 className="text-base sm:text-lg font-bold text-gray-900">Bookings by Department</h3>
-                        <p className="text-xs sm:text-sm text-gray-600 mt-1">Top departments by booking count</p>
+                        <h3 className="text-base sm:text-lg font-bold text-gray-900">Bookings by Facility</h3>
+                        <p className="text-xs sm:text-sm text-gray-600 mt-1">Top facilities by booking count</p>
                       </div>
                     </div>
                     {departmentChartData.length > 0 ? (
@@ -5326,7 +5725,7 @@ export default function AdminDashboard() {
                         </PieChart>
                       </ResponsiveContainer>
                     ) : (
-                      <EmptyState Icon={Users} message="No department data yet" />
+                      <EmptyState Icon={MapPin} message="No facility data yet" />
                     )}
                   </div>
                 )}
@@ -5410,38 +5809,38 @@ export default function AdminDashboard() {
             {DEBUG_OVERVIEW_SECTIONS.scheduled && (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 md:gap-6">
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 flex flex-col justify-between">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4 sm:mb-6">
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-base sm:text-lg font-bold text-gray-900">Scheduled Bookings</h3>
-                    <p className="text-xs sm:text-sm text-gray-600 mt-1">Upcoming approved and auto-scheduled reservations</p>
-                  </div>
-                  <div className="flex flex-row flex-wrap gap-2 items-center">
+                <div className="mb-4 sm:mb-6">
+                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-3">
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-base sm:text-lg font-bold text-gray-900">Scheduled Bookings</h3>
+                      <p className="text-xs sm:text-sm text-gray-600 mt-1">Upcoming approved and auto-scheduled reservations</p>
+                    </div>
                     <div className="bg-pink-100 text-pink-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium self-start whitespace-nowrap">
                       {scheduledCount || 0} scheduled
                     </div>
-                    <div className="ml-auto flex gap-2">
-                      <Select value={courseYearFilter} onValueChange={setCourseYearFilter}>
-                        <SelectTrigger className="w-[150px]">
-                          <SelectValue placeholder="All courses" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All courses</SelectItem>
-                          {courseYearOptions.map(option => (
-                            <SelectItem key={option} value={option}>
-                              {option}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <button
-                        onClick={() => setCourseYearSort(prev => (prev === 'asc' ? 'desc' : 'asc'))}
-                        className="inline-flex items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm hover:bg-muted"
-                        aria-label="Toggle course/year sort order"
-                      >
-                        <span className="mr-2">{courseYearSort === 'asc' ? 'A → Z' : 'Z → A'}</span>
-                        <ArrowUpDown className="h-4 w-4 text-gray-500" />
-                      </button>
-                    </div>
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <Select value={facilityFilter} onValueChange={setFacilityFilter}>
+                      <SelectTrigger className="w-full sm:w-[200px]">
+                        <SelectValue placeholder="All facilities" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All facilities</SelectItem>
+                        {facilityOptions.map(option => (
+                          <SelectItem key={option.id} value={option.id}>
+                            {option.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <button
+                      onClick={() => setFacilitySort(prev => (prev === 'asc' ? 'desc' : 'asc'))}
+                      className="inline-flex items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm hover:bg-muted"
+                      aria-label="Toggle facility sort order"
+                    >
+                      <span className="mr-2">{facilitySort === 'asc' ? 'A → Z' : 'Z → A'}</span>
+                      <ArrowUpDown className="h-4 w-4 text-gray-500" />
+                    </button>
                   </div>
                 </div>
 
@@ -5788,15 +6187,18 @@ export default function AdminDashboard() {
                         })}
                       </div>
                     )}
+                  </div>
 
-                    <div className="pt-4 border-t border-gray-200 flex justify-end">
-                      <button
-                        onClick={() => { setSelectedView('admin-activity-logs'); setSettingsTab('system'); }}
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-pink-600 text-white rounded-lg text-sm font-medium hover:bg-pink-700 transition-colors duration-150"
-                      >
-                        View All
-                      </button>
-                    </div>
+                  <div className="pt-4 border-t border-gray-200 flex justify-end">
+                    <button
+                      onClick={() => { 
+                        setSelectedView('security'); 
+                        setSecurityTab(alertsPreviewTab === 'booking' ? 'booking' : 'users'); 
+                      }}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-pink-600 text-white rounded-lg text-sm font-medium hover:bg-pink-700 transition-colors duration-150"
+                    >
+                      View All
+                    </button>
                   </div>
                 </div>
 
@@ -6135,15 +6537,6 @@ export default function AdminDashboard() {
                         </div>
                       );
                     })}
-
-                    <div className="pt-4 border-t border-gray-200 flex justify-end">
-                      <button
-                        onClick={() => { setSelectedView('admin-activity-logs'); setSettingsTab('system'); }}
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-pink-600 text-white rounded-lg text-sm hover:bg-pink-700 transition-colors duration-150"
-                      >
-                        View All
-                      </button>
-                    </div>
                   </div>
                 ) : (
                   <div className="text-center py-6">
@@ -6153,6 +6546,15 @@ export default function AdminDashboard() {
                     <p className="text-gray-600 text-xs">No recent system activity</p>
                   </div>
                 )}
+
+                <div className="pt-4 border-t border-gray-200 flex justify-end">
+                  <button
+                    onClick={() => { setSelectedView('admin-activity-logs'); setSettingsTab('system'); }}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-pink-600 text-white rounded-lg text-sm font-medium hover:bg-pink-700 transition-colors duration-150"
+                  >
+                    View All
+                  </button>
+                </div>
               </div>
             </div>
             )}
@@ -6474,6 +6876,49 @@ export default function AdminDashboard() {
         onConfirm={handleUnavailableConfirm}
         alreadyUnavailableDates={facilityForUnavailable && unavailableDatesByFacility[facilityForUnavailable.id] ? unavailableDatesByFacility[facilityForUnavailable.id] : []}
       />
+
+      <MakeAvailableModal
+        isOpen={isMakeAvailableModalOpen}
+        onClose={() => { setIsMakeAvailableModalOpen(false); setFacilityForAvailable(null); }}
+        facility={facilityForAvailable}
+        alreadyUnavailableDates={facilityForAvailable && unavailableDatesByFacility[facilityForAvailable.id] ? unavailableDatesByFacility[facilityForAvailable.id] : []}
+        onConfirm={({ clearAll, startDate, endDate }) => {
+          if (!facilityForAvailable) return;
+          const facilityId = facilityForAvailable.id;
+          if (clearAll) {
+            toggleFacilityAvailabilityMutation.mutate({ facilityId, available: true });
+          } else if (startDate && endDate) {
+            toggleFacilityAvailabilityMutation.mutate({ facilityId, available: true, startDate, endDate });
+            // Optimistically remove the selected range from local state for snappier UX
+            setUnavailableDatesByFacility(prev => {
+              const prevDates = new Set(prev[facilityId] || []);
+              const range: string[] = getDateRange(startDate, endDate);
+              for (const d of range) prevDates.delete(d);
+              return { ...prev, [facilityId]: Array.from(prevDates) };
+            });
+          }
+        }}
+      />
     </div>
+  );
+}
+
+export default function AdminDashboard() {
+  return (
+    <Suspense fallback={
+      <div className="p-6 space-y-6">
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+          <SkeletonStatsCard />
+          <SkeletonStatsCard />
+          <SkeletonStatsCard />
+          <SkeletonStatsCard />
+        </div>
+        <div className="bg-white rounded-lg shadow p-6">
+          <SkeletonTableRows rows={8} />
+        </div>
+      </div>
+    }>
+      <AdminDashboardInner />
+    </Suspense>
   );
 }

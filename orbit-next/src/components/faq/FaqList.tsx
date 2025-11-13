@@ -8,6 +8,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { SkeletonListItem } from "@/components/ui/skeleton-presets";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Search, ThumbsDown, ThumbsUp } from "lucide-react";
@@ -63,9 +64,12 @@ export default function FaqList() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-gray-600">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        Loading FAQs…
+      <div className="space-y-3">
+        <SkeletonListItem />
+        <SkeletonListItem />
+        <SkeletonListItem />
+        <SkeletonListItem />
+        <SkeletonListItem />
       </div>
     );
   }

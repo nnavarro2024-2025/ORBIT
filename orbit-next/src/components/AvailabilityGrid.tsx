@@ -5,6 +5,7 @@ import { apiRequest } from '@/lib/queryClient';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { CalendarDays, CheckCircle2, Filter, Slash, Undo2 } from 'lucide-react';
+import { Skeleton } from '@/components/ui/skeleton';
 
 interface SlotItem {
   start: string;
@@ -73,9 +74,19 @@ export default function AvailabilityGrid({ date, onSelectRange, unavailableDates
   });
 
   if (isLoading) return (
-    <div className="flex items-center gap-2 py-6 text-sm text-gray-600">
-      <CalendarDays className="h-4 w-4 animate-spin" />
-      Loading availability…
+    <div className="space-y-4 py-6">
+      <div className="grid grid-cols-1 gap-4">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="space-y-2">
+            <Skeleton className="h-6 w-48" />
+            <div className="grid grid-cols-6 gap-2">
+              {Array.from({ length: 6 }).map((_, j) => (
+                <Skeleton key={j} className="h-16 w-full" />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
   if (error) return (
@@ -357,7 +368,9 @@ export default function AvailabilityGrid({ date, onSelectRange, unavailableDates
                         }
                         const slotDateStr = `${slotTime.getFullYear()}-${String(slotTime.getMonth() + 1).padStart(2, '0')}-${String(slotTime.getDate()).padStart(2, '0')}`;
                         const isFacilityUnavailable = unavailableDates.includes(slotDateStr);
-                        if (slotStatus === 'available' && isFacilityUnavailable) {
+                        // When a date is blocked by system settings or bookings,
+                        // force all slots to render as unavailable (red), including scheduled ones.
+                        if (isFacilityUnavailable) {
                           slotStatus = 'unavailable';
                         }
                         const slotMatchesView =
@@ -396,7 +409,7 @@ export default function AvailabilityGrid({ date, onSelectRange, unavailableDates
                         }
                         const color = slotStatus === 'scheduled' ? 'bg-amber-300/90 text-amber-900 hover:bg-amber-300' : 'bg-red-400/90 text-white hover:bg-red-500';
                         const slotLabel = slotStatus === 'scheduled'
-                          ? format(slotTime, 'hh:mm a')
+                          ? (isFacilityUnavailable ? 'Unavailable' : format(slotTime, 'hh:mm a'))
                           : (isFacilityUnavailable ? 'Unavailable' : format(slotTime, 'hh:mm a'));
                         return (
                           <div

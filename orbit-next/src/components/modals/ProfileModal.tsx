@@ -4,6 +4,7 @@ import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Settings, User as UserIcon, ArrowLeft } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   AlertDialog,
   AlertDialogTrigger,
@@ -218,7 +219,29 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
               )}
             </>
           ) : (
-            <p>Loading user data...</p>
+            <div className="space-y-6 py-4">
+              <div className="flex flex-col items-center space-y-4">
+                <Skeleton className="h-24 w-24 rounded-full" />
+                <div className="space-y-2 w-full">
+                  <Skeleton className="h-4 w-32 mx-auto" />
+                  <Skeleton className="h-3 w-48 mx-auto" />
+                </div>
+              </div>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Skeleton className="h-4 w-20" />
+                  <Skeleton className="h-10 w-full rounded-lg" />
+                </div>
+                <div className="space-y-2">
+                  <Skeleton className="h-4 w-20" />
+                  <Skeleton className="h-10 w-full rounded-lg" />
+                </div>
+                <div className="space-y-2">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-10 w-full rounded-lg" />
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </SheetContent>

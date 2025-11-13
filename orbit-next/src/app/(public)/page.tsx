@@ -68,16 +68,13 @@ export default function LandingPage() {
               />
             </div>
 
-            <div className="text-center">
+            <div className="mt-8 flex justify-center">
               <button
                 onClick={handleGetStarted}
-                className="w-full sm:w-auto max-w-xs sm:max-w-md mx-auto bg-gradient-to-r from-pink-600 to-rose-700 hover:from-pink-700 hover:to-rose-800 text-white font-bold text-base sm:text-lg px-4 py-2 sm:px-10 sm:py-3 rounded-lg transition-all duration-150 transform hover:scale-105 shadow-lg hover:shadow-pink-500/20"
+                className="bg-gradient-to-r from-pink-600 to-rose-700 hover:from-pink-700 hover:to-rose-800 text-white font-bold text-lg px-10 py-3 rounded-lg transition-all duration-150 transform hover:scale-105 shadow-lg hover:shadow-pink-500/20"
               >
                 Get Started
               </button>
-              <p className="text-sm sm:text-base text-gray-600 mt-3 sm:mt-4 font-medium">
-                Sign in with your UIC account to access the system
-              </p>
             </div>
           </div>
         </div>

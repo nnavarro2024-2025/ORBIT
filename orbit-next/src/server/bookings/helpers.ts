@@ -362,15 +362,28 @@ export async function sendBookingNotifications({
 
       const bookingTime = startTime.toLocaleString();
       const facilityName = facilityInfo?.name || `Facility ${booking.facilityId}`;
-      let message = `${userEmail} submitted an equipment request for ${facilityName} on ${bookingTime}.`;
-      message += ` [Equipment: ${JSON.stringify(equipment)}]`;
+      
+      // Create admin notification (global - no userId)
+      const adminMessage = `${userEmail} submitted an equipment request for ${facilityName} on ${bookingTime}. [Equipment: ${JSON.stringify(equipment)}]`;
+      await storage.createSystemAlert({
+        id: randomUUID(),
+        type: "booking",
+        severity: "low",
+        title: "Equipment or Needs Request",
+        message: adminMessage,
+        userId: null,
+        isRead: false,
+        createdAt: new Date(),
+      });
 
+      // Create user notification (user-specific)
+      const userMessage = `You submitted an equipment request for ${facilityName} on ${bookingTime}. Equipment at ${new Date().toLocaleString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }).replace(' ', ' ')} [Equipment: ${JSON.stringify(equipment)}]`;
       await storage.createSystemAlert({
         id: randomUUID(),
         type: "user",
         severity: "low",
-        title: "Equipment Needs Submitted",
-        message,
+        title: "Equipment or Needs Request",
+        message: userMessage,
         userId,
         isRead: false,
         createdAt: new Date(),

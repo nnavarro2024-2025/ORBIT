@@ -15,13 +15,32 @@ export async function GET(request: NextRequest) {
   try {
     const alerts = await storage.getSystemAlerts();
     const userId = authResult.user.id;
+    const userEmail = authResult.user.email?.toLowerCase() || '';
+
+    console.log(`[notifications] Filtering alerts for user ${userId} (${userEmail})`);
+    console.log(`[notifications] Total alerts: ${alerts?.length || 0}`);
 
     const filtered = (alerts || []).filter((alert) => {
       if (!alert) return false;
-      if (alert.userId == null) return true;
-      return String(alert.userId) === String(userId);
+      
+      // Users should ONLY see alerts explicitly targeted to them (not admin/global alerts)
+      // Admin alerts like "Booking Created" have userId=null and are for admins only
+      // User alerts like "Booking Scheduled" have userId set and are for specific users
+      if (String(alert.userId) === String(userId)) {
+        // Hide read equipment notifications (old ones that were replaced by updated colored ones)
+        if (alert.isRead && alert.title && (alert.title.includes('Equipment') || alert.title.includes('Needs'))) {
+          console.log(`[notifications] ✗ Skipping read equipment alert: ${alert.id} - "${alert.title}"`);
+          return false;
+        }
+        
+        console.log(`[notifications] ✓ Matched user alert: ${alert.id} - "${alert.title}"`);
+        return true;
+      }
+      
+      return false;
     });
 
+    console.log(`[notifications] Filtered down to ${filtered.length} alerts for user`);
     return NextResponse.json(filtered, { status: 200 });
   } catch (error) {
     console.error("[notifications] Failed to fetch notifications:", error);

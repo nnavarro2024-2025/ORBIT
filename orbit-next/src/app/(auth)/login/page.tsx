@@ -1,16 +1,17 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { Check, Mail } from "lucide-react";
+import { useState, useEffect, useRef, Suspense } from "react";
+import { Check, Mail, Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/useAuth";
 import { useLegacyLocation } from "@/lib/navigation";
+import { Skeleton } from "@/components/ui/skeleton";
 // import { loginToUic } from "@/lib/uicApi";
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
-export default function Login() {
+function LoginInner() {
   const { isAuthenticated, user } = useAuth();
   const [, setLocation] = useLegacyLocation();
 
@@ -18,6 +19,7 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [redirecting, setRedirecting] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [domainBlockMsg, setDomainBlockMsg] = useState("");
   const [showDomainBlockModal, setShowDomainBlockModal] = useState(false);
@@ -83,6 +85,7 @@ export default function Login() {
 
     // Redirect authenticated users to the appropriate dashboard.
     if (isAuthenticated && user) {
+      setRedirecting(true);
       try {
         if (user.role === "admin") {
           setLocation("/admin");
@@ -92,6 +95,7 @@ export default function Login() {
       } catch (e) {
         // If anything goes wrong, do not redirect and let the user proceed manually.
         console.error("Redirect after login failed:", e);
+        setRedirecting(false);
       }
     }
   }, [isAuthenticated, user, setLocation]);
@@ -147,6 +151,41 @@ export default function Login() {
 
   return (
     <>
+      {redirecting && (
+        <div className="fixed inset-0 bg-white z-50 flex items-center justify-center">
+          <div className="w-full max-w-md p-6">
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200 space-y-6">
+              <div className="text-center space-y-4">
+                <Skeleton className="h-24 w-24 mx-auto rounded-lg" />
+                <Skeleton className="h-4 w-3/4 mx-auto" />
+              </div>
+              
+              <div className="space-y-3">
+                <Skeleton className="h-12 w-full rounded-lg" />
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 border-t border-gray-200" />
+                  <Skeleton className="h-3 w-32" />
+                  <div className="flex-1 border-t border-gray-200" />
+                </div>
+                <div className="space-y-3">
+                  <Skeleton className="h-4 w-20" />
+                  <Skeleton className="h-10 w-full rounded-lg" />
+                </div>
+                <div className="space-y-3">
+                  <Skeleton className="h-4 w-24" />
+                  <Skeleton className="h-10 w-full rounded-lg" />
+                </div>
+                <Skeleton className="h-10 w-full rounded-lg" />
+              </div>
+              
+              <div className="flex items-center justify-center gap-2 pt-4">
+                <Loader2 className="h-5 w-5 text-pink-600 animate-spin" />
+                <span className="text-sm text-gray-600 font-medium">Redirecting to your dashboard...</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
         {/* Background image */}
         <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: 'url(/images/facility-overview.jpg)' }} />
@@ -172,10 +211,19 @@ export default function Login() {
                 type="button"
                 onClick={signInWithGoogle}
                 className="w-full flex items-center justify-center gap-2 bg-white border border-gray-300 text-pink-600 font-medium text-sm py-2.5 px-4 rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed mb-2"
-                disabled={loading}
+                disabled={loading || redirecting}
               >
-                <Mail className="h-5 w-5 text-pink-600" />
-                {loading ? "Signing in..." : "Sign in with University Email"}
+                {loading || redirecting ? (
+                  <>
+                    <Loader2 className="h-5 w-5 text-pink-600 animate-spin" />
+                    {redirecting ? "Redirecting..." : "Signing in..."}
+                  </>
+                ) : (
+                  <>
+                    <Mail className="h-5 w-5 text-pink-600" />
+                    Sign in with University Email
+                  </>
+                )}
               </button>
 
               <div className="flex items-center my-2">
@@ -200,6 +248,7 @@ export default function Login() {
                     className="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-lg text-gray-900 placeholder-gray-400 focus:border-pink-600 focus:outline-none transition-all duration-200 shadow-sm"
                     placeholder="Enter your email"
                     required
+                    disabled={loading || redirecting}
                   />
                 </div>
 
@@ -212,14 +261,22 @@ export default function Login() {
                     className="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-lg text-gray-900 placeholder-gray-400 focus:border-pink-600 focus:outline-none transition-all duration-200 shadow-sm"
                     placeholder="Enter your password"
                     required
+                    disabled={loading || redirecting}
                   />
                 </div>
                 <button
                   type="submit"
-                  className="w-full bg-pink-600 hover:bg-pink-700 text-white font-medium text-sm py-2 px-4 rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
-                  disabled={loading}
+                  className="w-full bg-pink-600 hover:bg-pink-700 text-white font-medium text-sm py-2 px-4 rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md flex items-center justify-center gap-2"
+                  disabled={loading || redirecting}
                 >
-                  {loading ? "Signing in..." : "Login"}
+                  {loading || redirecting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      {redirecting ? "Redirecting..." : "Signing in..."}
+                    </>
+                  ) : (
+                    "Login"
+                  )}
                 </button>
               </form>
 
@@ -373,5 +430,42 @@ export default function Login() {
 
 
     </>
+  );
+}
+
+export default function Login() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center p-4 bg-gray-50">
+        <div className="w-full max-w-md">
+          <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200 space-y-6">
+            <div className="text-center space-y-4">
+              <Skeleton className="h-24 w-24 mx-auto rounded-lg" />
+              <Skeleton className="h-4 w-3/4 mx-auto" />
+            </div>
+            
+            <div className="space-y-3">
+              <Skeleton className="h-12 w-full rounded-lg" />
+              <div className="flex items-center gap-3">
+                <div className="flex-1 border-t border-gray-200" />
+                <Skeleton className="h-3 w-32" />
+                <div className="flex-1 border-t border-gray-200" />
+              </div>
+              <div className="space-y-3">
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-10 w-full rounded-lg" />
+              </div>
+              <div className="space-y-3">
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-10 w-full rounded-lg" />
+              </div>
+              <Skeleton className="h-10 w-full rounded-lg" />
+            </div>
+          </div>
+        </div>
+      </div>
+    }>
+      <LoginInner />
+    </Suspense>
   );
 }

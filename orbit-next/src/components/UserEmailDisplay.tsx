@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { User } from '@shared/schema';
+import { Skeleton } from '@/components/ui/skeleton';
 
 interface UserEmailDisplayProps {
   userId: string;
@@ -17,7 +18,7 @@ export default function UserEmailDisplay({ userId }: UserEmailDisplayProps) {
   });
 
   if (isLoading) {
-    return <span>Loading email...</span>;
+    return <Skeleton className="h-4 w-40 inline-block" />;
   }
 
   if (isError || !user) {

@@ -82,6 +82,50 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(facilityEligibility.error.body, { status: facilityEligibility.error.status });
     }
 
+    // Check facility-specific duration and daily booking limits
+    const facilityName = facility.name.toLowerCase();
+    const isCollabRoom = facilityName.includes('collaborative learning room 1') || facilityName.includes('collaborative learning room 2');
+    
+    if (isCollabRoom) {
+      // Max 2 hours for collaborative learning rooms
+      const durationMs = parsed.endTime.getTime() - parsed.startTime.getTime();
+      const durationHours = durationMs / (1000 * 60 * 60);
+      
+      if (durationHours > 2) {
+        return NextResponse.json(
+          { message: 'Collaborative Learning Rooms can only be booked for a maximum of 2 hours.' },
+          { status: 400 }
+        );
+      }
+      
+      // Max 2 bookings per day for collaborative learning rooms
+      // TEMPORARILY DISABLED FOR TESTING
+      /*
+      const startOfDay = new Date(parsed.startTime);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(parsed.startTime);
+      endOfDay.setHours(23, 59, 59, 999);
+      
+      const allUserBookings = await storage.getFacilityBookingsByUser(authResult.user.id);
+      const existingBookingsToday = allUserBookings.filter((b: any) => {
+        const bookingStart = new Date(b.startTime);
+        return (
+          b.facilityId === parsed.facilityId &&
+          (b.status === 'approved' || b.status === 'pending') &&
+          bookingStart >= startOfDay &&
+          bookingStart <= endOfDay
+        );
+      });
+      
+      if (existingBookingsToday.length >= 2) {
+        return NextResponse.json(
+          { message: 'You can only book this Collaborative Learning Room twice per day. You have reached your daily limit.' },
+          { status: 400 }
+        );
+      }
+      */
+    }
+
     const conflictResult = await enforceUserBookingConflicts(
       authResult.user.id,
       parsed.startTime,

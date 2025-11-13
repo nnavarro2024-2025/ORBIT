@@ -72,7 +72,12 @@ export default function Sidebar({ items, activeItem, onItemClick }: SidebarProps
                   ) : (
                     item.icon && <item.icon className="h-4 w-4 sm:h-5 sm:w-5 mr-2 sm:mr-3 flex-shrink-0" />
                   )}
-                  <span className="truncate">{item.isLoading ? "Loading..." : item.label}</span>
+                  <span
+                    className="whitespace-normal break-words leading-snug overflow-hidden"
+                    style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as any }}
+                  >
+                    {item.isLoading ? "Loading..." : item.label}
+                  </span>
                 </button>
               </li>
             );

@@ -56,7 +56,7 @@ import {
   BOOKING_MIN_DURATION_MINUTES,
   BOOKING_MIN_DURATION_MS,
 } from "@shared/bookingRules";
-import ValidationSummary, {
+import {
   type ConflictEntry,
   type WarningMessage,
 } from "./ValidationSummary";
@@ -1204,6 +1204,27 @@ export default function BookingModal({
     selectedFacility,
   ]);
 
+  // Helper: build detailed conflict description from server payload
+  const buildConflictDescription = (payload: any, baseMessage: string) => {
+    try {
+      if (!payload) return baseMessage;
+      const facilityName = payload?.facility?.name || 'Selected facility';
+      const conflicts = Array.isArray(payload?.conflictingBookings) ? payload.conflictingBookings : [];
+      const formatted = conflicts.map((c: any) => {
+        try {
+          const s = new Date(c.startTime);
+            const e = new Date(c.endTime);
+            const day = s.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+            const st = s.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const et = e.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            return `${day} ${st}-${et}`;
+        } catch { return ''; }
+      }).filter(Boolean);
+      if (formatted.length === 0) return `${baseMessage} (${facilityName}).`;
+      return `${baseMessage} (${facilityName}). Conflicts: ${formatted.join('; ')}`;
+    } catch { return baseMessage; }
+  };
+
   const createBookingMutation = useMutation({
     mutationFn: async (data: BookingFormData) => {
       setIsSubmitting(true);
@@ -1273,23 +1294,29 @@ export default function BookingModal({
         // Surface user-active/overlap errors inline so they appear under the form.
         const code = String(error.payload.error || '').trim();
         if (code === 'UserHasOverlappingBooking' || code === 'UserHasActiveBooking') {
-          const msg = error.payload.message || 'A conflicting booking exists. Please cancel it first or choose a different time.';
-          setFormValidationWarnings([{ title: code === 'UserHasActiveBooking' ? 'Existing Booking Detected' : 'Conflicting Booking Detected', description: msg }]);
+          const baseMsg = error.payload.message || 'You already have a pending or approved booking that overlaps this time.';
+          const detailed = buildConflictDescription(error.payload, baseMsg);
+          // Clear existing warnings and show only the server conflict with action button
+          setFormValidationWarnings([{ 
+            title: 'Conflicting Booking Found', 
+            description: detailed + ' You may cancel existing conflicting bookings and proceed below.' 
+          }]);
           setServerConflictPayload(error.payload);
-          setShowServerConflictDialog(true);
           return;
         }
 
         // Also handle facility-level conflicts returned from the storage layer (ConflictError -> 409 payload)
         if (error.payload && (error.payload.facility || error.payload.conflictingBookings)) {
-          const msg = error.payload.message || 'This time slot for the selected facility is already booked. Please choose a different time.';
-          setFormValidationWarnings([{ title: 'Time Slot Unavailable', description: msg }]);
-          // Keep the payload so the dialog can show more details if available
+          const baseMsg = error.payload.message || 'This time slot is already booked by another user.';
+          const detailed = buildConflictDescription(error.payload, baseMsg);
+          // Clear existing warnings and show only facility conflict
+          setFormValidationWarnings([{ title: 'Facility Conflict', description: detailed + ' Please pick another time.' }]);
           setServerConflictPayload(error.payload);
-          setShowServerConflictDialog(true);
           return;
         }
       }
+      
+      // Handle daily booking limit error for collaborative rooms - TEMPORARILY DISABLED FOR TESTING
       
       // Handle specific overlapping booking error
       if (error.message && error.message.includes("You already have a booking during this time")) {
@@ -1359,8 +1386,7 @@ export default function BookingModal({
     },
   });
 
-  // Server conflict dialog
-  const [showServerConflictDialog, setShowServerConflictDialog] = useState(false);
+  // Server conflict payload (rendered inline instead of dialog)
   const [serverConflictPayload, setServerConflictPayload] = useState<any | null>(null);
 
   const handleForceCancelAndProceed = async () => {
@@ -1389,7 +1415,6 @@ export default function BookingModal({
       await queryClient.invalidateQueries({ queryKey: ['/api/bookings'] });
       toast({ title: 'Booking Scheduled', description: 'Existing conflicting bookings were cancelled and your booking was scheduled.', variant: 'default' });
       form.reset();
-      setShowServerConflictDialog(false);
       setServerConflictPayload(null);
       setIsSubmitting(false);
       onClose();
@@ -1399,20 +1424,14 @@ export default function BookingModal({
     }
   };
 
-  const onSubmit = (data: BookingFormData) => {
-    // Prevent rapid duplicate submissions
-    const now = Date.now();
-    if (isSubmitting || (now - lastSubmissionTime < SUBMISSION_COOLDOWN)) {
-      toast({
-        title: "Please Wait",
-        description: "Please wait a moment before submitting another booking.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    // Collect all validation errors
+  // Real-time validation function that runs as form fields change
+  const validateFormRealtime = useCallback((data: Partial<BookingFormData>) => {
     const validationErrors: Array<{title: string, description: string}> = [];
+
+    // Only validate if we have the necessary data
+    if (!data.startTime || !data.endTime || !data.facilityId) {
+      return validationErrors;
+    }
 
     // Validate start time is not in the past
     const currentTime = new Date();
@@ -1423,28 +1442,24 @@ export default function BookingModal({
       });
     }
 
-    // NOTE: Minimum lead-time validation removed from client to avoid duplicate
-    // enforcement and improve UX; server-side validation is authoritative and
-    // will return structured errors if any lead-time policy is required.
-
     // Validate facility exists
-    const facility = facilities.find(f => f.id === parseInt(data.facilityId));
+    if (typeof data.facilityId !== 'string') {
+      return validationErrors; // facilityId not a string; abort further validation
+    }
+    const fid = data.facilityId;
+    const facility = facilities.find(f => f.id === parseInt(fid, 10));
     if (!facility) {
       validationErrors.push({
-        title: "Error",
-        description: "Selected facility not found.",
+        title: "Facility Not Found",
+        description: "Please select a valid facility from the list.",
       });
-      } else {
-      // NOTE: Client-side 'Facility Booking Limit' validation removed so server-side
-      // can handle canonical conflict resolution. Users will still see server errors
-      // if a conflict exists; we avoid blocking submission here to allow auto-scheduling flows.
-      // Use actual facility capacity from database
+    } else {
+      // Validate capacity
       const maxCapacity = facility.capacity || 8;
-
-      if (data.participants > maxCapacity) {
+      if (data.participants && data.participants > maxCapacity) {
         validationErrors.push({
           title: "Capacity Exceeded",
-          description: `The selected room has a maximum capacity of ${maxCapacity} people. Please reduce the number of participants.`,
+          description: `The selected room has a maximum capacity of ${maxCapacity} people. Please reduce the number of participants to ${maxCapacity} or fewer.`,
         });
       }
     }
@@ -1453,7 +1468,7 @@ export default function BookingModal({
     if (data.endTime <= data.startTime) {
       validationErrors.push({
         title: "Invalid Time Selection",
-        description: "End time must be after start time.",
+        description: "Invalid time selection. The start time must be earlier than the end time.",
       });
     }
 
@@ -1463,7 +1478,7 @@ export default function BookingModal({
     if (sDate.getFullYear() !== eDate.getFullYear() || sDate.getMonth() !== eDate.getMonth() || sDate.getDate() !== eDate.getDate()) {
       validationErrors.push({
         title: "Single-Day Booking Required",
-        description: "Start and end must be on the same calendar day. Please split multi-day events into separate bookings.",
+        description: "Bookings must start and end on the same calendar day. Please split multi-day events into separate bookings.",
       });
     }
 
@@ -1477,21 +1492,120 @@ export default function BookingModal({
       if (!endTimeValid) timeIssues.push("end time");
       
       validationErrors.push({
-  title: "School Hours",
-  description: `Your ${timeIssues.join(" and ")} ${timeIssues.length > 1 ? "are" : "is"} outside school operating hours (${formatLibraryHours()}). Room access is only available during these hours.`,
+        title: "Outside School Hours",
+        description: `Your ${timeIssues.join(" and ")} ${timeIssues.length > 1 ? "are" : "is"} outside school operating hours (${formatLibraryHours()}). Room access is only available during these hours.`,
       });
     }
 
-    const maxDurationMs = 2 * 60 * 60 * 1000;
-    if (data.startTime && data.endTime) {
+    // Facility-specific duration validation
+    if (facility && data.startTime && data.endTime) {
       const durationMs = data.endTime.getTime() - data.startTime.getTime();
-      if (durationMs > maxDurationMs) {
+      const durationHours = durationMs / (1000 * 60 * 60);
+      const durationMinutes = durationMs / (1000 * 60);
+      const facilityName = facility.name.toLowerCase();
+      const isCollabRoom = facilityName.includes('collaborative learning room 1') || facilityName.includes('collaborative learning room 2');
+      
+      // Minimum duration check
+      if (durationMs < BOOKING_MIN_DURATION_MS) {
         validationErrors.push({
-          title: "Maximum Duration Exceeded",
-          description: "Bookings exceeding the maximum allowed duration are not permitted.",
+          title: "Booking Too Short",
+          description: `Bookings must be at least ${BOOKING_MIN_DURATION_MINUTES} minutes long. Your current booking is ${Math.floor(durationMinutes)} minutes.`,
         });
       }
+      
+      // Maximum duration check (facility-specific)
+      if (isCollabRoom && durationHours > 2) {
+        validationErrors.push({
+          title: "Duration Limit Exceeded",
+          description: `Collaborative Learning Rooms can only be booked for a maximum of 2 hours. Your current booking is ${durationHours.toFixed(1)} hours. Please reduce your booking duration.`,
+        });
+      } else if (!isCollabRoom && durationMs > BOOKING_MAX_DURATION_MS) {
+        validationErrors.push({
+          title: "Maximum Duration Exceeded",
+          description: `Bookings cannot exceed ${BOOKING_MAX_DURATION_MINUTES} minutes (${BOOKING_MAX_DURATION_MINUTES / 60} hours). Your current booking is ${Math.floor(durationMinutes)} minutes. Please reduce your booking duration.`,
+        });
+      }
+      
+      // Check daily booking limit for collaborative learning rooms
+      // TEMPORARILY DISABLED FOR TESTING
+      /*
+      if (isCollabRoom && allBookings && user?.email) {
+        const startOfDay = new Date(data.startTime);
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(data.startTime);
+        endOfDay.setHours(23, 59, 59, 999);
+        
+        const currentEmail = String(user.email).toLowerCase();
+        const userBookingsToday = allBookings.filter((b: any) => {
+          const bookingStart = new Date(b.startTime);
+          const bookingEmail = String(b.userEmail || b.user?.email || '').toLowerCase();
+          return (
+            bookingEmail === currentEmail &&
+            b.facilityId === parseInt(fid, 10) &&
+            (b.status === 'approved' || b.status === 'pending') &&
+            bookingStart >= startOfDay &&
+            bookingStart <= endOfDay
+          );
+        });
+        
+        if (userBookingsToday.length >= 2) {
+          validationErrors.push({
+            title: "Daily Booking Limit Reached",
+            description: `You can only book this Collaborative Learning Room twice per day. You already have ${userBookingsToday.length} booking(s) for today. Please choose a different room or date.`,
+          });
+        }
+      }
+      */
     }
+
+    // Validate purpose field
+    if (data.purpose !== undefined && data.purpose.trim().length === 0) {
+      validationErrors.push({
+        title: "Purpose Required",
+        description: "Please provide a purpose for your booking. This helps us understand how facilities are being used.",
+      });
+    }
+
+    return validationErrors;
+  }, [facilities, allBookings, user?.email]);
+
+  // Watch form fields and validate in real-time
+  useEffect(() => {
+    const subscription = form.watch((value) => {
+      const data = {
+        facilityId: value.facilityId,
+        startTime: value.startTime,
+        endTime: value.endTime,
+        participants: value.participants,
+        purpose: value.purpose,
+      };
+      
+      // Only run validation if we have key fields filled
+      if (data.facilityId && data.startTime && data.endTime) {
+        const errors = validateFormRealtime(data as Partial<BookingFormData>);
+        setFormValidationWarnings(errors);
+      } else {
+        // Clear errors if key fields are empty (user is still filling form)
+        setFormValidationWarnings([]);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [form, validateFormRealtime]);
+
+  const onSubmit = (data: BookingFormData) => {
+    // Prevent rapid duplicate submissions
+    const now = Date.now();
+    if (isSubmitting || (now - lastSubmissionTime < SUBMISSION_COOLDOWN)) {
+      toast({
+        title: "Please Wait",
+        description: "Please wait a moment before submitting another booking.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Re-validate on submit to ensure all validations pass
+    const validationErrors = validateFormRealtime(data);
 
     // Show validation errors inline in the modal
     if (validationErrors.length > 0) {
@@ -2148,24 +2262,7 @@ export default function BookingModal({
               />
             </div>
 
-            {/* Time Conflict Warning */}
-            <ValidationSummary
-              id="booking-form-errors"
-              conflicts={
-                (() => {
-                  const conflicts = checkTimeConflict() as ConflictEntry[] | null;
-                  if (holdConflicts && holdConflicts.length > 0) {
-                    return [...(conflicts ?? []), ...holdConflicts];
-                  }
-                  return conflicts;
-                })()
-              }
-              warnings={
-                lockError
-                  ? [...formValidationWarnings, { title: "Slot hold", description: lockError }]
-                  : formValidationWarnings
-              }
-            />
+            {/* Removed top ValidationSummary duplicate */}
 
             {/* Purpose and Course/Year/Dept fields */}
 
@@ -2385,32 +2482,7 @@ export default function BookingModal({
                   </div>
                 </div>
 
-                {/* Right-aligned helper: shows default message or an error indicator when issues exist */}
-                <div className="w-full sm:w-1/2 flex justify-start sm:justify-end">
-                  <div className="w-full max-w-md text-left sm:text-right text-sm">
-                    {(() => {
-                      const durationWarning = !isDurationValid(form.watch('startTime'), form.watch('endTime'))
-                        ? [{ title: 'Bookings must be at least 30 minutes long', description: 'Please adjust the times before saving.' }]
-                        : [];
-                      const warnings = durationWarning.concat(formValidationWarnings || []);
-                      const serverError = createBookingMutation?.error ? String((createBookingMutation.error as any)?.message || createBookingMutation.error) : null;
-
-                      if (warnings.length || serverError) {
-                        return (
-                          <div className="inline-flex items-start gap-2 text-left sm:text-right">
-                            <div className="text-red-600 mt-0.5">⚠️</div>
-                            <div className="text-left sm:text-right">
-                              <div className="font-medium text-red-700 text-xs sm:text-sm">Errors detected</div>
-                              <div className="text-red-600 text-xs">See details below</div>
-                            </div>
-                          </div>
-                        );
-                      }
-
-                      return <div className="text-gray-500 text-xs sm:text-sm break-words">Validation errors will appear below after submission.</div>;
-                    })()}
-                  </div>
-                </div>
+                {/* Validation panel moved below to avoid duplicate */}
               </div>
               </DialogFooter>
 
@@ -2511,54 +2583,43 @@ export default function BookingModal({
               </AlertDialog>
 
               {/* Server-side conflict dialog: show when server reports overlapping bookings for this user */}
-              <AlertDialog open={showServerConflictDialog} onOpenChange={setShowServerConflictDialog}>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Conflicting Booking Found</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      The server reports you already have a pending or approved booking that overlaps this time.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <div className="p-3">
-                    {serverConflictPayload?.conflictingBookings && serverConflictPayload.conflictingBookings.length > 0 ? (
-                      <div className="space-y-2 text-sm">
-                        <div className="font-medium">Conflicting bookings:</div>
-                        {serverConflictPayload.conflictingBookings.map((c: any) => (
-                          <div key={c.id} className="text-xs">
-                            Facility {c.facilityId} — {new Date(c.startTime).toLocaleString()} to {new Date(c.endTime).toLocaleTimeString()}
-                            {' '}• Status: {c.status}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-sm">A conflicting booking exists. You may cancel it and proceed.</div>
-                    )}
-                  </div>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel onClick={() => { setShowServerConflictDialog(false); setServerConflictPayload(null); }}>Close</AlertDialogCancel>
-                    <AlertDialogAction onClick={handleForceCancelAndProceed}>Cancel existing bookings and proceed</AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
+              {/* Server conflict dialog removed; conflicts now shown inline below */}
 
             {/* Inline validation warnings (replaces toasts for form validation) */}
             {(() => {
               const durationWarning = !isDurationValid(form.watch('startTime'), form.watch('endTime'))
-            ? [{ title: 'Bookings must be at least 30 minutes long', description: 'Please adjust the times before saving.' }]
-            : [];
-          const warnings = durationWarning.concat(formValidationWarnings || []);
+                ? [{ title: 'Bookings must be at least 30 minutes long', description: 'Please adjust the times before saving.' }]
+                : [];
+              
+              // If serverConflictPayload exists, filter out any client-side conflict warnings to avoid duplicates
+              const clientWarnings = serverConflictPayload 
+                ? (formValidationWarnings || []).filter(w => w.title !== 'Conflicting Booking Found' && w.title !== 'Facility Conflict')
+                : (formValidationWarnings || []);
+              
+              const warnings = durationWarning.concat(clientWarnings);
+              
+              // If serverConflictPayload exists, append a structured conflict warning with action buttons
+              if (serverConflictPayload) {
+                const conflictBookings = Array.isArray(serverConflictPayload.conflictingBookings) ? serverConflictPayload.conflictingBookings : [];
+                const facilityName = serverConflictPayload?.facility?.name || 'Selected facility';
+                const baseMsg = serverConflictPayload?.message || 'A conflicting booking exists.';
+                let details = '';
+                if (conflictBookings.length > 0) {
+                  details = conflictBookings.map((c: any) => `${new Date(c.startTime).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})} - ${new Date(c.endTime).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})} (${c.status})`).join('; ');
+                }
+                warnings.push({
+                  title: 'Conflicting Booking Found',
+                  description: `${baseMsg}${details ? ' Conflicts: ' + details : ''}`,
+                });
+              }
               if (warnings.length === 0) return null;
-
               return (
                 <div id="booking-form-errors" className="mt-3 text-sm rounded-b-lg px-4 py-3 bg-white border-t border-gray-200">
                   {warnings.map((w, idx) => (
                     <div key={idx} className="mb-2 flex items-start gap-3">
-                      {/* larger yellow warning icon to match design */}
                       <div className="mt-0.5 text-yellow-600 text-xl">⚠️</div>
                       <div>
-                        {/* Bold, red heading like the screenshot */}
                         <div className="font-semibold text-red-700 text-sm">{w.title}</div>
-                        {/* Supporting text in slightly lighter red and smaller size */}
                         <div className="text-red-600 text-sm mt-1">{w.description}</div>
                       </div>
                     </div>

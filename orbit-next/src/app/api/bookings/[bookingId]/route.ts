@@ -86,6 +86,54 @@ export async function PUT(
       return NextResponse.json({ message: "Invalid facility id." }, { status: 400 });
     }
 
+    // Check facility-specific duration and daily booking limits
+    const facility = await storage.getFacility(parsedFacilityId);
+    if (facility) {
+      const facilityName = facility.name.toLowerCase();
+      const isCollabRoom = facilityName.includes('collaborative learning room 1') || facilityName.includes('collaborative learning room 2');
+      
+      if (isCollabRoom && !isAdmin) {
+        // Max 2 hours for collaborative learning rooms
+        const durationMs = parsedEndTime.getTime() - parsedStartTime.getTime();
+        const durationHours = durationMs / (1000 * 60 * 60);
+        
+        if (durationHours > 2) {
+          return NextResponse.json(
+            { message: 'Collaborative Learning Rooms can only be booked for a maximum of 2 hours.' },
+            { status: 400 }
+          );
+        }
+        
+        // Max 2 bookings per day for collaborative learning rooms
+        // TEMPORARILY DISABLED FOR TESTING
+        /*
+        const startOfDay = new Date(parsedStartTime);
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(parsedStartTime);
+        endOfDay.setHours(23, 59, 59, 999);
+        
+        const allUserBookings = await storage.getFacilityBookingsByUser(bookingOwnerId);
+        const existingBookingsToday = allUserBookings.filter((b: any) => {
+          const bookingStart = new Date(b.startTime);
+          return (
+            b.facilityId === parsedFacilityId &&
+            (b.status === 'approved' || b.status === 'pending') &&
+            b.id !== bookingId &&
+            bookingStart >= startOfDay &&
+            bookingStart <= endOfDay
+          );
+        });
+        
+        if (existingBookingsToday.length >= 2) {
+          return NextResponse.json(
+            { message: 'You can only book this Collaborative Learning Room twice per day. You have reached your daily limit.' },
+            { status: 400 }
+          );
+        }
+        */
+      }
+    }
+
     if (!isAdmin) {
       const overlappingBookings = await storage.checkUserOverlappingBookings(
         bookingOwnerId,
@@ -210,6 +258,61 @@ export async function PUT(
     if (updatePayload.equipment) {
       try {
         await db.update(facilityBookings).set({ equipment: updatePayload.equipment as any }).where(eq(facilityBookings.id, bookingId));
+        
+        // Mark all old equipment-related notifications as read
+        try {
+          const alerts = await storage.getSystemAlerts();
+          const equipmentAlerts = alerts.filter((alert: any) => 
+            alert.userId === bookingOwnerId &&
+            alert.title &&
+            (alert.title.includes('Equipment') || alert.title.includes('Needs'))
+          );
+          
+          for (const alert of equipmentAlerts) {
+            await storage.updateSystemAlert(alert.id, { isRead: true } as any);
+          }
+        } catch (alertError) {
+          console.warn("[bookings] Failed to mark equipment alerts as read", alertError);
+        }
+
+        // Create a new notification showing the updated equipment status
+        try {
+          const admin = await storage.getUser(authResult.user.id).catch(() => null);
+          const user = await storage.getUser(bookingOwnerId).catch(() => null);
+          const facility = await storage.getFacility(parsedFacilityId).catch(() => null);
+          
+          const adminEmail = admin?.email || 'Admin';
+          const userEmail = user?.email || 'User';
+          const facilityName = facility?.name || `Facility ${parsedFacilityId}`;
+          
+          // Build status message with inline equipment status
+          const equipment = updatePayload.equipment as any;
+          let statusParts: string[] = [];
+          
+          if (equipment.items && typeof equipment.items === 'object') {
+            for (const [key, value] of Object.entries(equipment.items)) {
+              const label = key.replace(/_/g, ' ');
+              const status = String(value).toLowerCase();
+              statusParts.push(`${label}: ${status}`);
+            }
+          }
+          
+          const statusText = statusParts.join(' • ');
+          const userMessage = `${adminEmail} updated your equipment request for ${facilityName}. ${statusText}`;
+          
+          await storage.createSystemAlert({
+            id: randomUUID(),
+            type: "user",
+            severity: "low",
+            title: "Equipment or Needs Request",
+            message: userMessage,
+            userId: bookingOwnerId,
+            isRead: false,
+            createdAt: new Date(),
+          });
+        } catch (notifError) {
+          console.warn("[bookings] Failed to create equipment update notification", notifError);
+        }
       } catch (error) {
         console.warn("[bookings] Failed to persist equipment via db", error);
       }
@@ -222,7 +325,7 @@ export async function PUT(
         action: "Booking Updated",
         details: `Booking ${bookingId} for ${facility?.name || `Facility ${parsedFacilityId}`} updated to ${parsedStartTime.toLocaleString()} - ${parsedEndTime.toLocaleString()}`,
         userId: bookingOwnerId,
-        ipAddress: request.headers.get("x-forwarded-for") || request.ip || null,
+        ipAddress: request.headers.get("x-forwarded-for") || null,
         userAgent: request.headers.get("user-agent"),
         createdAt: new Date(),
       });

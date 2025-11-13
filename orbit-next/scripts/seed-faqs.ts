@@ -56,13 +56,13 @@ const samples: Array<{ category: string; question: string; answer: string; sortO
   {
     category: "Booking",
     question: "How far in advance can I submit a booking request?",
-    answer: "Booking requests must be placed at least 24 hours before your desired start time. Requests can be scheduled up to 30 days in advance depending on facility availability.",
+    answer: "Submit booking requests at least 30 minutes before your desired start time. You can request times up to 30 days in advance, depending on facility availability.",
     sortOrder: 20,
   },
   {
     category: "Policies",
     question: "What happens if I need to cancel my booking?",
-    answer: "Open the booking dashboard, locate your reservation, and choose Cancel Booking. Please cancel at least 2 hours before the start time so other students can use the facility.",
+    answer: "Open the booking dashboard, locate your reservation, and choose Cancel Booking. Please cancel at least 30 minutes before the start time so others can use the facility.",
     sortOrder: 30,
   },
   {
@@ -70,6 +70,37 @@ const samples: Array<{ category: string; question: string; answer: string; sortO
     question: "Which equipment is included with study rooms?",
     answer: "Standard study rooms include whiteboards, HDMI-ready monitors, and power outlets. Additional equipment such as projectors or extension cords can be requested in the booking form.",
     sortOrder: 40,
+  },
+  // Guidelines represented as FAQ entries
+  {
+    category: "Policies",
+    question: "What are the normal booking hours?",
+    answer: "Bookings are generally available during school hours: 7:30 AM – 7:00 PM. Requests outside these hours are reviewed by staff and may be scheduled automatically; you'll be notified of any changes.",
+    sortOrder: 50,
+  },
+  {
+    category: "Policies",
+    question: "Who is eligible to book and are there room restrictions?",
+    answer: "All registered users can book standard study rooms. Some facilities (e.g., Board Room and Lounge) may be restricted to faculty or administrators. If a room is restricted, you will see a notice when attempting to book.",
+    sortOrder: 60,
+  },
+  {
+    category: "Booking",
+    question: "How should I choose group size and capacity?",
+    answer: "Enter your expected number of participants and do not exceed the facility's capacity. Each facility card shows its maximum capacity to help you select an appropriate space.",
+    sortOrder: 70,
+  },
+  {
+    category: "Policies",
+    question: "Can I change a booking after I submit it?",
+    answer: "You can edit upcoming or pending bookings. If the change conflicts with an existing reservation or equipment availability, staff will contact you to reschedule.",
+    sortOrder: 80,
+  },
+  {
+    category: "Policies",
+    question: "What conduct is expected when using study rooms?",
+    answer: "Keep noise appropriate for a study environment, leave the space clean, return furniture and equipment to original positions, and report any damage to staff immediately.",
+    sortOrder: 90,
   },
 ];
 

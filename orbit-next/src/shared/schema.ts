@@ -126,6 +126,7 @@ export const systemAlerts = pgTable("system_alerts", {
   userId: varchar("user_id").references(() => users.id),
   isRead: boolean("is_read").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 // Activity logs
@@ -266,14 +267,15 @@ export const insertReportScheduleSchema = z.object({
     .int()
     .min(0)
     .max(6)
+    .nullable()
     .optional(),
-  timeOfDay: z.string().optional(),
+  timeOfDay: z.string().nullable().optional(),
   format: z.string().min(1).default("pdf"),
-  description: z.string().optional(),
-  emailRecipients: z.string().optional(),
+  description: z.string().nullable().optional(),
+  emailRecipients: z.string().nullable().optional(),
   isActive: z.boolean().optional(),
-  nextRunAt: z.date().optional(),
-  lastRunAt: z.date().optional(),
+  nextRunAt: z.date().nullable().optional(),
+  lastRunAt: z.date().nullable().optional(),
   createdBy: z.string().optional(),
   updatedBy: z.string().optional(),
 });

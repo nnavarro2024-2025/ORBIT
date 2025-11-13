@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useState, useCallback, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Dialog,
   DialogContent,
@@ -610,6 +611,152 @@ function EditBookingModalContent({
     return `${hours}h ${minutes}m`;
   };
 
+  // Fetch all bookings to support validation rules (e.g., daily limits for collaborative rooms)
+  const { data: allBookingsRaw } = useQuery<any[]>({
+    queryKey: ["editBookingModal", "allBookings"],
+    queryFn: async () => {
+      const resp = await apiRequest("GET", "/api/bookings?includeUser=true");
+      return resp.json();
+    },
+    staleTime: 30_000,
+    enabled: isOpen,
+  });
+  const allBookings = useMemo(() => allBookingsRaw ?? [], [allBookingsRaw]);
+
+  // Real-time validation function
+  const validateFormRealtime = useCallback(() => {
+    const validationErrors: Array<{ title: string; description: string }> = [];
+
+    if (!facilityId || !startTime || !endTime) {
+      return validationErrors;
+    }
+
+    if (!purpose.trim()) {
+      validationErrors.push({
+        title: "Purpose Required",
+        description: "Please provide a purpose for your booking.",
+      });
+    }
+
+    if (startTime.getTime() < Date.now()) {
+      validationErrors.push({
+        title: "Invalid Start Time",
+        description: "Start time cannot be in the past. Please select a future time.",
+      });
+    }
+
+    const startTimeValid = isWithinLibraryHours(startTime);
+    const endTimeValid = isWithinLibraryHours(endTime);
+
+    if (!startTimeValid || !endTimeValid) {
+      const timeIssues: string[] = [];
+      if (!startTimeValid) timeIssues.push("start time");
+      if (!endTimeValid) timeIssues.push("end time");
+      validationErrors.push({
+        title: "Outside School Hours",
+        description: `Your ${timeIssues.join(" and ")} ${timeIssues.length > 1 ? "are" : "is"} outside school operating hours (${formatLibraryHours()}). Room access is only available during these hours.`,
+      });
+    }
+
+    if (endTime.getTime() <= startTime.getTime()) {
+      validationErrors.push({
+        title: "Invalid Time Selection",
+        description: "Invalid time selection. The start time must be earlier than the end time.",
+      });
+    }
+
+    const diff = endTime.getTime() - startTime.getTime();
+    const durationMinutes = diff / (1000 * 60);
+
+    if (diff > 0 && diff < BOOKING_MIN_DURATION_MS) {
+      validationErrors.push({
+        title: "Booking Too Short",
+        description: `Bookings must be at least ${BOOKING_MIN_DURATION_MINUTES} minutes long. Your current booking is ${Math.floor(durationMinutes)} minutes.`,
+      });
+    }
+
+    // Facility-specific duration validation
+    const facility = facilities.find((f) => f.id === parseInt(facilityId, 10));
+    if (facility) {
+      const facilityName = facility.name.toLowerCase();
+      const isCollabRoom = facilityName.includes('collaborative learning room 1') || facilityName.includes('collaborative learning room 2');
+      const durationHours = diff / (1000 * 60 * 60);
+
+      if (isCollabRoom && durationHours > 2) {
+        validationErrors.push({
+          title: "Duration Limit Exceeded",
+          description: `Collaborative Learning Rooms can only be booked for a maximum of 2 hours. Your current booking is ${durationHours.toFixed(1)} hours. Please reduce your booking duration.`,
+        });
+      } else if (!isCollabRoom && diff > BOOKING_MAX_DURATION_MS) {
+        validationErrors.push({
+          title: "Maximum Duration Exceeded",
+          description: `Bookings cannot exceed ${BOOKING_MAX_DURATION_MINUTES} minutes (${BOOKING_MAX_DURATION_MINUTES / 60} hours). Your current booking is ${Math.floor(durationMinutes)} minutes.`,
+        });
+      }
+
+      // Check daily booking limit for collaborative learning rooms
+      // TEMPORARILY DISABLED FOR TESTING
+      /*
+      if (isCollabRoom && allBookings && booking) {
+        const startOfDay = new Date(startTime);
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(startTime);
+        endOfDay.setHours(23, 59, 59, 999);
+
+        const userBookingsToday = allBookings.filter((b: any) => {
+          const bookingStart = new Date(b.startTime);
+          return (
+            b.userId === booking.userId &&
+            b.facilityId === parseInt(facilityId, 10) &&
+            (b.status === 'approved' || b.status === 'pending') &&
+            b.id !== booking.id &&
+            bookingStart >= startOfDay &&
+            bookingStart <= endOfDay
+          );
+        });
+
+        if (userBookingsToday.length >= 2) {
+          validationErrors.push({
+            title: "Daily Booking Limit Reached",
+            description: `You can only book this Collaborative Learning Room twice per day. You already have ${userBookingsToday.length} booking(s) for today. Please choose a different room or date.`,
+          });
+        }
+      }
+      */
+
+      const capacity = getFacilityMaxCapacity(facility);
+      if (participants > capacity) {
+        validationErrors.push({
+          title: "Capacity Exceeded",
+          description: `The selected room has a maximum capacity of ${capacity} people. Please reduce the number of participants to ${capacity} or fewer.`,
+        });
+      }
+    }
+
+    const sameDay =
+      startTime.getFullYear() === endTime.getFullYear() &&
+      startTime.getMonth() === endTime.getMonth() &&
+      startTime.getDate() === endTime.getDate();
+    if (!sameDay) {
+      validationErrors.push({
+        title: "Single-Day Booking Required",
+        description: "Bookings must start and end on the same calendar day. Please split multi-day events into separate bookings.",
+      });
+    }
+
+    return validationErrors;
+  }, [facilityId, startTime, endTime, purpose, participants, facilities, allBookings, booking]);
+
+  // Watch for changes and validate in real-time
+  useEffect(() => {
+    if (facilityId && startTime && endTime) {
+      const errors = validateFormRealtime();
+      setFormValidationWarnings(errors);
+    } else {
+      setFormValidationWarnings([]);
+    }
+  }, [facilityId, startTime, endTime, purpose, participants, validateFormRealtime]);
+
   const handleSave = async () => {
     const currentTimestamp = getNow();
     if (isSubmitting || currentTimestamp - lastSubmissionTime < SUBMISSION_COOLDOWN) {
@@ -626,88 +773,8 @@ function EditBookingModalContent({
       return;
     }
 
-    const validationErrors: Array<{ title: string; description: string }> = [];
-
-    if (!facilityId || !startTime || !endTime) {
-      validationErrors.push({
-        title: "Missing Information",
-        description: "Please fill in all required fields.",
-      });
-    }
-
-    if (startTime && startTime.getTime() < Date.now()) {
-      validationErrors.push({
-        title: "Invalid Start Time",
-        description: "Start time is in the past.",
-      });
-    }
-
-    const startTimeValid = startTime && isWithinLibraryHours(startTime);
-    const endTimeValid = endTime && isWithinLibraryHours(endTime);
-
-    if ((startTime && !startTimeValid) || (endTime && !endTimeValid)) {
-      const timeIssues: string[] = [];
-      if (startTime && !startTimeValid) timeIssues.push("start time");
-      if (endTime && !endTimeValid) timeIssues.push("end time");
-      validationErrors.push({
-        title: "School Hours",
-        description: `Your ${timeIssues.join(" and ")} ${timeIssues.length > 1 ? "are" : "is"} outside school operating hours (${formatLibraryHours()}). Room access is only available during these hours.`,
-      });
-    }
-
-    if (startTime && endTime && endTime.getTime() <= startTime.getTime()) {
-      validationErrors.push({
-        title: "Invalid Time Selection",
-        description: "End time must be after start time.",
-      });
-    }
-
-    if (startTime && endTime) {
-      const diff = endTime.getTime() - startTime.getTime();
-      if (diff > 0 && diff < BOOKING_MIN_DURATION_MS) {
-        validationErrors.push({
-          title: "Invalid Duration",
-          description: `Bookings must be at least ${BOOKING_MIN_DURATION_MINUTES} minutes long.`,
-        });
-      }
-      if (diff > BOOKING_MAX_DURATION_MS) {
-        validationErrors.push({
-          title: "Maximum Duration Exceeded",
-          description: `Bookings cannot exceed ${BOOKING_MAX_DURATION_MINUTES} minutes.`,
-        });
-      }
-    }
-
-    if (startTime && endTime) {
-      const sameDay =
-        startTime.getFullYear() === endTime.getFullYear() &&
-        startTime.getMonth() === endTime.getMonth() &&
-        startTime.getDate() === endTime.getDate();
-      if (!sameDay) {
-        validationErrors.push({
-          title: "Single-Day Booking Required",
-          description: "Start and end must be on the same calendar day. Please split multi-day events into separate bookings.",
-        });
-      }
-    }
-
-    if (facilityId) {
-      const facility = facilities.find((f) => f.id === parseInt(facilityId, 10));
-      if (!facility) {
-        validationErrors.push({
-          title: "Error",
-          description: "Selected facility not found.",
-        });
-      } else {
-        const capacity = getFacilityMaxCapacity(facility);
-        if (participants > capacity) {
-          validationErrors.push({
-            title: "Capacity Exceeded",
-            description: `The selected room has a maximum capacity of ${capacity} people. Please reduce the number of participants.`,
-          });
-        }
-      }
-    }
+    // Re-validate on submit
+    const validationErrors = validateFormRealtime();
 
     if (validationErrors.length > 0) {
       setFormValidationWarnings(validationErrors);
@@ -991,15 +1058,20 @@ function EditBookingModalContent({
           )}
         </div>
 
-        <ValidationSummary
-          id="edit-booking-form-errors"
-          warnings={
-            lockError
-              ? [...formValidationWarnings, { title: "Slot hold", description: lockError }]
-              : formValidationWarnings
-          }
-          conflicts={holdConflicts}
-        />
+        {/* ValidationSummary removed - slot hold conflicts disabled */}
+        {formValidationWarnings.length > 0 && (
+          <div id="edit-booking-form-errors" className="mt-3 text-sm rounded-b-lg px-4 py-3 bg-white border-t border-gray-200">
+            {formValidationWarnings.map((w, idx) => (
+              <div key={idx} className="mb-2 flex items-start gap-3">
+                <div className="mt-0.5 text-yellow-600 text-xl">⚠️</div>
+                <div>
+                  <div className="font-semibold text-red-700 text-sm">{w.title}</div>
+                  <div className="text-red-600 text-sm mt-1">{w.description}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {(selectedFacility || startTime || endTime || purpose) && (

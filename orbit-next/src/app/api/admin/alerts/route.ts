@@ -14,15 +14,22 @@ export async function GET(request: NextRequest) {
 
   try {
     const alerts = await storage.getSystemAlerts();
-    const userId = authResult.user.id;
     const isAdmin = authResult.userRecord?.role === "admin";
 
     const filtered = Array.isArray(alerts)
       ? alerts.filter((alert) => {
           if (!alert) return false;
-          if (isAdmin) return true;
-          if (alert.userId == null) return true;
-          return String(alert.userId) === String(userId);
+          // Admins should ONLY see global/admin alerts (userId == null)
+          // These are alerts like "Booking Created", "Equipment or Needs Request" (admin version)
+          if (isAdmin) {
+            // Hide read equipment/needs notifications for admins too
+            if (alert.userId == null && alert.isRead && alert.title && (alert.title.includes('Equipment') || alert.title.includes('Needs'))) {
+              return false;
+            }
+            return alert.userId == null;
+          }
+          // Non-admins shouldn't be using this endpoint, but if they do, return empty
+          return false;
         })
       : [];
 

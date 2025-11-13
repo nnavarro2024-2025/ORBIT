@@ -2,15 +2,17 @@ import { z, ZodError } from "zod";
 
 import type { InsertReportSchedule, UpdateReportSchedule } from "@shared/schema";
 
-const dateInputSchema = z.union([z.string().trim().min(1), z.date()]);
+// Accept ISO-like strings, Date objects, or null (clearing the field)
+const dateInputSchema = z.union([z.string().trim().min(1), z.date()]).nullable();
 
 export const createReportScheduleSchema = z.object({
   reportType: z.string().trim().min(1, "reportType is required"),
   frequency: z.string().trim().min(1, "frequency is required"),
-  dayOfWeek: z.number().int().min(0).max(6).optional(),
-  timeOfDay: z.string().trim().min(1).optional(),
+  dayOfWeek: z.number().int().min(0).max(6).nullable().optional(),
+  timeOfDay: z.string().trim().min(1).nullable().optional(),
   format: z.string().trim().min(1).optional(),
-  emailRecipients: z.string().trim().min(1).optional(),
+  description: z.string().trim().nullable().optional(),
+  emailRecipients: z.string().trim().min(1).nullable().optional(),
   isActive: z.boolean().optional(),
   nextRunAt: dateInputSchema.optional(),
   lastRunAt: dateInputSchema.optional(),
@@ -23,6 +25,7 @@ export type UpdateReportScheduleInput = z.infer<typeof updateReportScheduleSchem
 
 export function normalizeDateInput(value: unknown): Date | undefined {
   if (value === undefined || value === null) {
+    // Treat null the same as undefined for normalization; caller decides null semantics
     return undefined;
   }
 
@@ -67,6 +70,12 @@ export function buildInsertPayload(parsed: CreateReportScheduleInput, userId: st
 
   if (parsed.format !== undefined) {
     payload.format = parsed.format;
+  }
+
+  if (parsed.description !== undefined) {
+    // Allow null or string; schema ensures trimming on string path
+    // @ts-expect-error drizzle infer insert allows null here
+    payload.description = parsed.description ?? null;
   }
 
   if (parsed.emailRecipients !== undefined) {

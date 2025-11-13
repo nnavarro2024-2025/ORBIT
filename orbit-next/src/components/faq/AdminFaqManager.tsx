@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type Faq } from "@shared/schema";
 import { FAQ_CATEGORIES } from "@/shared/faq";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
+import { SkeletonTableRows } from "@/components/ui/skeleton-presets";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -69,10 +70,10 @@ function normalizeSortOrder(faqs: Faq[]): number {
   return Number.isFinite(max) ? max + 10 : 10;
 }
 
-export default function AdminFaqManager() {
+export default function AdminFaqManager({ searchTerm: externalSearchTerm }: { searchTerm?: string }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [searchTerm, setSearchTerm] = useState("");
+  const [localSearchTerm, setLocalSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>(ALL_CATEGORIES_OPTION);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -186,8 +187,10 @@ export default function AdminFaqManager() {
     });
   }, [faqs]);
 
+  const effectiveSearchTerm = externalSearchTerm !== undefined ? externalSearchTerm : localSearchTerm;
+
   const filteredFaqs = useMemo(() => {
-    const normalizedSearch = searchTerm.trim().toLowerCase();
+    const normalizedSearch = effectiveSearchTerm.trim().toLowerCase();
     return sortedFaqs.filter((faq) => {
       const matchesCategory = categoryFilter === ALL_CATEGORIES_OPTION || faq.category === categoryFilter;
       const matchesSearch =
@@ -196,7 +199,7 @@ export default function AdminFaqManager() {
         faq.answer.toLowerCase().includes(normalizedSearch);
       return matchesCategory && matchesSearch;
     });
-  }, [sortedFaqs, categoryFilter, searchTerm]);
+  }, [sortedFaqs, categoryFilter, effectiveSearchTerm]);
 
   const openCreateDialog = () => {
     setFormState({
@@ -214,99 +217,94 @@ export default function AdminFaqManager() {
       category: faq.category,
       question: faq.question,
       answer: faq.answer,
-      sortOrder: faq.sortOrder ?? 0,
+      sortOrder: faq.sortOrder ?? normalizeSortOrder(faqs),
     });
     setIsEditOpen(true);
   };
 
-  const handleCreate = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (createFaqMutation.isPending) return;
-    createFaqMutation.mutate({ ...formState, sortOrder: Number(formState.sortOrder ?? 0) });
+  const handleCreate = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    createFaqMutation.mutate(formState);
   };
 
-  const handleUpdate = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!editingFaq || updateFaqMutation.isPending) return;
-    updateFaqMutation.mutate({ id: editingFaq.id, data: { ...formState, sortOrder: Number(formState.sortOrder ?? 0) } });
+  const handleUpdate = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editingFaq) return;
+    updateFaqMutation.mutate({ id: editingFaq.id, data: formState });
   };
 
   const handleMove = (faq: Faq, direction: "up" | "down") => {
-    if (reorderFaqsMutation.isPending) return;
-    const index = filteredFaqs.findIndex((item) => item.id === faq.id);
-    const swapWith = direction === "up" ? filteredFaqs[index - 1] : filteredFaqs[index + 1];
-    if (!swapWith) return;
-    reorderFaqsMutation.mutate({ current: faq, target: swapWith });
+    const index = filteredFaqs.findIndex((f) => f.id === faq.id);
+    if (index === -1) return;
+    const targetIndex = direction === "up" ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= filteredFaqs.length) return;
+    reorderFaqsMutation.mutate({ current: filteredFaqs[index], target: filteredFaqs[targetIndex] });
   };
 
-  const formatDate = (value: string | Date | null | undefined) => {
-    if (!value) return "—";
-    try {
-      const date = value instanceof Date ? value : new Date(value);
-      return date.toLocaleString();
-    } catch (_error) {
-      return "—";
-    }
-  };
-
+  function formatDate(dateValue?: string | Date) {
+    if (!dateValue) return "—";
+    const d = dateValue instanceof Date ? dateValue : new Date(dateValue);
+    if (isNaN(d.getTime())) return "—";
+    return d.toLocaleDateString();
+  }
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">FAQ Management</h1>
-          <p className="text-sm text-gray-600">
-            Create, edit, and reorder FAQs shown to students in the booking dashboard.
-          </p>
-        </div>
-        <Button onClick={openCreateDialog} size="sm" className="self-start sm:self-auto">
-          <Plus className="mr-2 h-4 w-4" />
-          Add FAQ
-        </Button>
-      </div>
-
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
-        <div className="p-4 sm:p-6 space-y-4">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="flex flex-1 items-center gap-3">
-              <div className="flex-1">
-                <Label htmlFor="faq-search" className="text-xs uppercase tracking-wide text-gray-500">
-                  Search
-                </Label>
-                <Input
-                  id="faq-search"
-                  placeholder="Search by question or answer"
-                  value={searchTerm}
-                  onChange={(event) => setSearchTerm(event.target.value)}
-                />
+        <div className="p-4 sm:p-6 space-y-6">
+          {!externalSearchTerm && (
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="space-y-1">
+                <h1 className="text-2xl font-bold text-gray-900">FAQ Management</h1>
+                <p className="text-sm text-gray-600">
+                  Create, edit, and reorder FAQs shown to students in the booking dashboard.
+                </p>
               </div>
-              <div className="w-full md:w-52">
-                <Label className="text-xs uppercase tracking-wide text-gray-500">Category</Label>
-                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="All categories" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ALL_CATEGORIES_OPTION}>All categories</SelectItem>
-                    {FAQ_CATEGORIES.map((category) => (
-                      <SelectItem key={category} value={category}>
-                        {category}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              <Button onClick={openCreateDialog} size="sm" className="self-start sm:self-auto">
+                <Plus className="mr-2 h-4 w-4" />
+                Add FAQ
+              </Button>
             </div>
-            <div className="text-xs text-gray-500">
-              {isFetching ? "Refreshing list…" : `${filteredFaqs.length} FAQ${filteredFaqs.length === 1 ? "" : "s"}`}
-            </div>
-          </div>
-
-          <Separator />
-
+          )}
+          {!externalSearchTerm && <Separator />}
+          {!externalSearchTerm && (
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div className="flex flex-1 items-center gap-3">
+                    <div className="flex-1">
+                      <Label htmlFor="faq-search" className="text-xs uppercase tracking-wide text-gray-500">
+                        Search
+                      </Label>
+                      <Input
+                        id="faq-search"
+                        placeholder="Search by question or answer"
+                        value={localSearchTerm}
+                        onChange={(event) => setLocalSearchTerm(event.target.value)}
+                      />
+                    </div>
+                    <div className="w-full md:w-52">
+                      <Label className="text-xs uppercase tracking-wide text-gray-500">Category</Label>
+                      <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="All categories" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={ALL_CATEGORIES_OPTION}>All categories</SelectItem>
+                          {FAQ_CATEGORIES.map((category) => (
+                            <SelectItem key={category} value={category}>
+                              {category}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    {isFetching ? "Refreshing list…" : `${filteredFaqs.length} FAQ${filteredFaqs.length === 1 ? "" : "s"}`}
+                  </div>
+                </div>
+              )}
           {isLoading ? (
-            <div className="flex items-center justify-center py-10 text-gray-500">
-              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-              Loading FAQs…
+            <div className="overflow-x-auto">
+              <SkeletonTableRows rows={5} />
             </div>
           ) : isError ? (
             <div className="flex flex-col items-center justify-center gap-3 py-10 text-center">

@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+export const dynamic = "force-dynamic";
+
+import { useState, useEffect, useMemo, Suspense } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest } from "@/lib/queryClient";
@@ -9,7 +11,7 @@ import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
 import BookingModal from "@/components/modals/BookingModal";
 import EditBookingModal from "@/components/modals/EditBookingModal";
-import { Plus, Calendar, Home, Eye, AlertTriangle, BarChart3, Settings, Clock, CheckCircle, Loader2, HelpCircle } from "lucide-react";
+import { Plus, Calendar, Home, Eye, AlertTriangle, BarChart3, Clock, CheckCircle, Loader2, HelpCircle } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import {
@@ -24,8 +26,10 @@ import { format } from 'date-fns';
 import AvailabilityGrid from '@/components/AvailabilityGrid';
 import FaqList from '@/components/faq/FaqList';
 import { useLegacyLocation } from "@/lib/navigation";
+import { Skeleton } from "@/components/ui/skeleton";
+import { SkeletonFacilityCard, SkeletonListItem, SkeletonStatsCard } from "@/components/ui/skeleton-presets";
 
-export default function BookingDashboard() {
+function BookingDashboardInner() {
   const [showEditBookingModal, setShowEditBookingModal] = useState(false);
   const [editingBooking, setEditingBooking] = useState<any>(null);
   const [scrollToBookingId, setScrollToBookingId] = useState<string | null>(null);
@@ -51,7 +55,7 @@ export default function BookingDashboard() {
 
   // Fetch availability once for the dashboard so cards can show next available ranges
   const todayDateStr = format(new Date(), 'yyyy-MM-dd');
-  const { data: availabilityDataRaw } = useQuery({
+  const { data: availabilityDataRaw, isLoading: isAvailabilityLoading, isFetching: isAvailabilityFetching } = useQuery({
     queryKey: ['/api/availability', todayDateStr],
     queryFn: async () => {
       const res = await apiRequest('GET', `/api/availability?date=${todayDateStr}`);
@@ -148,31 +152,16 @@ export default function BookingDashboard() {
     // fallback - only add divider and admin link if the current user is an admin
     sidebarItems = [
       { id: 'dashboard', label: 'Dashboard', icon: Home },
-      { id: 'new-booking', label: 'New Booking', icon: BarChart3 },
+      { id: 'new-booking', label: 'New Booking', icon: Plus },
       { id: 'my-bookings', label: 'My Bookings', icon: Calendar },
       { id: 'available-rooms', label: 'Available Rooms', icon: Home },
-      { id: 'faqs', label: 'FAQs', icon: HelpCircle },
       { id: 'activity-logs', label: 'Activity Logs', icon: BarChart3 },
-      { id: 'booking-settings', label: 'Guidelines & Policy', icon: Settings },
+      { id: 'faqs', label: 'FAQs', icon: HelpCircle },
     ];
     if (user && user.role === 'admin') {
       sidebarItems.push({ id: 'divider-1', type: 'divider' });
       sidebarItems.push({ id: 'admin-dashboard', label: 'Admin Dashboard', icon: BarChart3 });
     }
-  }
-
-  // Post-process sidebarItems to ensure Activity Logs appears after Available Rooms
-  try {
-    const idxAvailable = sidebarItems.findIndex(it => it.id === 'available-rooms');
-    const idxActivity = sidebarItems.findIndex(it => it.id === 'activity-logs');
-    if (idxActivity !== -1 && idxAvailable !== -1 && idxActivity < idxAvailable) {
-      // move activity-logs to just after available-rooms
-      const [activityItem] = sidebarItems.splice(idxActivity, 1);
-      const insertAt = sidebarItems.findIndex(it => it.id === 'available-rooms');
-      sidebarItems.splice(insertAt + 1, 0, activityItem);
-    }
-  } catch (e) {
-    // noop
   }
 
   // set initial selected view from URL hash (e.g. /booking#dashboard)
@@ -213,11 +202,7 @@ export default function BookingDashboard() {
       setIsMobileSidebarOpen(false);
       return;
     }
-    if (id === 'booking-settings') {
-      setSelectedView('booking-settings');
-      setIsMobileSidebarOpen(false);
-      return;
-    }
+    
     setSelectedView(id);
     setIsMobileSidebarOpen(false);
   };
@@ -294,10 +279,8 @@ export default function BookingDashboard() {
     }
   }, []);
 
-  // If the user reloads the page while at /booking#activity-logs:notifications (and
-  // there was no one-time flag set), normalize to /booking#dashboard so reloads
-  // land on the dashboard view instead of the notifications tab. This mirrors
-  // the admin behavior where a reload normalizes to overview.
+  // If the user reloads the page while at Activity Logs (any tab), normalize to /booking#dashboard
+  // so reloads land on the dashboard view. This mirrors the admin behavior where a reload normalizes to overview.
   useEffect(() => {
     const isReloadNavigation = () => {
       try {
@@ -319,10 +302,14 @@ export default function BookingDashboard() {
       if (!rawHash) return;
       const normalized = rawHash.replace('/', ':');
       const parts = normalized.split(':');
-      if (parts[0] === 'activity-logs' && parts[1] === 'notifications') {
-        // Only redirect on reload (not when user clicked the header)
-        const v = sessionStorage.getItem('openNotificationsOnce');
-        if (!v && isReloadNavigation()) {
+      
+      // Normalize activity-logs on reload (regardless of inner tab)
+      if (parts[0] === 'activity-logs') {
+        // Check if one-time flags exist (set by header navigation) - if so, don't normalize
+        const notificationsFlag = sessionStorage.getItem('openNotificationsOnce');
+        const availableRoomsFlag = sessionStorage.getItem('openAvailableRoomsOnce');
+        
+        if (!notificationsFlag && !availableRoomsFlag && isReloadNavigation()) {
           try {
             const target = '/booking#dashboard';
             if (window.location.pathname + window.location.hash !== target) {
@@ -597,7 +584,7 @@ export default function BookingDashboard() {
   // Email notification setting removed
 
   // Default to empty arrays to avoid undefined errors
-  const { data: facilities = [] } = useQuery<any[]>({
+  const { data: facilities = [], isLoading: isFacilitiesLoading, isFetching: isFacilitiesFetching } = useQuery<any[]>({
     queryKey: ["/api/facilities"],
     queryFn: async () => {
       const response = await apiRequest("GET", "/api/facilities");
@@ -634,7 +621,7 @@ export default function BookingDashboard() {
     ? new Map<number, any>((availabilityDataRaw.data || []).map((d: any) => [d.facility.id, d]))
     : generateMockForFacilities(facilities || []);
 
-  const { data: userBookingsData = [] } = useQuery<any[]>({
+  const { data: userBookingsData = [], isLoading: isUserBookingsLoading, isFetching: isUserBookingsFetching } = useQuery<any[]>({
     queryKey: ["/api/bookings"],
     queryFn: async () => {
       const response = await apiRequest("GET", "/api/bookings");
@@ -645,7 +632,7 @@ export default function BookingDashboard() {
   });
 
   // NEW: Get ALL approved bookings to show facility availability to all users
-  const { data: allBookingsData = [] } = useQuery<any[]>({
+  const { data: allBookingsData = [], isLoading: isAllBookingsLoading, isFetching: isAllBookingsFetching } = useQuery<any[]>({
     queryKey: ["/api/bookings/all"],
     queryFn: async () => {
       const response = await apiRequest("GET", "/api/bookings/all");
@@ -659,7 +646,7 @@ export default function BookingDashboard() {
   const allBookings = Array.isArray(allBookingsData) ? allBookingsData : [];
 
   // Notifications for the current user (used in the Activity Logs -> Notification logs tab)
-  const { data: notificationsData = [] } = useQuery<any[]>({
+  const { data: notificationsData = [], isLoading: isNotificationsLoading, isFetching: isNotificationsFetching } = useQuery<any[]>({
     queryKey: ['/api/notifications'],
     queryFn: async () => {
       const res = await apiRequest('GET', '/api/notifications');
@@ -1216,6 +1203,10 @@ export default function BookingDashboard() {
     return 'bg-gray-100 text-gray-800';
   };
 
+  // Check if critical initial data is loading (first load only)
+  const isInitialLoading = (isFacilitiesLoading && facilities.length === 0) || 
+                          (isUserBookingsLoading && userBookings.length === 0);
+
   const renderContent = () => {
     switch (selectedView) {
       case "my-bookings":
@@ -1234,8 +1225,13 @@ export default function BookingDashboard() {
                   New Booking
                 </button>
               </div>
-
-              {userBookings.length === 0 ? (
+              {(isUserBookingsLoading || isUserBookingsFetching) ? (
+                <div className="space-y-3">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <SkeletonListItem key={i} />
+                  ))}
+                </div>
+              ) : userBookings.length === 0 ? (
                 <div className="text-center py-12">
                   <div className="bg-gray-100 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
                     <Calendar className="h-8 w-8 text-gray-400" />
@@ -1654,7 +1650,13 @@ export default function BookingDashboard() {
 
             {activityTab === 'booking' ? (
               <div className="space-y-4">
-                {userBookings.length === 0 ? (
+                {(isUserBookingsLoading || isUserBookingsFetching) ? (
+                  <div className="space-y-3">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <SkeletonListItem key={i} />
+                    ))}
+                  </div>
+                ) : userBookings.length === 0 ? (
                   <div className="text-center py-8">
                     <p className="text-gray-600 text-sm">No booking history</p>
                   </div>
@@ -1891,7 +1893,13 @@ export default function BookingDashboard() {
               </div>
             ) : (
               <div className="space-y-2">
-                {notificationsData.length === 0 ? (
+                {(isNotificationsLoading || isNotificationsFetching) ? (
+                  <div className="space-y-3">
+                    {Array.from({ length: 6 }).map((_, i) => (
+                      <SkeletonListItem key={i} />
+                    ))}
+                  </div>
+                ) : notificationsData.length === 0 ? (
                   <div className="text-center py-8">
                     <p className="text-gray-600 text-sm">No notifications</p>
                   </div>
@@ -1907,17 +1915,29 @@ export default function BookingDashboard() {
                             <div className="text-xs text-gray-600 mt-1 break-words">{baseMessage}</div>
                             {equipment && (
                               <div className="mt-2 flex flex-wrap gap-1.5">
-                                {Object.entries(equipment).map(([key, value]: [string, any]) => {
-                                  const displayKey = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-                                  return (
+                                {/* If equipment is an array of item labels, render labels directly */}
+                                {Array.isArray(equipment) ? (
+                                  (equipment as any[]).map((label, idx) => (
                                     <span
-                                      key={key}
-                                      className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}
+                                      key={idx}
+                                      className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800"
                                     >
-                                      {displayKey}
+                                      {String(label)}
                                     </span>
-                                  );
-                                })}
+                                  ))
+                                ) : (
+                                  Object.entries(equipment).map(([key, value]: [string, any]) => {
+                                    const displayKey = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                                    return (
+                                      <span
+                                        key={key}
+                                        className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}
+                                      >
+                                        {displayKey}
+                                      </span>
+                                    );
+                                  })
+                                )}
                               </div>
                             )}
                           </div>
@@ -2013,7 +2033,11 @@ export default function BookingDashboard() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-4 sm:gap-6">
-                {facilities
+                {(isFacilitiesLoading || isFacilitiesFetching) ? (
+                  Array.from({ length: 6 }).map((_, i) => (
+                    <SkeletonFacilityCard key={i} />
+                  ))
+                ) : facilities
                   .filter((f) => {
                     const restricted = isRestrictedFacility(f);
                     const allowedByRole = (user?.role === 'faculty' || user?.role === 'admin');
@@ -2059,7 +2083,7 @@ export default function BookingDashboard() {
                                 e.currentTarget.nextElementSibling?.classList?.remove('hidden');
                               }}
                             />
-                            <div className="hidden absolute inset-0 flex items-center justify-center">
+                            <div className="absolute inset-0 hidden [&:not(.hidden)]:flex items-center justify-center">
                               <div className="text-center">
                                 <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mx-auto mb-2 shadow-sm">
                                   <Calendar className={`h-8 w-8 ${isAvailableForBooking ? 'text-gray-400' : 'text-gray-300'}`} />
@@ -2267,7 +2291,7 @@ export default function BookingDashboard() {
                 })}
               </div>
 
-              {facilities.length === 0 ? (
+              {(isFacilitiesLoading || isFacilitiesFetching) ? null : facilities.length === 0 ? (
                 <div className="text-center py-12">
                   <div className="bg-gray-100 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
                     <Calendar className="h-8 w-8 text-gray-400" />
@@ -2318,76 +2342,20 @@ export default function BookingDashboard() {
             </div>
         );
 
-      case "booking-settings":
-        return (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
-            <div className="mb-4 sm:mb-6">
-              <h3 className="text-lg sm:text-xl font-bold text-gray-900">Booking Guidelines & Policy</h3>
-              <p className="text-sm sm:text-base text-gray-600 mt-1">Review facility booking guidelines, policies, and usage rules</p>
-            </div>
-
-            <div className="space-y-6">
-              {/* Email notifications control removed */}
-
-              <div className="bg-pink-50 rounded-lg p-4 border border-pink-200">
-                <h4 className="font-medium text-pink-900 mb-2">Booking Guidelines</h4>
-                <div className="text-sm text-pink-800 space-y-3">
-                  <div>
-                    <h5 className="font-semibold text-pink-900 mb-1">Overview</h5>
-                    <p>Use this system to reserve facilities for academic work, meetings, and approved events. Follow these guidelines to ensure fair access and a smooth experience for all users.</p>
-                  </div>
-
-                  <div>
-                    <h5 className="font-semibold text-pink-900 mb-1">Booking Windows & Lead Time</h5>
-                    <ul className="space-y-1 ml-4 list-disc">
-                      <li>Request bookings at least 30 minutes before the desired start time.</li>
-                      <li>Bookings are generally available during school hours: 7:30 AM – 7:00 PM. Requests outside these hours will be reviewed by staff.</li>
-                      <li>Some facilities may require additional lead time—check the facility details before requesting.</li>
-                    </ul>
-                  </div>
-
-                  <div>
-                    <h5 className="font-semibold text-pink-900 mb-1">Eligibility & Capacity</h5>
-                    <ul className="space-y-1 ml-4 list-disc">
-                      <li>Only registered university users may create bookings.</li>
-                      <li>Enter the expected number of participants and do not exceed the facility’s maximum capacity.</li>
-                      <li>If your event requires special equipment or setup, request it when creating the booking so staff can plan accordingly.</li>
-                    </ul>
-                  </div>
-
-                  <div>
-                    <h5 className="font-semibold text-pink-900 mb-1">Cancellations & Changes</h5>
-                    <ul className="space-y-1 ml-4 list-disc">
-                      <li>Cancel at least 30 minutes before the start time whenever possible to free space for others.</li>
-                      <li>To change a booking, edit the reservation—if the requested changes conflict with existing bookings, staff will contact you to reschedule.</li>
-                      <li>No-shows or repeated late cancellations may result in temporary booking restrictions.</li>
-                    </ul>
-                  </div>
-
-                  <div>
-                    <h5 className="font-semibold text-pink-900 mb-1">Conduct & Responsibilities</h5>
-                    <ul className="space-y-1 ml-4 list-disc">
-                      <li>Keep noise levels appropriate for a study environment and respect other users.</li>
-                      <li>Leave the space clean and return furniture/equipment to its original arrangement.</li>
-                      <li>Report any damage or issues to staff immediately via the contact details listed in the facility information.</li>
-                    </ul>
-                  </div>
-
-                  <div className="bg-pink-100 p-3 rounded border border-pink-300 mt-4">
-                    <p className="font-semibold text-pink-900">Tip</p>
-                    <p className="text-pink-800">Popular slots fill quickly. Book early and add a reminder to your calendar to avoid missing your reservation.</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
+      
 
       default:
         return (
           <>
             {/* Stats Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 mb-6 sm:mb-8">
+              {(isUserBookingsLoading || isUserBookingsFetching) ? (
+                <>
+                  <SkeletonStatsCard />
+                  <SkeletonStatsCard />
+                </>
+              ) : (
+                <>
               <button
                 onClick={() => setSelectedView("my-bookings")}
                 className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 hover:shadow-md transition-all duration-200 hover:border-pink-300 text-left group"
@@ -2419,7 +2387,8 @@ export default function BookingDashboard() {
                   </div>
                 </div>
               </button>
-
+                </>
+              )}
               
             </div>
 
@@ -2452,7 +2421,11 @@ export default function BookingDashboard() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-4 sm:gap-6">
-                {facilities
+                {(isFacilitiesLoading || isFacilitiesFetching) ? (
+                  Array.from({ length: 6 }).map((_, i) => (
+                    <SkeletonFacilityCard key={i} />
+                  ))
+                ) : facilities
                   .filter((f) => {
                     const restricted = isRestrictedFacility(f);
                     const allowedByRole = (user?.role === 'faculty' || user?.role === 'admin');
@@ -2690,7 +2663,7 @@ export default function BookingDashboard() {
                 })}
               </div>
 
-              {facilities.length === 0 ? (
+              {(isFacilitiesLoading || isFacilitiesFetching) ? null : facilities.length === 0 ? (
                 <div className="text-center py-12">
                   <div className="bg-gray-100 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
                     <Calendar className="h-8 w-8 text-gray-400" />
@@ -2748,7 +2721,26 @@ export default function BookingDashboard() {
                   <p className="text-gray-600 text-sm mt-1">Your latest facility reservations</p>
                 </div>
                 <button
-                  onClick={() => setSelectedView("my-bookings")}
+                  onClick={() => {
+                    try {
+                      // Always go to Booking History when clicking from Recent Booking section
+                      const newHash = '#activity-logs:booking';
+                      
+                      // Update view and tab state
+                      setSelectedView('activity-logs');
+                      setActivityTab('booking');
+                      
+                      // Update URL hash
+                      window.location.hash = newHash;
+                      
+                      // Reset pagination
+                      setActivityBookingPage(0);
+                    } catch (e) {
+                      // fallback: just set view
+                      setSelectedView('activity-logs');
+                      setActivityTab('booking');
+                    }
+                  }}
                   className="text-pink-600 hover:text-pink-800 font-medium text-sm transition-colors duration-200"
                 >
                   View All →
@@ -2770,7 +2762,13 @@ export default function BookingDashboard() {
 
               {activityTab === 'booking' ? (
                 <div className="space-y-4">
-                  {userBookings.length === 0 ? (
+                  {(isUserBookingsLoading || isUserBookingsFetching) ? (
+                    <div className="space-y-3">
+                      {Array.from({ length: 4 }).map((_, i) => (
+                        <SkeletonListItem key={i} />
+                      ))}
+                    </div>
+                  ) : userBookings.length === 0 ? (
                     <div className="text-center py-8">
                       <p className="text-gray-600 text-sm">No booking history</p>
                     </div>
@@ -2951,7 +2949,13 @@ export default function BookingDashboard() {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {notificationsData.length === 0 ? (
+                  {(isNotificationsLoading || isNotificationsFetching) ? (
+                    <div className="space-y-3">
+                      {Array.from({ length: 4 }).map((_, i) => (
+                        <SkeletonListItem key={i} />
+                      ))}
+                    </div>
+                  ) : notificationsData.length === 0 ? (
                     <div className="text-center py-8">
                       <p className="text-gray-600 text-sm">No notifications</p>
                     </div>
@@ -2968,17 +2972,28 @@ export default function BookingDashboard() {
                               <div className="text-xs text-gray-600 mt-1 break-words">{baseMessage}</div>
                               {equipment && (
                                 <div className="mt-2 flex flex-wrap gap-1.5">
-                                  {Object.entries(equipment).map(([key, value]: [string, any]) => {
-                                    const displayKey = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-                                    return (
+                                  {Array.isArray(equipment) ? (
+                                    (equipment as any[]).map((label, idx) => (
                                       <span
-                                        key={key}
-                                        className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}
+                                        key={idx}
+                                        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800"
                                       >
-                                        {displayKey}
+                                        {String(label)}
                                       </span>
-                                    );
-                                  })}
+                                    ))
+                                  ) : (
+                                    Object.entries(equipment).map(([key, value]: [string, any]) => {
+                                      const displayKey = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                                      return (
+                                        <span
+                                          key={key}
+                                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}
+                                        >
+                                          {displayKey}
+                                        </span>
+                                      );
+                                    })
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -3028,6 +3043,68 @@ export default function BookingDashboard() {
         );
     }
   };
+
+  // Show full skeleton during initial data load
+  if (isInitialLoading) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col">
+        <Header onMobileToggle={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)} />
+        
+        <div className="flex flex-1 relative">
+          {/* Desktop Sidebar - Hidden on mobile */}
+          <div className="hidden lg:block w-64 h-[calc(100vh-4rem)] border-r bg-card fixed top-16 left-0 z-30 overflow-y-auto">
+            <Sidebar
+              items={sidebarItems}
+              activeItem={selectedView}
+              onItemClick={handleSidebarClick}
+            />
+          </div>
+
+          {/* Mobile Sidebar - Drawer style */}
+          <div
+            className={`lg:hidden fixed top-16 left-0 h-[calc(100vh-4rem)] w-64 bg-card border-r z-40 overflow-y-auto transition-transform duration-300 ease-in-out ${
+              isMobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+            }`}
+          >
+            <Sidebar
+              items={sidebarItems}
+              activeItem={selectedView}
+              onItemClick={handleSidebarClick}
+            />
+          </div>
+
+          {/* Main Content - Show skeleton during initial load */}
+          <div className="flex-1 lg:ml-64 ml-0">
+            <div className="p-6 space-y-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+                <SkeletonStatsCard />
+                <SkeletonStatsCard />
+              </div>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                <SkeletonFacilityCard />
+                <SkeletonFacilityCard />
+                <SkeletonFacilityCard />
+                <SkeletonFacilityCard />
+                <SkeletonFacilityCard />
+                <SkeletonFacilityCard />
+              </div>
+              
+              <div className="bg-white rounded-lg shadow-sm border p-4 sm:p-6">
+                <Skeleton className="h-6 w-48 mb-4" />
+                <div className="space-y-3">
+                  <SkeletonListItem />
+                  <SkeletonListItem />
+                  <SkeletonListItem />
+                  <SkeletonListItem />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -3188,5 +3265,43 @@ export default function BookingDashboard() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+export default function BookingDashboard() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-background flex flex-col">
+        <div className="h-16 bg-white border-b" />
+        <div className="flex flex-1">
+          <div className="hidden lg:block w-64 border-r" />
+          <div className="flex-1 lg:ml-64 p-6 space-y-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+              <SkeletonStatsCard />
+              <SkeletonStatsCard />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+              <SkeletonFacilityCard />
+              <SkeletonFacilityCard />
+              <SkeletonFacilityCard />
+              <SkeletonFacilityCard />
+              <SkeletonFacilityCard />
+              <SkeletonFacilityCard />
+            </div>
+            <div className="bg-white rounded-lg shadow-sm border p-4 sm:p-6">
+              <Skeleton className="h-6 w-48 mb-4" />
+              <div className="space-y-3">
+                <SkeletonListItem />
+                <SkeletonListItem />
+                <SkeletonListItem />
+                <SkeletonListItem />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    }>
+      <BookingDashboardInner />
+    </Suspense>
   );
 }

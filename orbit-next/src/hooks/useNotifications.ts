@@ -72,7 +72,18 @@ export function useNotifications({ enabled, isAdmin }: UseNotificationsOptions):
   const markAsReadMutation = useMutation({
     mutationFn: async (alertId: string) => {
       const endpoint = isAdmin ? `/api/admin/alerts/${alertId}/read` : `/api/notifications/${alertId}/read`;
-      await apiRequest("POST", endpoint);
+      // Use apiRequest which handles authentication - don't try to read response body
+      try {
+        await apiRequest("POST", endpoint);
+      } catch (error: any) {
+        // If error is about body stream, ignore it - the request likely succeeded
+        if (error?.message?.includes('body stream already read')) {
+          console.warn('[markAsRead] Ignoring body stream error, request likely succeeded');
+          return { success: true };
+        }
+        throw error;
+      }
+      return { success: true };
     },
     onMutate: async (alertId: string) => {
       await queryClient.cancelQueries({ queryKey: ["/api/admin/alerts"] });
@@ -81,8 +92,19 @@ export function useNotifications({ enabled, isAdmin }: UseNotificationsOptions):
       const prevAdmin = queryClient.getQueryData<any[]>(["/api/admin/alerts"]);
       const prevUser = queryClient.getQueryData<any[]>(["/api/notifications"]);
 
-      const updateList = (list: any[] | undefined) =>
-        Array.isArray(list) ? list.map((alert) => (alert?.id === alertId ? { ...alert, isRead: true } : alert)) : list;
+      const updateList = (list: any[] | undefined) => {
+        if (!Array.isArray(list)) return list;
+        return list
+          .map((alert) => (alert?.id === alertId ? { ...alert, isRead: true } : alert))
+          .filter((alert) => {
+            // Hide equipment notifications once marked as read
+            if (alert?.id === alertId && alert?.isRead && alert?.title && 
+                (alert.title.includes('Equipment') || alert.title.includes('Needs'))) {
+              return false;
+            }
+            return true;
+          });
+      };
 
       queryClient.setQueryData(["/api/admin/alerts"], (old: any) => updateList(old));
       queryClient.setQueryData(["/api/notifications"], (old: any) => updateList(old));

@@ -6,6 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useNotifications } from "@/hooks/useNotifications";
+import { SkeletonListItem } from "@/components/ui/skeleton-presets";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -145,7 +146,10 @@ function parseEquipmentAlert(alert: any) {
   const mapToken = (rawToken: string) => {
     const raw = String(rawToken || '').replace(/_/g, ' ').trim();
     const lower = raw.toLowerCase();
-    if (lower.includes('others')) return null;
+    // Only skip if token is exactly 'other' or 'others' – do not filter
+    // out unrelated tokens that merely contain that substring (prevents
+    // accidental dropping of legitimate item labels).
+    if (lower === 'others' || lower === 'other') return null;
     if (lower === 'whiteboard') return 'Whiteboard & Markers';
     if (lower === 'projector') return 'Projector';
     if (lower === 'extension cord' || lower === 'extension_cord') return 'Extension Cord';
@@ -203,21 +207,17 @@ function parseEquipmentAlert(alert: any) {
         needsObj = { items: needsObj };
       }
     }
-    // If items is an array, map tokens to labels and extract any trailing 'others' text
+    // If items is an array, map tokens to labels
     if (Array.isArray(needsObj.items)) {
-      let othersFromItems = '';
       const mapped = needsObj.items.map((s: string) => {
-        const rawTok = String(s || '');
-        const lower = rawTok.toLowerCase();
-        if (lower.includes('others')) {
-          const trailing = rawTok.replace(/.*?others[:\s-]*/i, '').trim();
-          if (trailing && !othersFromItems) othersFromItems = trailing;
-          return null;
-        }
+        const rawTok = String(s || '').trim();
+        if (!rawTok) return null;
+        // Don't filter out items - mapToken already returns null for 'others'
         return mapToken(rawTok);
       }).filter(Boolean) as string[];
       equipmentList = mapped;
-      othersText = othersFromItems || (needsObj.others ? String(needsObj.others).trim() : null);
+      // Get othersText from the separate 'others' field, not from items array
+      othersText = needsObj.others ? String(needsObj.others).trim() : null;
     }
 
     // If needsObj contains an items map (per-item statuses), extract it regardless of array vs object
@@ -225,11 +225,13 @@ function parseEquipmentAlert(alert: any) {
       // Only treat items as a key->status map when it's an object (not an array)
       if (needsObj.items && typeof needsObj.items === 'object' && !Array.isArray(needsObj.items)) {
         itemsWithStatus = Object.keys(needsObj.items).map((k) => {
+          const mapped = mapToken(k);
+          if (!mapped) return null; // skip 'others'
           const rawVal = (needsObj.items as any)[k];
           const val = String(rawVal || '').toLowerCase();
           const status: 'prepared' | 'not_available' | 'pending' = val === 'prepared' || val === 'true' || val === 'yes' ? 'prepared' : (val === 'not available' || val === 'not_available' || val === 'false' || val === 'no' ? 'not_available' : 'pending');
-          return { label: mapToken(k) || String(k), status };
-        });
+          return { label: mapped, status };
+        }).filter(Boolean) as Array<{ label: string, status: 'prepared' | 'not_available' | 'pending' }>;
       }
     } catch (e) { itemsWithStatus = null; }
     // If we still didn't obtain itemsWithStatus, try the quoted-pairs fallback
@@ -237,11 +239,14 @@ function parseEquipmentAlert(alert: any) {
       const pairs = parseQuotedPairs();
       const keys = Object.keys(pairs || {});
       if (keys.length > 0) {
-        itemsWithStatus = keys.map(k => {
+        const mapped = keys.map(k => {
+          const lab = mapToken(k);
+          if (!lab) return null; // skip 'others'
           const val = String(pairs[k] || '').toLowerCase();
           const status: 'prepared' | 'not_available' | 'pending' = val === 'prepared' || val === 'true' || val === 'yes' ? 'prepared' : (val === 'not available' || val === 'not_available' || val === 'false' || val === 'no' ? 'not_available' : 'pending');
-          return { label: mapToken(k) || String(k), status };
-        });
+          return { label: lab, status };
+        }).filter(Boolean) as Array<{ label: string, status: 'prepared' | 'not_available' | 'pending' }>;
+        itemsWithStatus = mapped.length > 0 ? mapped : null;
       }
     }
 
@@ -250,11 +255,14 @@ function parseEquipmentAlert(alert: any) {
       const pairs2 = parseInlineLabelStatus();
       const keys2 = Object.keys(pairs2 || {});
       if (keys2.length > 0) {
-        itemsWithStatus = keys2.map(k => {
+        const mapped2 = keys2.map(k => {
+          const lab = mapToken(k);
+          if (!lab) return null; // skip 'others'
           const val = String(pairs2[k] || '').toLowerCase();
           const status: 'prepared' | 'not_available' | 'pending' = val === 'prepared' || val === 'true' || val === 'yes' ? 'prepared' : (val === 'not available' || val === 'not_available' || val === 'false' || val === 'no' ? 'not_available' : 'pending');
-          return { label: mapToken(k) || String(k), status };
-        });
+          return { label: lab, status };
+        }).filter(Boolean) as Array<{ label: string, status: 'prepared' | 'not_available' | 'pending' }>;
+        itemsWithStatus = mapped2.length > 0 ? mapped2 : null;
       }
     }
   } else if (eqMatch && eqMatch[1]) {
@@ -265,7 +273,7 @@ function parseEquipmentAlert(alert: any) {
       if (lower.includes('others')) {
         const trailing = p.replace(/.*?others[:\s-]*/i, '').trim();
         if (trailing && !othersFromParts) othersFromParts = trailing;
-        return null;
+        return null; // Don't include 'others' in the equipment list - it goes to othersText
       }
       return mapToken(p);
     }).filter(Boolean) as string[];
@@ -321,11 +329,7 @@ function parseEquipmentAlert(alert: any) {
     }
   }
 
-  // If we have an others text or detected 'others' markers, show a placeholder in the inline list instead of raw 'Others: ...'
-  if (othersText && equipmentList.length >= 0) {
-    // Ensure we don't duplicate 'and others'
-    if (!equipmentList.includes('and others')) equipmentList.push('and others');
-  }
+  // Do not inject 'and others' placeholder; we'll show "Other details" separately.
 
   // Normalize visible title for equipment alerts
   try {
@@ -987,7 +991,11 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
             <DropdownMenuContent align="end" className="w-96 p-2">
               <DropdownMenuLabel className="font-medium p-2">Notifications</DropdownMenuLabel>
               {alertsLoading ? (
-                <div className="p-3 text-sm text-gray-500">Loading...</div>
+                <div className="p-3 space-y-2">
+                  <SkeletonListItem />
+                  <SkeletonListItem />
+                  <SkeletonListItem />
+                </div>
               ) : visibleAlerts.length > 0 ? (
                 <div className="space-y-2">
                   {visibleAlerts.map((alert: any) => {
@@ -1115,10 +1123,17 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
                           try {
                             const mergedBookings = [...(userBookings || []), ...(allBookings || [])];
                             const matchEmail = parsed.titleRequesterEmail || actorEmail || '';
+                            
+                            // Also try to extract email from the alert message
+                            const msgLower = String(alert.message || '').toLowerCase();
+                            const emailMatch = alert.message?.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,})/);
+                            const extractedEmail = emailMatch ? emailMatch[1] : null;
+                            
                             const candidates = mergedBookings.filter((b: any) => {
                               try {
                                 const ownerEmail = String(b.userEmail || b.user?.email || '').toLowerCase();
-                                if (matchEmail && ownerEmail && ownerEmail === String(matchEmail).toLowerCase()) return true;
+                                const matchTarget = (matchEmail || extractedEmail || '').toLowerCase();
+                                if (matchTarget && ownerEmail && ownerEmail === matchTarget) return true;
                                 return false;
                               } catch (e) { return false; }
                             });
@@ -1141,16 +1156,32 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
                               const adminResp = String(chosen.adminResponse || '');
                               let structuredFromBooking: any = null;
                               try {
-                                const jsonMatch = adminResp.match(/(\{[\s\S]*\})/);
-                                if (jsonMatch && jsonMatch[1]) structuredFromBooking = JSON.parse(jsonMatch[1]);
+                                // Match the JSON block after "Needs: Status —"
+                                const jsonMatch = adminResp.match(/[—\-]\s*(\{[\s\S]*\})\s*$/);
+                                if (jsonMatch && jsonMatch[1]) {
+                                  structuredFromBooking = JSON.parse(jsonMatch[1]);
+                                }
                               } catch (e) { structuredFromBooking = null; }
 
-                              if (structuredFromBooking && (structuredFromBooking.items || typeof structuredFromBooking.items === 'object')) {
-                                inferredItemsWithStatus = Object.keys(structuredFromBooking.items).map((k) => {
-                                  const rawVal = structuredFromBooking.items[k];
-                                  const val = String(rawVal || '').toLowerCase();
-                                  const status: 'prepared' | 'not_available' | 'pending' = val === 'prepared' || val === 'true' || val === 'yes' ? 'prepared' : (val === 'not available' || val === 'not_available' || val === 'false' || val === 'no' ? 'not_available' : 'pending');
-                                  return { label: k, status };
+                              if (structuredFromBooking && structuredFromBooking.items && typeof structuredFromBooking.items === 'object') {
+                                // Map the keys from adminResponse to the parsed equipment list items
+                                inferredItemsWithStatus = parsed.equipmentList.map((label: string) => {
+                                  // Find matching key in structuredFromBooking.items (case-insensitive, handle underscores vs spaces)
+                                  const matchingKey = Object.keys(structuredFromBooking.items).find((k) =>
+                                    k.toLowerCase() === label.toLowerCase() ||
+                                    k.replace(/_/g, ' ').toLowerCase() === label.replace(/_/g, ' ').toLowerCase()
+                                  );
+                                  
+                                  if (matchingKey) {
+                                    const rawVal = structuredFromBooking.items[matchingKey];
+                                    const val = String(rawVal || '').toLowerCase();
+                                    const status: 'prepared' | 'not_available' | 'pending' = 
+                                      val === 'prepared' || val === 'true' || val === 'yes' ? 'prepared' : 
+                                      (val === 'not available' || val === 'not_available' || val === 'false' || val === 'no' ? 'not_available' : 
+                                      'pending');
+                                    return { label, status };
+                                  }
+                                  return { label, status: 'pending' as const };
                                 });
                               } else if (/Needs:\s*Prepared/i.test(adminResp)) {
                                 inferredItemsWithStatus = parsed.equipmentList.map((lab: any) => ({ label: lab, status: 'prepared' }));
@@ -1199,9 +1230,18 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
                                 </li>
                               ))}
                               {parsed.othersText ? (
-                                <li className="flex items-start gap-2 text-xs text-gray-600">
-                                  <span className="inline-block w-5">•</span>
-                                  <span>Other details: {parsed.othersText}</span>
+                                <li className="flex items-center gap-2">
+                                  <label className="flex items-center gap-2">
+                                    <input
+                                      type="checkbox"
+                                      disabled
+                                      checked={false}
+                                      className="w-4 h-4 rounded focus:ring-0 accent-gray-400"
+                                      readOnly
+                                      aria-checked={false}
+                                    />
+                                    <span className="text-xs text-gray-600">Others: {parsed.othersText}</span>
+                                  </label>
                                 </li>
                               ) : null}
                             </ul>
@@ -1225,7 +1265,7 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
                               const mapTokenLocal = (rawToken: string) => {
                                 const raw = String(rawToken || '').replace(/_/g, ' ').trim();
                                 const lower = raw.toLowerCase();
-                                if (lower.includes('others')) return null;
+                                if (lower === 'others' || lower === 'other') return null;
                                 if (lower === 'whiteboard') return 'Whiteboard & Markers';
                                 if (lower === 'projector') return 'Projector';
                                 if (lower === 'extension cord' || lower === 'extension_cord') return 'Extension Cord';
@@ -1264,7 +1304,7 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
                                     </label>
                                   </li>
                                 ))}
-                                {displayOthers ? (<li className="flex items-start gap-2 text-xs text-gray-600"><span className="inline-block w-5">•</span><span>Other details: {displayOthers}</span></li>) : null}
+                                {displayOthers ? (<li className="flex items-center gap-2"><label className="flex items-center gap-2"><input type="checkbox" disabled checked={false} className="w-4 h-4 rounded focus:ring-0 accent-gray-400" readOnly aria-checked={false} /><span className="text-xs text-gray-600">Others: {displayOthers}</span></label></li>) : null}
                               </ul>
                             );
                           } else {
@@ -1285,7 +1325,7 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
                                     </label>
                                   </li>
                                 ))}
-                                {parsed.othersText ? (<li className="flex items-start gap-2 text-xs text-gray-600"><span className="inline-block w-5">•</span><span>Other details: {parsed.othersText}</span></li>) : null}
+                                {parsed.othersText ? (<li className="flex items-center gap-2"><label className="flex items-center gap-2"><input type="checkbox" disabled checked={false} className="w-4 h-4 rounded focus:ring-0 accent-gray-400" readOnly aria-checked={false} /><span className="text-xs text-gray-600">Others: {parsed.othersText}</span></label></li>) : null}
                               </ul>
                             );
                           }
@@ -1390,10 +1430,22 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
                             setLocation('/admin/alerts');
                             return;
                           }
-                          try { setLocation('/notifications'); return; } catch (_) { }
-                          try { window.location.href = '/notifications'; return; } catch (_) { }
+                          // Navigate to Activity Logs → Notification Logs tab in booking dashboard
+                          // Update hash first, then trigger hashchange event manually if already on the page
+                          const newHash = '#activity-logs:notifications';
+                          const currentPath = window.location.pathname;
+                          
+                          if (currentPath.includes('/booking')) {
+                            // Already on booking page - update hash and dispatch event
+                            window.location.hash = newHash;
+                            window.dispatchEvent(new HashChangeEvent('hashchange'));
+                          } else {
+                            // Navigate to booking page with hash
+                            try { setLocation('/booking' + newHash); return; } catch (_) { }
+                            try { window.location.href = '/booking' + newHash; return; } catch (_) { }
+                          }
                         } catch (e) {
-                          // Fallback to location.replace if setLocation isn't available
+                          // Fallback
                           if (isAdmin) {
                             try { window.location.replace('/admin/alerts'); } catch (_) { setLocation('/admin/alerts'); }
                           } else {
