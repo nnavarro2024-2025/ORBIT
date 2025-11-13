@@ -2653,7 +2653,7 @@ function AdminDashboardInner() {
                 <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 lg:gap-6">
                   <div className="flex-1 min-w-0 space-y-2">
                     <h2 className="text-xl sm:text-2xl font-bold text-gray-900 flex items-center gap-2">
-                      <CalendarClock className="h-6 w-6 text-blue-600" />
+                      <CalendarClock className="h-6 w-6 text-pink-600" />
                       Report Schedules
                     </h2>
                     <p className="text-sm text-gray-600">Automate delivery of admin insights with recurring PDF reports.</p>
@@ -2688,7 +2688,7 @@ function AdminDashboardInner() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Button onClick={openCreateScheduleModal} className="inline-flex items-center gap-2">
+                    <Button onClick={openCreateScheduleModal} className="inline-flex items-center gap-2 bg-pink-600 hover:bg-pink-700 text-white">
                       <Plus className="h-4 w-4" />
                       Add schedule
                     </Button>
@@ -2715,7 +2715,7 @@ function AdminDashboardInner() {
                       : 'No report schedules have been configured yet. Create one to begin automated reporting.'}
                   </p>
                   <div className="mt-4">
-                    <Button onClick={openCreateScheduleModal} className="inline-flex items-center gap-2">
+                    <Button onClick={openCreateScheduleModal} className="inline-flex items-center gap-2 bg-pink-600 hover:bg-pink-700 text-white">
                       <Plus className="h-4 w-4" />
                       Create your first schedule
                     </Button>
@@ -2777,8 +2777,9 @@ function AdminDashboardInner() {
                                     onCheckedChange={(val) => handleToggleScheduleActive(schedule, val)}
                                     disabled={isPending}
                                     aria-label={schedule.isActive !== false ? 'Pause schedule' : 'Activate schedule'}
+                                    className="data-[state=checked]:bg-pink-600"
                                   />
-                                  <Badge variant={schedule.isActive !== false ? 'default' : 'secondary'}>
+                                  <Badge className={schedule.isActive !== false ? 'bg-pink-50 text-pink-700 border border-pink-200' : 'bg-gray-100 text-gray-700 border border-gray-300'}>
                                     {schedule.isActive !== false ? 'Active' : 'Paused'}
                                   </Badge>
                                 </div>

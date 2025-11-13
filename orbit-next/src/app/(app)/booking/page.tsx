@@ -11,7 +11,7 @@ import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
 import BookingModal from "@/components/modals/BookingModal";
 import EditBookingModal from "@/components/modals/EditBookingModal";
-import { Plus, Calendar, Home, Eye, AlertTriangle, BarChart3, Clock, CheckCircle, Loader2, HelpCircle } from "lucide-react";
+import { Plus, Calendar, Home, Eye, AlertTriangle, BarChart3, Clock, CheckCircle, Loader2, HelpCircle, Search } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import {
@@ -215,6 +215,7 @@ function BookingDashboardInner() {
   const [activityTab, setActivityTab] = useState<'booking' | 'notifications'>('booking');
   const [activityBookingPage, setActivityBookingPage] = useState(0);
   const [activityNotificationsPage, setActivityNotificationsPage] = useState(0);
+  const [activitySearchTerm, setActivitySearchTerm] = useState('');
 
   // Interpret URL hash forms like:
   // - #activity-logs
@@ -1627,24 +1628,74 @@ function BookingDashboardInner() {
         );
 
       case "activity-logs":
+        // Filter bookings based on search term
+        const searchTerm = activitySearchTerm.trim().toLowerCase();
+        const filteredUserBookings = searchTerm
+          ? userBookings.filter(booking => {
+              const facilityName = getFacilityDisplay(booking.facilityId).toLowerCase();
+              const purpose = (booking.purpose || '').toLowerCase();
+              const status = getBookingStatus(booking).label.toLowerCase();
+              const date = format(new Date(booking.startTime), 'EEE, MMM d').toLowerCase();
+              return facilityName.includes(searchTerm) || purpose.includes(searchTerm) || status.includes(searchTerm) || date.includes(searchTerm);
+            })
+          : userBookings;
+
+        // Filter notifications based on search term
+        const filteredNotifications = searchTerm
+          ? notificationsData.filter((notif: any) => {
+              const title = (notif.title || '').toLowerCase();
+              const message = (notif.message || '').toLowerCase();
+              return title.includes(searchTerm) || message.includes(searchTerm);
+            })
+          : notificationsData;
+
+        // Auto-switch tabs based on search results
+        if (searchTerm) {
+          const bookingCount = filteredUserBookings.length;
+          const notifCount = filteredNotifications.length;
+          if (activityTab === 'booking' && bookingCount === 0 && notifCount > 0) {
+            setActivityTab('notifications');
+          } else if (activityTab === 'notifications' && notifCount === 0 && bookingCount > 0) {
+            setActivityTab('booking');
+          }
+        }
+
         return (
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-              <div>
-                <h3 className="text-xl font-semibold text-gray-900">Activity Logs</h3>
-                <p className="text-sm text-gray-600 mt-1">View booking history and notification logs</p>
+            <div className="flex flex-col gap-4 mb-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                  <h3 className="text-xl font-semibold text-gray-900">Activity Logs</h3>
+                  <p className="text-sm text-gray-600 mt-1">View booking history and notification logs</p>
+                </div>
+                <div className="flex items-center gap-2 overflow-x-auto">
+                  <button
+                    onClick={() => setActivityTab('booking')}
+                    className={`px-3 py-2 rounded whitespace-nowrap text-sm ${activityTab === 'booking' ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
+                    Booking History
+                  </button>
+                  <button
+                    onClick={() => setActivityTab('notifications')}
+                    className={`px-3 py-2 rounded whitespace-nowrap text-sm ${activityTab === 'notifications' ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
+                    Notification Logs
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-2 overflow-x-auto">
-                <button
-                  onClick={() => setActivityTab('booking')}
-                  className={`px-3 py-2 rounded whitespace-nowrap text-sm ${activityTab === 'booking' ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
-                  Booking History
-                </button>
-                <button
-                  onClick={() => setActivityTab('notifications')}
-                  className={`px-3 py-2 rounded whitespace-nowrap text-sm ${activityTab === 'notifications' ? 'bg-pink-600 text-white' : 'bg-gray-100 text-gray-700'}`}>
-                  Notification Logs
-                </button>
+              
+              {/* Global Search Bar */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  value={activitySearchTerm}
+                  onChange={(e) => {
+                    setActivitySearchTerm(e.target.value);
+                    setActivityBookingPage(0);
+                    setActivityNotificationsPage(0);
+                  }}
+                  placeholder="Search bookings and notifications..."
+                  className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg focus:border-pink-600 focus:ring-1 focus:ring-pink-600 focus:outline-none transition-colors"
+                />
               </div>
             </div>
 
@@ -1656,13 +1707,15 @@ function BookingDashboardInner() {
                       <SkeletonListItem key={i} />
                     ))}
                   </div>
-                ) : userBookings.length === 0 ? (
+                ) : filteredUserBookings.length === 0 ? (
                   <div className="text-center py-8">
-                    <p className="text-gray-600 text-sm">No booking history</p>
+                    <p className="text-gray-600 text-sm">
+                      {searchTerm ? 'No bookings match your search' : 'No booking history'}
+                    </p>
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {userBookings
+                    {filteredUserBookings
                       .slice(activityBookingPage * 10, (activityBookingPage + 1) * 10)
                       .map((booking) => {
                       const id = String(booking.id || Math.random());
@@ -1899,12 +1952,14 @@ function BookingDashboardInner() {
                       <SkeletonListItem key={i} />
                     ))}
                   </div>
-                ) : notificationsData.length === 0 ? (
+                ) : filteredNotifications.length === 0 ? (
                   <div className="text-center py-8">
-                    <p className="text-gray-600 text-sm">No notifications</p>
+                    <p className="text-gray-600 text-sm">
+                      {searchTerm ? 'No notifications match your search' : 'No notifications'}
+                    </p>
                   </div>
                 ) : (
-                  notificationsData.slice(activityNotificationsPage * notificationsPerPage, (activityNotificationsPage + 1) * notificationsPerPage).map((n: any) => {
+                  filteredNotifications.slice(activityNotificationsPage * notificationsPerPage, (activityNotificationsPage + 1) * notificationsPerPage).map((n: any) => {
                     const { baseMessage, equipment } = parseEquipmentFromMessage(n.message);
                     
                     return (
@@ -1971,9 +2026,13 @@ function BookingDashboardInner() {
               <div className="pt-4 border-t border-gray-100 mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 {activityTab === 'booking' ? (
                   // Compact summary for Recent Booking booking history (no pagination)
-                  <p className="text-[11px] sm:text-sm text-gray-600">Showing {Math.min(bookingsPerPage, userBookings.length)} of {userBookings.length} bookings</p>
+                  <p className="text-[11px] sm:text-sm text-gray-600">
+                    {searchTerm ? `${filteredUserBookings.length}/${userBookings.length} bookings` : `Showing ${Math.min(bookingsPerPage, filteredUserBookings.length)} of ${filteredUserBookings.length} bookings`}
+                  </p>
                 ) : (
-                  <p className="text-[11px] sm:text-sm text-gray-600">Showing {activityNotificationsPage * notificationsPerPage + 1} to {Math.min((activityNotificationsPage + 1) * notificationsPerPage, notificationsData.length)} of {notificationsData.length} notifications</p>
+                  <p className="text-[11px] sm:text-sm text-gray-600">
+                    {searchTerm ? `${filteredNotifications.length}/${notificationsData.length} notifications` : `Showing ${activityNotificationsPage * notificationsPerPage + 1} to ${Math.min((activityNotificationsPage + 1) * notificationsPerPage, filteredNotifications.length)} of ${filteredNotifications.length} notifications`}
+                  </p>
                 )}
 
                 <div className="flex items-center justify-between sm:justify-start gap-2 w-full sm:w-auto">
@@ -1981,7 +2040,7 @@ function BookingDashboardInner() {
                   {activityTab === 'booking' ? null : (
                     <>
                       <button onClick={() => setActivityNotificationsPage(p => Math.max(0, p - 1))} disabled={activityNotificationsPage === 0} className="flex-1 sm:flex-none px-3 py-1.5 sm:py-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-xs sm:text-sm font-medium transition-colors">Prev</button>
-                      <button onClick={() => setActivityNotificationsPage(p => ((p + 1) * notificationsPerPage < notificationsData.length ? p + 1 : p))} disabled={(activityNotificationsPage + 1) * notificationsPerPage >= notificationsData.length} className="flex-1 sm:flex-none px-3 py-1.5 sm:py-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-xs sm:text-sm font-medium transition-colors">Next</button>
+                      <button onClick={() => setActivityNotificationsPage(p => ((p + 1) * notificationsPerPage < filteredNotifications.length ? p + 1 : p))} disabled={(activityNotificationsPage + 1) * notificationsPerPage >= filteredNotifications.length} className="flex-1 sm:flex-none px-3 py-1.5 sm:py-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-xs sm:text-sm font-medium transition-colors">Next</button>
                     </>
                   )}
                 </div>

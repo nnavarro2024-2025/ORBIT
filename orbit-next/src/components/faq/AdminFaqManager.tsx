@@ -259,7 +259,7 @@ export default function AdminFaqManager({ searchTerm: externalSearchTerm }: { se
                   Create, edit, and reorder FAQs shown to students in the booking dashboard.
                 </p>
               </div>
-              <Button onClick={openCreateDialog} size="sm" className="self-start sm:self-auto">
+              <Button onClick={openCreateDialog} size="sm" className="self-start sm:self-auto bg-pink-600 hover:bg-pink-700 text-white">
                 <Plus className="mr-2 h-4 w-4" />
                 Add FAQ
               </Button>
@@ -278,6 +278,7 @@ export default function AdminFaqManager({ searchTerm: externalSearchTerm }: { se
                         placeholder="Search by question or answer"
                         value={localSearchTerm}
                         onChange={(event) => setLocalSearchTerm(event.target.value)}
+                        className="focus:border-pink-600 focus:ring-pink-600"
                       />
                     </div>
                     <div className="w-full md:w-52">
@@ -363,11 +364,11 @@ export default function AdminFaqManager({ searchTerm: externalSearchTerm }: { se
                         <TableCell className="align-middle">
                           <div className="font-medium text-gray-900 leading-snug line-clamp-2">{faq.question}</div>
                           <div className="mt-1 text-xs text-gray-500 md:hidden">
-                            <Badge variant="secondary">{faq.category}</Badge>
+                            <Badge variant="outline" className="bg-pink-50 border-pink-200 text-pink-700">{faq.category}</Badge>
                           </div>
                         </TableCell>
                         <TableCell className="hidden md:table-cell align-middle">
-                          <Badge variant="secondary">{faq.category}</Badge>
+                          <Badge variant="outline" className="bg-pink-50 border-pink-200 text-pink-700">{faq.category}</Badge>
                         </TableCell>
                         <TableCell className="hidden md:table-cell align-middle text-sm text-gray-600">
                           <span className="font-medium text-green-600">{faq.helpfulCount}</span>
@@ -385,6 +386,7 @@ export default function AdminFaqManager({ searchTerm: externalSearchTerm }: { se
                               variant="outline"
                               onClick={() => openEditDialog(faq)}
                               disabled={updateFaqMutation.isPending && editingFaq?.id === faq.id}
+                              className="border-pink-200 text-pink-600 hover:bg-pink-50"
                             >
                               <Pencil className="mr-1.5 h-3.5 w-3.5" /> Edit
                             </Button>
@@ -474,7 +476,7 @@ export default function AdminFaqManager({ searchTerm: externalSearchTerm }: { se
               <Button type="button" variant="outline" onClick={() => setIsCreateOpen(false)}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={createFaqMutation.isPending}>
+              <Button type="submit" disabled={createFaqMutation.isPending} className="bg-pink-600 hover:bg-pink-700 text-white">
                 {createFaqMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Create FAQ
               </Button>
@@ -544,7 +546,7 @@ export default function AdminFaqManager({ searchTerm: externalSearchTerm }: { se
               <Button type="button" variant="outline" onClick={() => setIsEditOpen(false)}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={updateFaqMutation.isPending}>
+              <Button type="submit" disabled={updateFaqMutation.isPending} className="bg-pink-600 hover:bg-pink-700 text-white">
                 {updateFaqMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Save changes
               </Button>

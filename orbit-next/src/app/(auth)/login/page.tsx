@@ -249,6 +249,7 @@ function LoginInner() {
                     placeholder="Enter your email"
                     required
                     disabled={loading || redirecting}
+                    autoComplete="off"
                   />
                 </div>
 
@@ -262,6 +263,7 @@ function LoginInner() {
                     placeholder="Enter your password"
                     required
                     disabled={loading || redirecting}
+                    autoComplete="new-password"
                   />
                 </div>
                 <button
