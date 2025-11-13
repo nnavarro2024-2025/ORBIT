@@ -415,7 +415,7 @@ export default function BookingDashboard() {
       }
     },
     // Expect the server to return the updated booking object; update cache optimistically
-    onSuccess: async (data: any) => {
+    onSuccess: async (data: any, variables: any) => {
       try {
         // If server returned the updated booking, update the bookings cache
         if (data && data.id) {
@@ -454,9 +454,17 @@ export default function BookingDashboard() {
       }
 
       try {
+        const snapshot = (data && data.id) ? data : variables;
+        const facilityName = snapshot?.facility?.name || snapshot?.facilityName || `Facility #${snapshot?.facilityId ?? snapshot?.facility_id ?? '—'}`;
+        const start = snapshot?.startTime ? new Date(snapshot.startTime) : null;
+        const end = snapshot?.endTime ? new Date(snapshot.endTime) : null;
+        const description = start && end
+          ? `${facilityName} • ${format(start, 'MMM d, yyyy h:mm a')} – ${format(end, 'h:mm a')}`
+          : `${facilityName} updated successfully.`;
+
         toast({
-          title: 'Booking updated successfully.',
-          description: 'Your changes have been saved.',
+          title: 'Booking Updated',
+          description,
         });
       } catch (toastError) {
         console.warn('[BookingDashboard] Failed to show update success toast', toastError);
@@ -507,13 +515,13 @@ export default function BookingDashboard() {
   const cancelBookingMutation = useMutation({
     mutationFn: (bookingId: string) => apiRequest("POST", `/api/bookings/${bookingId}/cancel`),
     onSuccess: async () => {
-      // Wait for cache invalidation to complete before hiding loading state
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["/api/bookings"] }),
-        queryClient.invalidateQueries({ queryKey: ["/api/notifications"] }),
-        queryClient.invalidateQueries({ queryKey: ["/api/admin/alerts"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/admin/activity"] }),
       ]);
+      // Notifications and alerts update slightly later; refresh in background.
+      queryClient.invalidateQueries({ queryKey: ["/api/notifications"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/alerts"] });
     },
     onError: (error: any) => {
       toast({
@@ -535,12 +543,15 @@ export default function BookingDashboard() {
       const bookingSnapshot = bookingToCancel;
       cancelBookingMutation.mutate(bookingToCancel.id, {
         onSuccess: () => {
-          // Show context-aware toast: 'Ended' for active bookings, otherwise 'Cancelled'
           const start = new Date(bookingSnapshot.startTime);
           const end = new Date(bookingSnapshot.endTime);
           const now = new Date();
-          const isActive = bookingSnapshot.status === 'approved' ? (start <= now && now <= end) : (start <= now && now <= end);
-          toast({ title: 'Booking cancelled successfully.', description: isActive ? 'Your active booking has been ended.' : 'Your booking has been cancelled.' });
+          const facilityName = bookingSnapshot.facility?.name || bookingSnapshot.facilityName || `Facility #${bookingSnapshot.facilityId}`;
+          const isActiveWindow = start <= now && now <= end;
+          toast({
+            title: isActiveWindow ? 'Booking Ended' : 'Booking Cancelled',
+            description: `${facilityName} • ${format(start, 'MMM d, yyyy h:mm a')} – ${format(end, 'h:mm a')}`,
+          });
           // Close modal only after mutation succeeds and cache is updated
           setShowCancelModal(false);
           setBookingToCancel(null);

@@ -5,11 +5,11 @@ import { and, asc, eq, gt, or } from "drizzle-orm";
 import { storage } from "@/server/storage";
 import { emailService } from "@/server/emailService";
 import { db } from "@/server/db";
+import { BOOKING_MAX_DURATION_MS, BOOKING_MIN_DURATION_MS } from "@shared/bookingRules";
 import { facilityBookings, type Facility, type FacilityBooking } from "@shared/schema";
 
 const LIBRARY_OPEN_MINUTES = 7 * 60 + 30; // 7:30 AM
 const LIBRARY_CLOSE_MINUTES = 19 * 60; // 7:00 PM
-export const MAX_BOOKING_DURATION_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 export interface ValidationError {
   status: number;
@@ -117,14 +117,13 @@ export async function ensureFacilityIsBookable(
   }
 
   const durationMs = end.getTime() - start.getTime();
-  const minDurationMs = 30 * 60 * 1000;
   if (durationMs <= 0) {
     return {
       ok: false,
       error: { status: 400, body: { message: "End time must be after start time." } },
     };
   }
-  if (durationMs < minDurationMs) {
+  if (durationMs < BOOKING_MIN_DURATION_MS) {
     return {
       ok: false,
       error: { status: 400, body: { message: "Booking duration must be at least 30 minutes." } },
@@ -139,7 +138,7 @@ export async function ensureFacilityIsBookable(
     console.warn("[bookings] Failed to determine user role", error);
   }
 
-  if (durationMs > MAX_BOOKING_DURATION_MS) {
+  if (durationMs > BOOKING_MAX_DURATION_MS) {
     return {
       ok: false,
       error: {

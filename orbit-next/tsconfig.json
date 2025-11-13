@@ -27,7 +27,8 @@
         "./src/*"
       ],
       "@shared/*": [
-        "./src/shared/*"
+        "./src/shared/*",
+        "../shared/*"
       ],
       "@app-server/*": [
         "./src/server/*"
@@ -47,7 +48,8 @@
       "zod": [
         "./node_modules/zod"
       ]
-    }
+    },
+    "typeRoots": ["./orbit-next/node_modules/@types", "./node_modules/@types"]
   },
   "include": [
     "next-env.d.ts",

@@ -15,8 +15,8 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
-import { DialogDescription } from "@/components/ui/dialog";
 import {
   Form,
   FormControl,
@@ -50,6 +50,16 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
+import {
+  BOOKING_MAX_DURATION_MINUTES,
+  BOOKING_MAX_DURATION_MS,
+  BOOKING_MIN_DURATION_MINUTES,
+  BOOKING_MIN_DURATION_MS,
+} from "@shared/bookingRules";
+import ValidationSummary, {
+  type ConflictEntry,
+  type WarningMessage,
+} from "./ValidationSummary";
 
 // Small helper: return a short description for known facility names
 const getFacilityDescriptionByName = (name?: string) => {
@@ -65,6 +75,113 @@ const getFacilityDescriptionByName = (name?: string) => {
 };
 
 const PREVIEW_LIMIT = 10; // upper bound for small previews inside modals
+
+const LIBRARY_OPEN_HOUR = 7;
+const LIBRARY_OPEN_MINUTE = 30;
+const LIBRARY_CLOSE_HOUR = 19;
+const LIBRARY_CLOSE_MINUTE = 0;
+const SLOT_INTERVAL_MINUTES = 30;
+
+const startOfDay = (value: Date) => {
+  const copy = new Date(value);
+  copy.setHours(0, 0, 0, 0);
+  return copy;
+};
+
+const isSameCalendarDay = (a: Date, b: Date) => startOfDay(a).getTime() === startOfDay(b).getTime();
+
+const isDateBeforeToday = (value: Date) => startOfDay(value).getTime() < startOfDay(new Date()).getTime();
+
+const getLibraryWindow = (reference: Date) => {
+  const open = new Date(reference);
+  open.setHours(LIBRARY_OPEN_HOUR, LIBRARY_OPEN_MINUTE, 0, 0);
+  const close = new Date(reference);
+  close.setHours(LIBRARY_CLOSE_HOUR, LIBRARY_CLOSE_MINUTE, 0, 0);
+  return { open, close };
+};
+
+const roundUpToInterval = (value: Date, minutes: number) => {
+  const result = new Date(value);
+  result.setSeconds(0, 0);
+  const intervalMs = minutes * 60 * 1000;
+  const remainder = result.getTime() % intervalMs;
+  if (remainder === 0) return result;
+  result.setTime(result.getTime() + (intervalMs - remainder));
+  return result;
+};
+
+const clampStartToLibrary = (candidate: Date) => {
+  const { open, close } = getLibraryWindow(candidate);
+  const latestStart = new Date(Math.max(open.getTime(), close.getTime() - BOOKING_MIN_DURATION_MS));
+  if (candidate.getTime() < open.getTime()) return open;
+  if (candidate.getTime() > latestStart.getTime()) return latestStart;
+  return candidate;
+};
+
+const clampEndToLibrary = (candidate: Date, start: Date) => {
+  const { close } = getLibraryWindow(start);
+  if (candidate.getTime() > close.getTime()) return close;
+  if (candidate.getTime() <= start.getTime()) {
+    return new Date(Math.min(close.getTime(), start.getTime() + BOOKING_MIN_DURATION_MS));
+  }
+  return candidate;
+};
+
+const getNextAvailableStart = () => {
+  const now = new Date();
+  const { open: todayOpen, close: todayClose } = getLibraryWindow(now);
+  if (now.getTime() < todayOpen.getTime()) {
+    return todayOpen;
+  }
+  if (now.getTime() >= todayClose.getTime()) {
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const { open: tomorrowOpen } = getLibraryWindow(tomorrow);
+    return tomorrowOpen;
+  }
+  const rounded = roundUpToInterval(now, SLOT_INTERVAL_MINUTES);
+  if (rounded.getTime() > todayClose.getTime()) {
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const { open: tomorrowOpen } = getLibraryWindow(tomorrow);
+    return tomorrowOpen;
+  }
+  return clampStartToLibrary(rounded);
+};
+
+const normalizeStartTime = (candidate: Date) => {
+  let normalized = clampStartToLibrary(roundUpToInterval(candidate, SLOT_INTERVAL_MINUTES));
+  const now = new Date();
+
+  if (isSameCalendarDay(normalized, now) && normalized.getTime() < now.getTime()) {
+    const next = clampStartToLibrary(roundUpToInterval(now, SLOT_INTERVAL_MINUTES));
+    const { close } = getLibraryWindow(now);
+    if (next.getTime() <= close.getTime()) {
+      normalized = next;
+    } else {
+      normalized = clampStartToLibrary(getNextAvailableStart());
+    }
+  }
+
+  return normalized;
+};
+
+const normalizeEndTime = (start: Date, candidate?: Date | null) => {
+  const base = candidate ? new Date(candidate) : new Date(start.getTime() + BOOKING_MIN_DURATION_MS);
+  let normalized = clampEndToLibrary(base, start);
+  let diff = normalized.getTime() - start.getTime();
+
+  if (diff < BOOKING_MIN_DURATION_MS) {
+    normalized = clampEndToLibrary(new Date(start.getTime() + BOOKING_MIN_DURATION_MS), start);
+    diff = normalized.getTime() - start.getTime();
+  }
+
+  if (diff > BOOKING_MAX_DURATION_MS) {
+    normalized = clampEndToLibrary(new Date(start.getTime() + BOOKING_MAX_DURATION_MS), start);
+  }
+
+  return normalized;
+};
 
 // Custom Number Input with Controls
 interface NumberInputWithControlsProps {
@@ -256,18 +373,17 @@ export default function BookingModal({
   // getUserFacilityBookings removed - server-side checks are authoritative and
   // this client helper was unused. Kept logic centralized on server/storage.ts.
 
-  // Library working hours validation functions
   const isWithinLibraryHours = (date: Date): boolean => {
-    const hours = date.getHours();
-    const minutes = date.getMinutes();
-    const timeInMinutes = hours * 60 + minutes;
-    const libraryOpenTime = 7 * 60 + 30; // 7:30 AM
-    const libraryCloseTime = 19 * 60; // 7:00 PM
-    return timeInMinutes >= libraryOpenTime && timeInMinutes <= libraryCloseTime;
+    const { open, close } = getLibraryWindow(date);
+    return date.getTime() >= open.getTime() && date.getTime() <= close.getTime();
   };
 
   const formatLibraryHours = (): string => {
-    return "7:30 AM - 7:00 PM";
+    const sample = new Date();
+    const { open, close } = getLibraryWindow(sample);
+    const openLabel = format(open, "h:mm a");
+    const closeLabel = format(close, "h:mm a");
+    return `${openLabel} - ${closeLabel}`;
   };
 
   const createBookingSchema = () => z
@@ -289,11 +405,15 @@ export default function BookingModal({
       try {
         if (val.startTime && val.endTime) {
           const diff = val.endTime.getTime() - val.startTime.getTime();
-          const minMs = 30 * 60 * 1000; // 30 minutes
           if (diff <= 0) {
             ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'End time must be after start time', path: ['endTime'] });
-          } else if (diff < minMs) {
-            ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Bookings must be at least 30 minutes long', path: ['endTime'] });
+          } else {
+            if (diff < BOOKING_MIN_DURATION_MS) {
+              ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Bookings must be at least ${BOOKING_MIN_DURATION_MINUTES} minutes long`, path: ['endTime'] });
+            }
+            if (diff > BOOKING_MAX_DURATION_MS) {
+              ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Bookings cannot exceed ${BOOKING_MAX_DURATION_MINUTES} minutes`, path: ['endTime'] });
+            }
           }
         }
       } catch (e) {
@@ -326,13 +446,27 @@ export default function BookingModal({
   const OTHERS_MAX = 50;
   const REMINDER_LEAD_MINUTES = 60;
 
+  const defaultStartTime = useMemo(() => {
+    if (initialStartTime) {
+      return clampStartToLibrary(new Date(initialStartTime));
+    }
+    return clampStartToLibrary(getNextAvailableStart());
+  }, [initialStartTime]);
+
+  const defaultEndTime = useMemo(() => {
+    const base = initialEndTime
+      ? new Date(initialEndTime)
+      : new Date(defaultStartTime.getTime() + BOOKING_MIN_DURATION_MS);
+    return clampEndToLibrary(base, defaultStartTime);
+  }, [initialEndTime, defaultStartTime]);
+
   const form = useForm<BookingFormData>({
     resolver: zodResolver(bookingSchema),
     mode: 'onChange',
     defaultValues: {
       facilityId: "",
-      startTime: initialStartTime ?? new Date(Date.now() + 60 * 60 * 1000), // Default: initialStartTime or now + 1 hour
-      endTime: initialEndTime ?? new Date(Date.now() + 90 * 60 * 1000), // Default: initialEndTime or start + 30 minutes
+      startTime: defaultStartTime,
+      endTime: defaultEndTime,
       purpose: "",
       courseYearDept: "",
       participants: 1,
@@ -348,25 +482,28 @@ export default function BookingModal({
     if (!isOpen) return;
 
     if (initialStartTime) {
+      const normalizedStart = normalizeStartTime(new Date(initialStartTime));
       const currentStart = form.getValues('startTime');
       const currentStartMs = currentStart instanceof Date ? currentStart.getTime() : undefined;
-      const nextStartMs = initialStartTime.getTime();
+      const nextStartMs = normalizedStart.getTime();
       if (currentStartMs !== nextStartMs) {
-        form.setValue('startTime', initialStartTime);
+        form.setValue('startTime', normalizedStart);
       }
     }
 
     if (initialEndTime) {
+      const baseStart = form.getValues('startTime') || defaultStartTime;
+      const normalizedEnd = normalizeEndTime(baseStart, new Date(initialEndTime));
       const currentEnd = form.getValues('endTime');
       const currentEndMs = currentEnd instanceof Date ? currentEnd.getTime() : undefined;
-      const nextEndMs = initialEndTime.getTime();
+      const nextEndMs = normalizedEnd.getTime();
       if (currentEndMs !== nextEndMs) {
-        form.setValue('endTime', initialEndTime);
+        form.setValue('endTime', normalizedEnd);
       }
     }
   }, [isOpen, initialStartTime, initialEndTime, form]);
 
-  const [formValidationWarnings, setFormValidationWarnings] = useState<Array<{title: string; description: string}>>([]);
+  const [formValidationWarnings, setFormValidationWarnings] = useState<WarningMessage[]>([]);
   // Track whether the user manually edited the date/time so we don't overwrite their choices
   const [userEditedTime, setUserEditedTime] = useState(false);
   type AvailableSlot = { start: Date; end: Date; source: "api" | "fallback" };
@@ -374,9 +511,296 @@ export default function BookingModal({
   const [availableSlots, setAvailableSlots] = useState<AvailableSlot[]>([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [slotsError, setSlotsError] = useState<string | null>(null);
+  const [lockedSlot, setLockedSlot] = useState<{
+    holdId: string;
+    facilityId: number;
+    startTime: string;
+    endTime: string;
+    expiresAt: string;
+  } | null>(null);
+  const [lockError, setLockError] = useState<string | null>(null);
+  const [holdConflicts, setHoldConflicts] = useState<ConflictEntry[] | null>(null);
+  const holdRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestHoldRequestRef = useRef(0);
+  const failedHoldSignatureRef = useRef<string | null>(null);
+  const latestHoldIdRef = useRef<string | null>(null);
 
   const startTimeValue = form.watch("startTime");
+  const endTimeValue = form.watch("endTime");
   const facilityIdValue = form.watch("facilityId");
+
+  type SerializedSlotHold = {
+    id: string;
+    facilityId?: number;
+    startTime?: string;
+    endTime?: string;
+    expiresAt: string;
+  };
+
+  const clearHoldRefreshTimer = useCallback(() => {
+    if (holdRefreshTimeoutRef.current) {
+      clearTimeout(holdRefreshTimeoutRef.current);
+      holdRefreshTimeoutRef.current = null;
+    }
+  }, []);
+
+  const releaseHold = useCallback(
+    async (holdId?: string) => {
+      clearHoldRefreshTimer();
+      const targetHoldId = holdId ?? latestHoldIdRef.current;
+      latestHoldIdRef.current = null;
+      setLockedSlot(null);
+      if (!targetHoldId) {
+        return;
+      }
+      try {
+        await apiRequest(
+          "DELETE",
+          `/api/booking-holds?holdId=${encodeURIComponent(targetHoldId)}`,
+        );
+      } catch (error) {
+        console.warn("[BookingModal] Failed to release slot hold", error);
+      }
+    },
+    [clearHoldRefreshTimer],
+  );
+
+  const ensureSlotHoldRef = useRef<(() => Promise<void>) | null>(null);
+
+  const scheduleHoldRefresh = useCallback(
+    (hold: SerializedSlotHold) => {
+      clearHoldRefreshTimer();
+      const expiresAtMs = new Date(hold.expiresAt).getTime();
+      if (!Number.isFinite(expiresAtMs)) {
+        return;
+      }
+      const refreshDelay = Math.max(expiresAtMs - Date.now() - 15_000, 5_000);
+      holdRefreshTimeoutRef.current = setTimeout(async () => {
+        try {
+          const resp = await apiRequest("PATCH", "/api/booking-holds", {
+            holdId: hold.id,
+          });
+          const data = await resp.json();
+          const refreshed: SerializedSlotHold | undefined = data?.hold;
+          if (!refreshed) {
+            throw new Error("Missing slot hold data");
+          }
+          latestHoldIdRef.current = refreshed.id;
+          failedHoldSignatureRef.current = null;
+          setLockedSlot((prev) => {
+            if (!prev) {
+              return {
+                holdId: refreshed.id,
+                facilityId: refreshed.facilityId ?? hold.facilityId ?? 0,
+                startTime: refreshed.startTime ?? hold.startTime ?? "",
+                endTime: refreshed.endTime ?? hold.endTime ?? "",
+                expiresAt: refreshed.expiresAt,
+              };
+            }
+            if (prev.holdId === refreshed.id) {
+              return { ...prev, expiresAt: refreshed.expiresAt };
+            }
+            return {
+              ...prev,
+              holdId: refreshed.id,
+              expiresAt: refreshed.expiresAt,
+            };
+          });
+          scheduleHoldRefresh({
+            id: refreshed.id,
+            facilityId: refreshed.facilityId ?? hold.facilityId,
+            startTime: refreshed.startTime ?? hold.startTime,
+            endTime: refreshed.endTime ?? hold.endTime,
+            expiresAt: refreshed.expiresAt,
+          });
+        } catch (error) {
+          console.warn("[BookingModal] Failed to refresh slot hold", error);
+          clearHoldRefreshTimer();
+          latestHoldIdRef.current = null;
+          setLockedSlot(null);
+          setHoldConflicts(null);
+          setLockError("Slot hold expired. Attempting to reacquire...");
+          failedHoldSignatureRef.current = null;
+          ensureSlotHoldRef.current?.();
+        }
+      }, refreshDelay);
+    },
+    [clearHoldRefreshTimer],
+  );
+
+  const ensureSlotHold = useCallback(async () => {
+    if (!isOpen) {
+      return;
+    }
+
+    const facilityIdStr = facilityIdValue;
+    const start = startTimeValue instanceof Date ? startTimeValue : null;
+    const end = endTimeValue instanceof Date ? endTimeValue : null;
+
+    if (!facilityIdStr || !start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      failedHoldSignatureRef.current = null;
+      setHoldConflicts(null);
+      setLockError(null);
+      await releaseHold();
+      return;
+    }
+
+    const facilityId = parseInt(facilityIdStr, 10);
+    if (Number.isNaN(facilityId)) {
+      failedHoldSignatureRef.current = null;
+      setHoldConflicts(null);
+      setLockError(null);
+      await releaseHold();
+      return;
+    }
+
+    const normalizedStart = new Date(start);
+    const normalizedEnd = new Date(end);
+    const desiredSignature = `${facilityId}|${normalizedStart.toISOString()}|${normalizedEnd.toISOString()}`;
+    const currentSignature = lockedSlot
+      ? `${lockedSlot.facilityId}|${lockedSlot.startTime}|${lockedSlot.endTime}`
+      : null;
+
+    if (lockedSlot && currentSignature === desiredSignature) {
+      if (!holdRefreshTimeoutRef.current) {
+        scheduleHoldRefresh({
+          id: lockedSlot.holdId,
+          facilityId: lockedSlot.facilityId,
+          startTime: lockedSlot.startTime,
+          endTime: lockedSlot.endTime,
+          expiresAt: lockedSlot.expiresAt,
+        });
+      }
+      return;
+    }
+
+    if (failedHoldSignatureRef.current === desiredSignature) {
+      return;
+    }
+
+    clearHoldRefreshTimer();
+    const requestId = Date.now();
+    latestHoldRequestRef.current = requestId;
+
+    try {
+      const resp = await apiRequest("POST", "/api/booking-holds", {
+        holdId: lockedSlot?.holdId,
+        facilityId,
+        startTime: normalizedStart.toISOString(),
+        endTime: normalizedEnd.toISOString(),
+      });
+      const data = await resp.json();
+      if (latestHoldRequestRef.current !== requestId) return;
+      const hold: SerializedSlotHold | undefined = data?.hold;
+      if (!hold) {
+        throw new Error("Missing slot hold data");
+      }
+
+      latestHoldIdRef.current = hold.id;
+      failedHoldSignatureRef.current = null;
+      setHoldConflicts(null);
+      setLockError(null);
+      setLockedSlot({
+        holdId: hold.id,
+        facilityId: hold.facilityId ?? facilityId,
+        startTime: hold.startTime ?? normalizedStart.toISOString(),
+        endTime: hold.endTime ?? normalizedEnd.toISOString(),
+        expiresAt: hold.expiresAt,
+      });
+      scheduleHoldRefresh({
+        id: hold.id,
+        facilityId: hold.facilityId ?? facilityId,
+        startTime: hold.startTime ?? normalizedStart.toISOString(),
+        endTime: hold.endTime ?? normalizedEnd.toISOString(),
+        expiresAt: hold.expiresAt,
+      });
+    } catch (error: any) {
+      if (latestHoldRequestRef.current !== requestId) return;
+
+      const previousHoldId = lockedSlot?.holdId;
+      latestHoldIdRef.current = null;
+      setLockedSlot(null);
+      if (previousHoldId) {
+        await releaseHold(previousHoldId);
+      }
+
+      failedHoldSignatureRef.current = desiredSignature;
+      let errorMessage = "Unable to reserve the selected time slot.";
+      let conflicts: ConflictEntry[] | null = null;
+
+      const payload = error?.payload;
+      if (payload) {
+        if (payload.message) {
+          errorMessage = payload.message;
+        }
+        if (Array.isArray(payload.conflictingBookings)) {
+          const facilityName = selectedFacility?.name || `Facility ${facilityId}`;
+          conflicts = payload.conflictingBookings.map((booking: any) => ({
+            id: booking.id,
+            startTime: booking.startTime,
+            endTime: booking.endTime,
+            facilityName,
+            status: booking.status,
+          }));
+        }
+        if (payload.conflictingHoldExpiresAt) {
+          const expiresAt = new Date(payload.conflictingHoldExpiresAt);
+          if (!Number.isNaN(expiresAt.getTime())) {
+            errorMessage = `Another user is currently holding this slot until ${format(expiresAt, "MMM d, yyyy h:mm a")}.`;
+          }
+        }
+      } else if (error instanceof Error && error.message) {
+        errorMessage = error.message;
+      }
+
+      setHoldConflicts(conflicts);
+      setLockError(errorMessage);
+    }
+  }, [
+    isOpen,
+    facilityIdValue,
+    startTimeValue,
+    endTimeValue,
+    lockedSlot,
+    selectedFacility,
+    releaseHold,
+    scheduleHoldRefresh,
+    clearHoldRefreshTimer,
+  ]);
+
+  useEffect(() => {
+    ensureSlotHoldRef.current = ensureSlotHold;
+  }, [ensureSlotHold]);
+
+  const startTimeMs = startTimeValue instanceof Date ? startTimeValue.getTime() : null;
+  const endTimeMs = endTimeValue instanceof Date ? endTimeValue.getTime() : null;
+
+  useEffect(() => {
+    if (!isOpen) {
+      failedHoldSignatureRef.current = null;
+      setHoldConflicts(null);
+      setLockError(null);
+      void releaseHold();
+      return;
+    }
+
+    void ensureSlotHold();
+  }, [
+    isOpen,
+    facilityIdValue,
+    startTimeMs,
+    endTimeMs,
+    ensureSlotHold,
+    releaseHold,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      failedHoldSignatureRef.current = null;
+      void releaseHold();
+    };
+  }, [releaseHold]);
+
   const selectedDateKey = startTimeValue ? format(startTimeValue, "yyyy-MM-dd") : null;
 
   const computeFallbackSlots = useCallback((facilityIdNum: number, dateKey: string): AvailableSlot[] => {
@@ -513,30 +937,67 @@ export default function BookingModal({
     if (availableSlots.length === 0) return;
 
     const firstSlot = availableSlots[0];
+    const normalizedStart = normalizeStartTime(firstSlot.start);
+    const normalizedEnd = normalizeEndTime(normalizedStart, firstSlot.end);
+
     const currentStart = form.getValues('startTime');
     const currentEnd = form.getValues('endTime');
 
-    const startMatches = currentStart && Math.abs(currentStart.getTime() - firstSlot.start.getTime()) < 60 * 1000;
-    const endMatches = currentEnd && Math.abs(currentEnd.getTime() - firstSlot.end.getTime()) < 60 * 1000;
-
-    if (!startMatches) {
-      form.setValue('startTime', firstSlot.start);
+    if (!currentStart || Math.abs(currentStart.getTime() - normalizedStart.getTime()) >= 60 * 1000) {
+      form.setValue('startTime', normalizedStart);
     }
-    if (!endMatches) {
-      form.setValue('endTime', firstSlot.end);
+    if (!currentEnd || Math.abs(currentEnd.getTime() - normalizedEnd.getTime()) >= 60 * 1000) {
+      form.setValue('endTime', normalizedEnd);
     }
   }, [availableSlots, userEditedTime, isOpen, form]);
 
-  const handleSlotSelect = (slot: AvailableSlot) => {
-    form.setValue('startTime', slot.start, { shouldDirty: true });
-    form.setValue('endTime', slot.end, { shouldDirty: true });
+  const handleSlotSelect = useCallback((slot: AvailableSlot) => {
+    const normalizedStart = normalizeStartTime(slot.start);
+    const normalizedEnd = normalizeEndTime(normalizedStart, slot.end);
+    form.setValue('startTime', normalizedStart, { shouldDirty: true });
+    form.setValue('endTime', normalizedEnd, { shouldDirty: true });
     setUserEditedTime(true);
+    setLockError(null);
+  }, [form]);
+
+  const isSlotSelected = useCallback((slot: AvailableSlot) => {
+    if (!startTimeValue) return false;
+    const normalizedStart = normalizeStartTime(slot.start);
+    return Math.abs(startTimeValue.getTime() - normalizedStart.getTime()) < 60 * 1000;
+  }, [startTimeValue]);
+
+  const computeDurationMs = (start?: Date | null, end?: Date | null) => {
+    if (!start || !end) return 0;
+    return Math.max(0, end.getTime() - start.getTime());
   };
 
-  const isSlotSelected = (slot: AvailableSlot) => {
-    if (!startTimeValue) return false;
-    return Math.abs(startTimeValue.getTime() - slot.start.getTime()) < 60 * 1000;
-  };
+  const durationMs = computeDurationMs(startTimeValue, endTimeValue);
+  const durationMinutes = durationMs / 60000;
+  const isBelowMinDuration = durationMs > 0 && durationMs < BOOKING_MIN_DURATION_MS;
+  const exceedsMaxDuration = durationMs > BOOKING_MAX_DURATION_MS;
+
+  useEffect(() => {
+    if (!startTimeValue) return;
+    const normalizedStart = normalizeStartTime(new Date(startTimeValue));
+    if (normalizedStart.getTime() !== startTimeValue.getTime()) {
+      form.setValue("startTime", normalizedStart, { shouldDirty: true });
+      return;
+    }
+
+    const currentEnd = form.getValues("endTime");
+    const normalizedEnd = normalizeEndTime(normalizedStart, currentEnd ?? undefined);
+    if (!currentEnd || normalizedEnd.getTime() !== currentEnd.getTime()) {
+      form.setValue("endTime", normalizedEnd, { shouldDirty: true });
+    }
+  }, [startTimeValue, form]);
+
+  useEffect(() => {
+    if (!startTimeValue || !endTimeValue) return;
+    const normalizedEnd = normalizeEndTime(new Date(startTimeValue), new Date(endTimeValue));
+    if (normalizedEnd.getTime() !== endTimeValue.getTime()) {
+      form.setValue("endTime", normalizedEnd, { shouldDirty: true });
+    }
+  }, [startTimeValue, endTimeValue, form]);
 
   // Dev-only debug: log current user's bookings when modal opens or facility changes
   useEffect(() => {
@@ -1089,11 +1550,11 @@ export default function BookingModal({
     return `${hours}h ${minutes}m`;
   };
 
-  const isDurationValid = (start: Date | undefined, end: Date | undefined) => {
+  const isDurationValid = useCallback((start: Date | undefined, end: Date | undefined) => {
     if (!start || !end) return false;
     const diff = end.getTime() - start.getTime();
-    return diff >= 30 * 60 * 1000; // at least 30 minutes
-  };
+    return diff >= BOOKING_MIN_DURATION_MS && diff <= BOOKING_MAX_DURATION_MS;
+  }, []);
 
   // Auto-fill an available time slot when the modal opens (today or next day)
   useEffect(() => {
@@ -1578,15 +2039,14 @@ export default function BookingModal({
                             onSelect={(date) => {
                               if (!date) return;
                               const current = field.value || new Date();
-                              const newDate = new Date(date);
-                              // preserve time from current selection
-                              newDate.setHours(current.getHours(), current.getMinutes(), 0, 0);
-                              field.onChange(newDate);
-                              // mark that the user edited the time/date manually
+                              const merged = new Date(date);
+                              merged.setHours(current.getHours(), current.getMinutes(), 0, 0);
+                              const normalized = normalizeStartTime(merged);
+                              field.onChange(normalized);
                               setUserEditedTime(true);
                             }}
                             initialFocus
-                            disabled={(date) => date < new Date()}
+                            disabled={(date) => isDateBeforeToday(date)}
                           />
                         </PopoverContent>
                       </Popover>
@@ -1605,9 +2065,10 @@ export default function BookingModal({
                             const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
                             if (!timeRegex.test(timeValue)) return;
                             const [hours, minutes] = timeValue.split(":").map(Number);
-                            const newDate = field.value ? new Date(field.value) : new Date();
-                            newDate.setHours(hours, minutes, 0, 0);
-                            field.onChange(newDate);
+                            const base = field.value ? new Date(field.value) : new Date();
+                            base.setHours(hours, minutes, 0, 0);
+                            const normalized = normalizeStartTime(base);
+                            field.onChange(normalized);
                             setUserEditedTime(true);
                           }}
                         />
@@ -1643,14 +2104,17 @@ export default function BookingModal({
                             selected={field.value}
                             onSelect={(date) => {
                               if (!date) return;
-                              const current = field.value || new Date();
-                              const newDate = new Date(date);
-                              newDate.setHours(current.getHours(), current.getMinutes(), 0, 0);
-              field.onChange(newDate);
-              setUserEditedTime(true);
+                              const start = form.getValues('startTime') || new Date();
+                              const normalizedStart = normalizeStartTime(new Date(start));
+                              const current = field.value || normalizedStart;
+                              const merged = new Date(date);
+                              merged.setHours(current.getHours(), current.getMinutes(), 0, 0);
+                              const normalizedEnd = normalizeEndTime(normalizedStart, merged);
+                              field.onChange(normalizedEnd);
+                              setUserEditedTime(true);
                             }}
                             initialFocus
-                            disabled={(date) => date < new Date()}
+                            disabled={(date) => isDateBeforeToday(date)}
                           />
                         </PopoverContent>
                       </Popover>
@@ -1669,9 +2133,11 @@ export default function BookingModal({
                             const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
                             if (!timeRegex.test(timeValue)) return;
                             const [hours, minutes] = timeValue.split(":").map(Number);
-                            const newDate = field.value ? new Date(field.value) : new Date();
-                            newDate.setHours(hours, minutes, 0, 0);
-                            field.onChange(newDate);
+                            const start = form.getValues('startTime') || new Date();
+                            const base = field.value ? new Date(field.value) : new Date();
+                            base.setHours(hours, minutes, 0, 0);
+                            const normalizedEnd = normalizeEndTime(start, base);
+                            field.onChange(normalizedEnd);
                             setUserEditedTime(true);
                           }}
                         />
@@ -1683,59 +2149,23 @@ export default function BookingModal({
             </div>
 
             {/* Time Conflict Warning */}
-            {(() => {
-              const conflicts = checkTimeConflict();
-              if (!conflicts) return null;
-              
-              return (
-                <div id="booking-form-errors" className="space-y-3 rounded-lg border border-red-200 bg-red-50 p-4">
-                  <div className="flex items-center gap-2 text-red-700">
-                    <TriangleAlert className="h-5 w-5" />
-                    <span className="font-semibold">Please review the following issues</span>
-                  </div>
-                  <div className="flex items-start gap-2">
-                    <div className="w-2 h-2 rounded-full bg-red-500 mt-2"></div>
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-red-800 mb-2">
-                        Time Conflict Detected
-                      </p>
-                      <p className="text-sm text-red-700 mb-3">
-                        Your selected time overlaps with {conflicts.length} existing booking{conflicts.length > 1 ? 's' : ''}:
-                      </p>
-                      <div className="space-y-2">
-                        {conflicts.slice(0, Math.min(PREVIEW_LIMIT, conflicts.length)).map((booking: any, index: number) => (
-                          <div key={index} className="bg-red-100 rounded p-2">
-                            <p className="text-xs text-red-800">
-                              {new Date(booking.startTime).toLocaleDateString('en-US', {
-                                weekday: 'short',
-                                month: 'short',
-                                day: 'numeric'
-                              })} • {new Date(booking.startTime).toLocaleTimeString('en-US', {
-                                hour: 'numeric',
-                                minute: '2-digit',
-                                hour12: true
-                              })} - {new Date(booking.endTime).toLocaleTimeString('en-US', {
-                                hour: 'numeric',
-                                minute: '2-digit',
-                                hour12: true
-                              })}
-                            </p>
-                          </div>
-                        ))}
-                        {conflicts.length > PREVIEW_LIMIT && (
-                          <p className="text-xs text-red-600">
-                            +{conflicts.length - PREVIEW_LIMIT} more conflict{conflicts.length - PREVIEW_LIMIT > 1 ? 's' : ''}
-                          </p>
-                        )}
-                      </div>
-                      <p className="text-sm text-red-700 mt-3">
-                        Please choose a different time to avoid conflicts.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              );
-            })()}
+            <ValidationSummary
+              id="booking-form-errors"
+              conflicts={
+                (() => {
+                  const conflicts = checkTimeConflict() as ConflictEntry[] | null;
+                  if (holdConflicts && holdConflicts.length > 0) {
+                    return [...(conflicts ?? []), ...holdConflicts];
+                  }
+                  return conflicts;
+                })()
+              }
+              warnings={
+                lockError
+                  ? [...formValidationWarnings, { title: "Slot hold", description: lockError }]
+                  : formValidationWarnings
+              }
+            />
 
             {/* Purpose and Course/Year/Dept fields */}
 
