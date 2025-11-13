@@ -2040,8 +2040,18 @@ function BookingDashboardInner() {
                 ) : facilities
                   .filter((f) => {
                     const restricted = isRestrictedFacility(f);
-                    const allowedByRole = (user?.role === 'faculty' || user?.role === 'admin');
-                    return !(restricted && !allowedByRole);
+                    const userRole = user?.role || 'student';
+                    
+                    // Admin sees everything
+                    if (userRole === 'admin') return true;
+                    
+                    // Faculty sees ONLY Board Room and Faculty Lounge
+                    if (userRole === 'faculty') {
+                      return restricted; // Only show restricted facilities (Board Room and Faculty Lounge)
+                    }
+                    
+                    // Students see only non-restricted facilities
+                    return !restricted;
                   })
                   .map((facility) => {
                   const bookingStatus = getFacilityBookingStatus(facility.id);
@@ -2428,8 +2438,18 @@ function BookingDashboardInner() {
                 ) : facilities
                   .filter((f) => {
                     const restricted = isRestrictedFacility(f);
-                    const allowedByRole = (user?.role === 'faculty' || user?.role === 'admin');
-                    return !(restricted && !allowedByRole);
+                    const userRole = user?.role || 'student';
+                    
+                    // Admin sees everything
+                    if (userRole === 'admin') return true;
+                    
+                    // Faculty sees ONLY Board Room and Faculty Lounge
+                    if (userRole === 'faculty') {
+                      return restricted; // Only show restricted facilities (Board Room and Faculty Lounge)
+                    }
+                    
+                    // Students see only non-restricted facilities
+                    return !restricted;
                   })
                   .map((facility) => {
                   const bookingStatus = getFacilityBookingStatus(facility.id);

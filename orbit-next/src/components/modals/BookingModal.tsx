@@ -300,13 +300,25 @@ export default function BookingModal({
   ];
 
   const allFacilities = useMemo(() => (facilities.length > 0 ? facilities : predefinedFacilities), [facilities]);
-  // Filter out restricted facilities for non-faculty/admin users
+  // Filter facilities based on user role
   const visibleFacilities = useMemo(() => {
     return allFacilities.filter(facility => {
+      if (!facility.isActive) return false;
+      
       const name = String(facility.name || '').toLowerCase();
       const restricted = /board room|boardroom|lounge/.test(name);
-      const allowedByRole = (user?.role === 'faculty' || user?.role === 'admin');
-      return facility.isActive && !(restricted && !allowedByRole);
+      const userRole = user?.role || 'student';
+      
+      // Admin sees everything
+      if (userRole === 'admin') return true;
+      
+      // Faculty sees ONLY Board Room and Faculty Lounge
+      if (userRole === 'faculty') {
+        return restricted; // Only show restricted facilities
+      }
+      
+      // Students see only non-restricted facilities
+      return !restricted;
     });
   }, [allFacilities, user?.role]);
   const fallbackFacilities = visibleFacilities;
