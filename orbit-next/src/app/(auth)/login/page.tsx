@@ -107,10 +107,9 @@ function LoginInner() {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          // Redirect back to the login page so the client can detect domain
-          // restrictions and show an appropriate UI instead of landing at
-          // the app root where the user may appear briefly signed in.
-          redirectTo: `${window.location.origin}/login`,
+          // After OAuth, land on booking dashboard; role-based redirect will adjust if needed.
+          // Ensure this URL is added to Supabase's Allowed Redirect URLs.
+          redirectTo: `${window.location.origin}/booking`,
 
           // Force Google to show the account chooser so users can pick which account to use
           queryParams: { prompt: 'select_account' },
