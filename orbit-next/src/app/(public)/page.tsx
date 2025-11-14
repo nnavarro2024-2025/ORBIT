@@ -1,53 +1,83 @@
 "use client";
 
-import { ReactNode, useEffect } from "react";
+import { ReactNode, useEffect, useRef, useState } from "react";
 import { Calendar, Shield, Users } from "lucide-react";
 
 import { useAuth } from "@/hooks/useAuth";
 import { useLegacyLocation } from "@/lib/navigation";
 
 export default function LandingPage() {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, isLoading: authLoading } = useAuth();
   const [, setLocation] = useLegacyLocation();
+  const processedOAuthRef = useRef(false);
+  const [isRedirecting, setIsRedirecting] = useState(false);
 
   const handleGetStarted = () => {
     setLocation("/login");
   };
 
+  // Handle OAuth hash tokens (#access_token=...) landing on the public page.
+  // Wait for useAuth to fully establish the session (isAuthenticated && user && !authLoading) before redirecting.
   useEffect(() => {
-    if (isAuthenticated && user) {
-      try {
-        if (user.role === "admin") {
-          setLocation("/admin");
-        } else {
-          setLocation("/booking");
-        }
-      } catch (error) {
-        console.error("Redirect after auth check failed:", error);
+    // Early hash detection: if we have an access_token fragment, show redirecting state.
+    if (processedOAuthRef.current) return;
+    try {
+      const hash = typeof window !== 'undefined' ? window.location.hash || '' : '';
+      if (hash.includes('access_token=')) {
+        processedOAuthRef.current = true;
+        setIsRedirecting(true);
       }
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    // Wait until auth is fully resolved (not loading, user exists, isAuthenticated).
+    if (authLoading) return;
+    if (!isAuthenticated || !user) {
+      // If not authenticated after loading finished, clear redirecting state.
+      if (isRedirecting) setIsRedirecting(false);
+      return;
     }
-  }, [isAuthenticated, user, setLocation]);
+    try {
+      const target = user.role === 'admin' ? '/admin' : '/booking';
+      setLocation(target);
+    } catch (error) {
+      console.error('Redirect after auth check failed:', error);
+      setIsRedirecting(false);
+    }
+  }, [isAuthenticated, user, authLoading, setLocation, isRedirecting]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-rose-50">
-      <div className="min-h-screen flex items-center justify-center py-12">
-        <div className="w-full max-w-4xl px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-6 sm:mb-8 lg:mb-10">
-            <div className="inline-flex items-center justify-center mb-3 sm:mb-4 lg:mb-6">
-              <img
-                src="/orbit-logo.png"
-                alt="ORBIT Logo"
-                className="h-12 sm:h-14 md:h-16 w-auto object-contain"
-              />
+    <>
+      {isRedirecting && (
+        <div className="fixed inset-0 bg-white z-50 flex items-center justify-center">
+          <div className="text-center">
+            <div className="inline-flex items-center justify-center mb-4">
+              <img src="/orbit-logo.png" alt="ORBIT" className="h-20 w-auto animate-pulse" />
             </div>
-            <p className="text-lg sm:text-xl lg:text-2xl text-gray-700 mb-3 sm:mb-4 font-bold">
-              ORBIT - Integrated Library Facility Management System
-            </p>
-            <p className="text-base sm:text-lg text-gray-600 max-w-3xl mx-auto leading-snug">
-              Easily find and reserve school rooms and facilities — manage your bookings in one
-              place.
-            </p>
+            <p className="text-gray-600 text-sm">Signing you in...</p>
           </div>
+        </div>
+      )}
+      <div className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-rose-50">
+        <div className="min-h-screen flex items-center justify-center py-12">
+          <div className="w-full max-w-4xl px-4 sm:px-6 lg:px-8">
+            <div className="text-center mb-6 sm:mb-8 lg:mb-10">
+              <div className="inline-flex items-center justify-center mb-3 sm:mb-4 lg:mb-6">
+                <img
+                  src="/orbit-logo.png"
+                  alt="ORBIT Logo"
+                  className="h-12 sm:h-14 md:h-16 w-auto object-contain"
+                />
+              </div>
+              <p className="text-lg sm:text-xl lg:text-2xl text-gray-700 mb-3 sm:mb-4 font-bold">
+                ORBIT - Integrated Library Facility Management System
+              </p>
+              <p className="text-base sm:text-lg text-gray-600 max-w-3xl mx-auto leading-snug">
+                Easily find and reserve school rooms and facilities — manage your bookings in one
+                place.
+              </p>
+            </div>
 
           <div className="mx-auto">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-5 mb-4 sm:mb-8 lg:mb-10">
@@ -79,7 +109,8 @@ export default function LandingPage() {
           </div>
         </div>
       </div>
-    </div>
+      </div>
+    </>
   );
 }
 

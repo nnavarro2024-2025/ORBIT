@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 
 function LoginInner() {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, isLoading: authLoading } = useAuth();
   const [, setLocation] = useLegacyLocation();
 
   // Remove username, use email only
@@ -28,21 +28,28 @@ function LoginInner() {
   const domainBlockedRef = useRef(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [isOAuthCallback, setIsOAuthCallback] = useState(false);
 
   // When the confirm modal opens, focus the Confirm button so Enter will activate it immediately
 
   useEffect(() => {
     try {
-      const search = (() => {
+      const hash = (() => {
         try {
-          return typeof window !== "undefined" ? window.location.search : "";
+          return typeof window !== "undefined" ? window.location.hash : "";
         } catch (_e) {
           return "";
         }
       })();
-      const hash = (() => {
+
+      // Check if this is an OAuth callback (has access_token in hash)
+      if (hash.includes('access_token')) {
+        setIsOAuthCallback(true);
+      }
+
+      const search = (() => {
         try {
-          return typeof window !== "undefined" ? window.location.hash : "";
+          return typeof window !== "undefined" ? window.location.search : "";
         } catch (_e) {
           return "";
         }
@@ -83,7 +90,9 @@ function LoginInner() {
     // user becomes authenticated (we want the user to explicitly dismiss the modal).
     if (domainBlockedRef.current) return;
 
-    // Redirect authenticated users to the appropriate dashboard.
+    // Wait for auth to finish loading, then redirect authenticated users
+    if (authLoading) return;
+    
     if (isAuthenticated && user) {
       setRedirecting(true);
       try {
@@ -98,7 +107,7 @@ function LoginInner() {
         setRedirecting(false);
       }
     }
-  }, [isAuthenticated, user, setLocation]);
+  }, [isAuthenticated, user, authLoading, setLocation]);
 
   const signInWithGoogle = async () => {
     setLoading(true);
@@ -107,9 +116,8 @@ function LoginInner() {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          // After OAuth, land on booking dashboard; role-based redirect will adjust if needed.
-          // Ensure this URL is added to Supabase's Allowed Redirect URLs.
-          redirectTo: `${window.location.origin}/booking`,
+          // Redirect back to login so session can be properly established before routing
+          redirectTo: `${window.location.origin}/login`,
 
           // Force Google to show the account chooser so users can pick which account to use
           queryParams: { prompt: 'select_account' },
@@ -150,7 +158,7 @@ function LoginInner() {
 
   return (
     <>
-      {redirecting && (
+      {(redirecting || (isOAuthCallback && authLoading)) && (
         <div className="fixed inset-0 bg-white z-50 flex items-center justify-center">
           <div className="w-full max-w-md p-6">
             <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200 space-y-6">
@@ -179,7 +187,9 @@ function LoginInner() {
               
               <div className="flex items-center justify-center gap-2 pt-4">
                 <Loader2 className="h-5 w-5 text-pink-600 animate-spin" />
-                <span className="text-sm text-gray-600 font-medium">Redirecting to your dashboard...</span>
+                <span className="text-sm text-gray-600 font-medium">
+                  {isOAuthCallback ? 'Processing sign-in...' : 'Redirecting to your dashboard...'}
+                </span>
               </div>
             </div>
           </div>

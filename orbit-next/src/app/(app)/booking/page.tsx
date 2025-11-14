@@ -38,7 +38,7 @@ function BookingDashboardInner() {
   const [devForceOpen, setDevForceOpen] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   // Common hooks used throughout the dashboard
-  const { user } = useAuth();
+  const { user, isLoading: authLoading, isAuthenticated } = useAuth();
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -62,6 +62,7 @@ function BookingDashboardInner() {
       return res.json();
     },
     staleTime: 30_000,
+    enabled: !!user && !authLoading,
   });
 
   // If availability API didn't return data, synthesize a mock availability map so cards can show time frames.
@@ -628,8 +629,8 @@ function BookingDashboardInner() {
       const response = await apiRequest("GET", "/api/bookings");
       return response.json();
     },
-    // Refetch every 30s so countdowns stay in sync with server-side expirations
-    refetchInterval: 30000,
+    enabled: !!user && !authLoading,
+    refetchInterval: false,
   });
 
   // NEW: Get ALL approved bookings to show facility availability to all users
@@ -639,7 +640,8 @@ function BookingDashboardInner() {
       const response = await apiRequest("GET", "/api/bookings/all");
       return response.json();
     },
-    refetchInterval: 30000, // Refresh every 30 seconds to show real-time availability
+    enabled: !!user && !authLoading,
+    refetchInterval: false,
   });
 
   // Ensure userBookings is always an array
@@ -653,7 +655,7 @@ function BookingDashboardInner() {
       const res = await apiRequest('GET', '/api/notifications');
       try { return await res.json(); } catch { return []; }
     },
-    enabled: !!user,
+    enabled: !!user && !authLoading,
     staleTime: 30_000,
   });
 
