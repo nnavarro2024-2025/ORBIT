@@ -53,8 +53,8 @@ function getPool() {
   // On serverless platforms, keep pool size very small to avoid exceeding
   // Supabase pooler limits when lambdas spin up in parallel.
   const isServerless = process.env.VERCEL === "1" || process.env.AWS_REGION;
-  const configuredMax = parseInt(process.env.DB_POOL_MAX || "5", 10);
-  const max = Math.max(1, isServerless ? Math.min(configuredMax, 2) : configuredMax);
+  const configuredMax = parseInt(process.env.DB_POOL_MAX || (isServerless ? "1" : "5"), 10);
+  const max = Math.max(1, isServerless ? Math.min(configuredMax, 1) : configuredMax);
 
   // Normalize to ensure pgBouncer transaction pooling to prevent session exhaustion.
   try {
