@@ -50,10 +50,20 @@ export async function POST(request: NextRequest) {
     try {
       existingUser = await storage.getUser(userId);
     } catch (dbError: any) {
-      console.error("[auth/sync] Database getUser error:", dbError?.message || dbError);
+      const errorMsg = dbError?.message || String(dbError);
+      console.error("[auth/sync] Database getUser error:", errorMsg);
+      
+      // Check if it's a connection pool error
+      if (errorMsg.includes("MaxClientsInSessionMode") || errorMsg.includes("connection pool")) {
+        console.error("🚨 [auth/sync] Database connection pool exhausted. This usually means:");
+        console.error("   - Too many concurrent connections");
+        console.error("   - DB_POOL_MAX is too high for your Supabase plan");
+        console.error("   - Consider reducing DB_POOL_MAX to 1 or using pgBouncer");
+      }
+      
       return NextResponse.json(
-        { message: "Database error: " + (dbError?.message || "Unknown error") },
-        { status: 500 }
+        { message: "Database connection error. Please try again." },
+        { status: 503 } // Service Unavailable instead of 500
       );
     }
 

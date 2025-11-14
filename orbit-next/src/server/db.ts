@@ -50,18 +50,17 @@ function getPool() {
   let raw = process.env.DATABASE_URL || "postgresql://localhost:5432/postgres";
   raw = raw.trim();
 
-  // On serverless platforms, keep pool size very small to avoid exceeding
-  // Supabase pooler limits when lambdas spin up in parallel.
+  // Use reasonable pool size: 5 for local dev, 1 for serverless
   const isServerless = process.env.VERCEL === "1" || process.env.AWS_REGION;
-  const configuredMax = parseInt(process.env.DB_POOL_MAX || (isServerless ? "1" : "5"), 10);
-  const max = Math.max(1, isServerless ? Math.min(configuredMax, 1) : configuredMax);
+  const configuredMax = parseInt(process.env.DB_POOL_MAX || "5", 10);
+  const max = Math.max(1, isServerless ? 1 : configuredMax);
 
   // Normalize to ensure pgBouncer transaction pooling to prevent session exhaustion.
   try {
     const url = new URL(raw);
     if (!/localhost|127\.0\.0\.1/i.test(url.hostname)) {
       if (!url.searchParams.get("pgbouncer")) url.searchParams.set("pgbouncer", "true");
-      if (!url.searchParams.get("pool_mode")) url.searchParams.set("pool_mode", "transaction");
+      // Don't force pool_mode - port 6543 handles transaction mode automatically
       if (!url.searchParams.get("connection_limit")) url.searchParams.set("connection_limit", String(max));
     }
     raw = url.toString();
@@ -69,12 +68,16 @@ function getPool() {
     console.warn("[db] Could not parse DATABASE_URL for normalization", e);
   }
 
-  const idleTimeoutMillis = parseInt(process.env.DB_POOL_IDLE_MS || "10000", 10);
+  const idleTimeoutMillis = parseInt(process.env.DB_POOL_IDLE_MS || "30000", 10);
+  const connectionTimeoutMillis = parseInt(process.env.DB_POOL_CONNECTION_TIMEOUT_MS || "5000", 10);
+  const statementTimeoutMillis = parseInt(process.env.DB_POOL_STATEMENT_TIMEOUT_MS || "30000", 10);
 
   _pool = new Pool({
     connectionString: raw,
     max,
     idleTimeoutMillis,
+    connectionTimeoutMillis,
+    statement_timeout: statementTimeoutMillis,
     allowExitOnIdle: true,
     ssl: /localhost|127\.0\.0\.1/.test(raw) ? undefined : { rejectUnauthorized: false },
   });
