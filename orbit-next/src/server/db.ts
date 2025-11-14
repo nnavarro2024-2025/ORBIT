@@ -69,7 +69,10 @@ function getPool() {
   }
 
   const idleTimeoutMillis = parseInt(process.env.DB_POOL_IDLE_MS || "30000", 10);
-  const connectionTimeoutMillis = parseInt(process.env.DB_POOL_CONNECTION_TIMEOUT_MS || "5000", 10);
+  const connectionTimeoutMillis = parseInt(
+    process.env.DB_POOL_CONNECTION_TIMEOUT_MS || (isServerless ? "20000" : "5000"),
+    10,
+  );
   const statementTimeoutMillis = parseInt(process.env.DB_POOL_STATEMENT_TIMEOUT_MS || "30000", 10);
 
   _pool = new Pool({
