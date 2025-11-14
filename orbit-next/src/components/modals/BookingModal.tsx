@@ -518,6 +518,7 @@ export default function BookingModal({
   const [formValidationWarnings, setFormValidationWarnings] = useState<WarningMessage[]>([]);
   // Track whether the user manually edited the date/time so we don't overwrite their choices
   const [userEditedTime, setUserEditedTime] = useState(false);
+  const isSelectingSlotRef = useRef(false);
   type AvailableSlot = { start: Date; end: Date; source: "api" | "fallback" };
   const slotCacheRef = useRef<Map<string, AvailableSlot[]>>(new Map());
   const [availableSlots, setAvailableSlots] = useState<AvailableSlot[]>([]);
@@ -828,9 +829,15 @@ export default function BookingModal({
       const blockingStatuses = new Set(["approved", "pending"]);
       const facilityBookings = (allBookings || []).filter((booking: any) => booking.facilityId === facilityIdNum && blockingStatuses.has(booking.status));
 
-      for (let cursor = new Date(startWindow); cursor.getTime() + SLOT_MS <= endWindow.getTime(); cursor = new Date(cursor.getTime() + SLOT_MS)) {
+      for (let cursor = new Date(startWindow); cursor.getTime() < endWindow.getTime(); cursor = new Date(cursor.getTime() + SLOT_MS)) {
         const slotStart = new Date(cursor);
         const slotEnd = new Date(cursor.getTime() + SLOT_MS);
+        
+        // Skip slots that extend beyond library hours
+        if (slotEnd.getTime() > endWindow.getTime()) {
+          break;
+        }
+        
         const conflict = facilityBookings.some((booking: any) => {
           const existingStart = new Date(booking.startTime).getTime();
           const existingEnd = new Date(booking.endTime).getTime();
@@ -905,7 +912,16 @@ export default function BookingModal({
         if (facilityEntry && Array.isArray(facilityEntry.slots)) {
           slots = facilityEntry.slots
             .filter((slot: any) => slot?.status === 'available')
-            .map((slot: any) => ({ start: new Date(slot.start), end: new Date(slot.end), source: "api" as const }));
+            .map((slot: any) => ({ start: new Date(slot.start), end: new Date(slot.end), source: "api" as const }))
+            .filter((slot: AvailableSlot) => {
+              // Ensure slots are within library hours (7:30 AM - 7:00 PM)
+              const hour = slot.start.getHours();
+              const minute = slot.start.getMinutes();
+              const startMinutes = hour * 60 + minute;
+              const libraryOpenMinutes = 7 * 60 + 30; // 7:30 AM
+              const libraryCloseMinutes = 19 * 60; // 7:00 PM
+              return startMinutes >= libraryOpenMinutes && startMinutes < libraryCloseMinutes;
+            });
         }
 
         if (slots.length === 0) {
@@ -943,40 +959,96 @@ export default function BookingModal({
     };
   }, [isOpen, facilityIdValue, selectedDateKey, computeFallbackSlots]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    if (userEditedTime) return;
-    if (availableSlots.length === 0) return;
+  // Track if we've already auto-filled the initial slot
+  const hasAutoFilledRef = useRef(false);
 
-    const firstSlot = availableSlots[0];
-    const normalizedStart = normalizeStartTime(firstSlot.start);
-    const normalizedEnd = normalizeEndTime(normalizedStart, firstSlot.end);
+  useEffect(() => {
+    if (!isOpen) {
+      hasAutoFilledRef.current = false; // Reset when modal closes
+      setUserEditedTime(false); // Reset user edited state when modal closes
+      return;
+    }
+    
+    // Skip auto-fill if user has manually selected a time or we've already auto-filled
+    if (userEditedTime || hasAutoFilledRef.current) return;
+    if (availableSlots.length === 0) return;
 
     const currentStart = form.getValues('startTime');
     const currentEnd = form.getValues('endTime');
-
-    if (!currentStart || Math.abs(currentStart.getTime() - normalizedStart.getTime()) >= 60 * 1000) {
-      form.setValue('startTime', normalizedStart);
+    
+    // Only auto-fill if no valid time is currently set
+    if (currentStart && currentEnd) {
+      const { open, close } = getLibraryWindow(currentStart);
+      const isValidTime = currentStart.getTime() >= open.getTime() && 
+                         currentEnd.getTime() <= close.getTime();
+      if (isValidTime) {
+        hasAutoFilledRef.current = true; // Mark as filled
+        return; // Keep existing valid time
+      }
     }
-    if (!currentEnd || Math.abs(currentEnd.getTime() - normalizedEnd.getTime()) >= 60 * 1000) {
-      form.setValue('endTime', normalizedEnd);
+
+    // Only auto-fill the first time the modal opens or when the date changes
+    if (!hasAutoFilledRef.current) {
+      const firstSlot = availableSlots[0];
+      if (firstSlot) {
+        const normalizedStart = new Date(firstSlot.start);
+        const normalizedEnd = new Date(firstSlot.end);
+        
+        // Only update if the values are actually different
+        const currentStartTime = currentStart?.getTime();
+        const currentEndTime = currentEnd?.getTime();
+        
+        if (currentStartTime !== normalizedStart.getTime() || currentEndTime !== normalizedEnd.getTime()) {
+          form.setValue('startTime', normalizedStart, { shouldValidate: true });
+          form.setValue('endTime', normalizedEnd, { shouldValidate: true });
+        }
+        
+        hasAutoFilledRef.current = true;
+      }
     }
   }, [availableSlots, userEditedTime, isOpen, form]);
 
   const handleSlotSelect = useCallback((slot: AvailableSlot) => {
-    const normalizedStart = normalizeStartTime(slot.start);
-    const normalizedEnd = normalizeEndTime(normalizedStart, slot.end);
-    form.setValue('startTime', normalizedStart, { shouldDirty: true });
-    form.setValue('endTime', normalizedEnd, { shouldDirty: true });
+    // Set userEditedTime to true to prevent auto-fill from overriding the selection
     setUserEditedTime(true);
+    
+    // Set the flag to indicate we're in the middle of a slot selection
+    isSelectingSlotRef.current = true;
+    
+    // Use batch updates to prevent intermediate renders
+    form.setValue('startTime', new Date(slot.start), { 
+      shouldValidate: true, 
+      shouldDirty: true,
+      shouldTouch: true
+    });
+    form.setValue('endTime', new Date(slot.end), { 
+      shouldValidate: true, 
+      shouldDirty: true,
+      shouldTouch: true
+    });
+    
     setLockError(null);
+    
+    // Keep the flag set longer to ensure all effects complete
+    setTimeout(() => {
+      isSelectingSlotRef.current = false;
+    }, 1000);
   }, [form]);
 
   const isSlotSelected = useCallback((slot: AvailableSlot) => {
-    if (!startTimeValue) return false;
-    const normalizedStart = normalizeStartTime(slot.start);
-    return Math.abs(startTimeValue.getTime() - normalizedStart.getTime()) < 60 * 1000;
-  }, [startTimeValue]);
+    if (!startTimeValue || !slot) return false;
+    
+    // Compare both start and end times to ensure we have an exact match
+    const slotStart = new Date(slot.start).getTime();
+    const slotEnd = new Date(slot.end).getTime();
+    const currentStart = startTimeValue.getTime();
+    const currentEnd = endTimeValue?.getTime();
+    
+    return (
+      Math.abs(currentStart - slotStart) < 60 * 1000 && 
+      (!currentEnd || Math.abs(currentEnd - slotEnd) < 60 * 1000)
+    );
+  }, [startTimeValue, endTimeValue]);
 
   const computeDurationMs = (start?: Date | null, end?: Date | null) => {
     if (!start || !end) return 0;
@@ -990,6 +1062,32 @@ export default function BookingModal({
 
   useEffect(() => {
     if (!startTimeValue) return;
+    if (isSelectingSlotRef.current) return; // Don't interfere during slot selection
+    if (userEditedTime) return; // Don't override user's manual selection
+    
+    // Check if current time matches an available slot (don't normalize valid slot selections)
+    const matchesSlot = availableSlots.some(slot => 
+      Math.abs(slot.start.getTime() - startTimeValue.getTime()) < 1000
+    );
+    if (matchesSlot) return; // This is a valid slot selection, don't touch it
+    
+    // Check if the current time is already valid (within library hours, proper interval)
+    const { open, close } = getLibraryWindow(startTimeValue);
+    const isWithinHours = startTimeValue.getTime() >= open.getTime() && startTimeValue.getTime() < close.getTime();
+    const minutes = startTimeValue.getMinutes();
+    const isProperInterval = minutes === 0 || minutes === 30;
+    
+    if (isWithinHours && isProperInterval) {
+      // Time is already valid, just ensure end time is set
+      const currentEnd = form.getValues("endTime");
+      if (!currentEnd) {
+        const normalizedEnd = normalizeEndTime(startTimeValue, undefined);
+        form.setValue("endTime", normalizedEnd, { shouldDirty: true });
+      }
+      return;
+    }
+    
+    // Only normalize if time is actually invalid
     const normalizedStart = normalizeStartTime(new Date(startTimeValue));
     if (normalizedStart.getTime() !== startTimeValue.getTime()) {
       form.setValue("startTime", normalizedStart, { shouldDirty: true });
@@ -1001,15 +1099,37 @@ export default function BookingModal({
     if (!currentEnd || normalizedEnd.getTime() !== currentEnd.getTime()) {
       form.setValue("endTime", normalizedEnd, { shouldDirty: true });
     }
-  }, [startTimeValue, form]);
+  }, [startTimeValue, form, userEditedTime, availableSlots]);
 
   useEffect(() => {
     if (!startTimeValue || !endTimeValue) return;
+    if (isSelectingSlotRef.current) return; // Don't interfere during slot selection
+    if (userEditedTime) return; // Don't override user's manual selection
+    
+    // Check if current time matches an available slot (don't normalize valid slot selections)
+    const matchesSlot = availableSlots.some(slot => 
+      Math.abs(slot.start.getTime() - startTimeValue.getTime()) < 1000 &&
+      Math.abs(slot.end.getTime() - endTimeValue.getTime()) < 1000
+    );
+    if (matchesSlot) return; // This is a valid slot selection, don't touch it
+    
+    // Check if end time is valid (after start, within library hours, proper duration)
+    const { close } = getLibraryWindow(startTimeValue);
+    const duration = endTimeValue.getTime() - startTimeValue.getTime();
+    const isAfterStart = endTimeValue.getTime() > startTimeValue.getTime();
+    const isWithinHours = endTimeValue.getTime() <= close.getTime();
+    const isValidDuration = duration >= BOOKING_MIN_DURATION_MS && duration <= BOOKING_MAX_DURATION_MS;
+    
+    if (isAfterStart && isWithinHours && isValidDuration) {
+      return; // End time is already valid
+    }
+    
+    // Only normalize if end time is actually invalid
     const normalizedEnd = normalizeEndTime(new Date(startTimeValue), new Date(endTimeValue));
     if (normalizedEnd.getTime() !== endTimeValue.getTime()) {
       form.setValue("endTime", normalizedEnd, { shouldDirty: true });
     }
-  }, [startTimeValue, endTimeValue, form]);
+  }, [startTimeValue, endTimeValue, form, userEditedTime, availableSlots]);
 
   // Dev-only debug: log current user's bookings when modal opens or facility changes
   useEffect(() => {
@@ -1703,7 +1823,7 @@ export default function BookingModal({
 
         // If the caller provided an explicit slot (user clicked a slot), prefer it
         // but only if it's within library hours and doesn't conflict with approved bookings.
-  if (initialStartTime && initialEndTime) {
+        if (!userEditedTime && initialStartTime && initialEndTime) {
           const providedStartValid = isWithinLibraryHours(initialStartTime);
           const providedEndValid = isWithinLibraryHours(initialEndTime);
 
