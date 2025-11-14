@@ -1080,22 +1080,28 @@ function AdminDashboardInner() {
 
   // Small visible badge used to highlight bookings that requested equipment
 
-  // Admin stats
-  const isAdmin = !!authUser && authUser.role === 'admin';
+  // Auth gating: prevent admin queries firing before auth completes
+  const { user: authUserFull, isLoading: authLoading } = useAuth(); // reuse hook to get loading state
+  const effectiveUser = authUserFull || authUser; // fallback to existing authUser if defined earlier
+  const authReady = !!effectiveUser && !authLoading;
+  const isAdmin = authReady && effectiveUser.role === 'admin';
+
+  const commonQueryOpts = {
+    refetchInterval: false as const,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false as const,
+  };
 
 
-  // System alerts
+  // System alerts (manual refresh only)
   const { data: alertsData = [], isLoading: alertsLoading, isError: alertsError } = useQuery({
     queryKey: ['/api/admin/alerts'],
     queryFn: async () => {
       const res = await apiRequest('GET', '/api/admin/alerts');
       return res.json();
     },
-    // Poll alerts so system alerts appear in near-real time for admins
-    refetchInterval: 5000,
-    refetchOnMount: 'always',
-    refetchOnWindowFocus: false,
     enabled: isAdmin,
+    ...commonQueryOpts,
   });
 
   // Report schedules
@@ -1110,43 +1116,37 @@ function AdminDashboardInner() {
     enabled: isAdmin,
   });
 
-  // Activity logs
+  // Activity logs (manual refresh)
   const { data: activitiesData = [], isLoading: activitiesLoading, isError: activitiesError } = useQuery({
     queryKey: ['/api/admin/activity'],
     queryFn: async () => {
       const res = await apiRequest('GET', '/api/admin/activity');
       return res.json();
     },
-    refetchInterval: 5000,
-    refetchOnMount: 'always',
-    refetchOnWindowFocus: false,
     enabled: isAdmin,
+    ...commonQueryOpts,
   });
 
-  // All bookings (admin view)
+  // All bookings (manual refresh)
   const { data: adminBookingsData = [], isLoading: allBookingsLoading, isError: allBookingsError } = useQuery({
     queryKey: ['/api/admin/bookings'],
     queryFn: async () => {
       const res = await apiRequest('GET', '/api/admin/bookings');
       return res.json();
     },
-    refetchInterval: 5000,
-    refetchOnMount: 'always',
-    refetchOnWindowFocus: false,
     enabled: isAdmin,
+    ...commonQueryOpts,
   });
 
-  // Pending bookings (for booking requests tab)
+  // Pending bookings
   const { data: pendingBookingsData = [], isLoading: pendingBookingsLoading, isError: pendingBookingsError } = useQuery({
     queryKey: ['/api/bookings/pending'],
     queryFn: async () => {
       const res = await apiRequest('GET', '/api/bookings/pending');
       return res.json();
     },
-    refetchInterval: 5000,
-    refetchOnMount: 'always',
-    refetchOnWindowFocus: false,
     enabled: isAdmin,
+    ...commonQueryOpts,
   });
 
   // Facilities
@@ -1156,9 +1156,8 @@ function AdminDashboardInner() {
       const res = await apiRequest('GET', '/api/facilities');
       return res.json();
     },
-    refetchOnMount: 'always',
-    refetchOnWindowFocus: false,
-    enabled: isAuthenticated,
+    enabled: authReady,
+    ...commonQueryOpts,
   });
 
   // Admin users
@@ -1168,9 +1167,8 @@ function AdminDashboardInner() {
       const res = await apiRequest('GET', '/api/admin/users');
       return res.json();
     },
-    refetchOnMount: 'always',
-    refetchOnWindowFocus: false,
     enabled: isAdmin,
+    ...commonQueryOpts,
   });
 
   // Current authenticated user (for admin email fallbacks)

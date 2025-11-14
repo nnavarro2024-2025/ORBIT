@@ -46,18 +46,37 @@ setupJSONBParser();
 
 function getPool() {
   if (_pool) return _pool;
-  
-  const rawConnectionString = process.env.DATABASE_URL || "postgresql://localhost:5432/postgres";
-  const connectionString = rawConnectionString.trim();
-  if (rawConnectionString !== connectionString) {
-    console.warn("[db] Trimmed whitespace from DATABASE_URL env var");
+
+  let raw = process.env.DATABASE_URL || "postgresql://localhost:5432/postgres";
+  raw = raw.trim();
+
+  // Normalize to ensure pgBouncer transaction pooling to prevent session exhaustion.
+  try {
+    const url = new URL(raw);
+    if (!/localhost|127\.0\.0\.1/i.test(url.hostname)) {
+      if (!url.searchParams.get("pgbouncer")) url.searchParams.set("pgbouncer", "true");
+      if (!url.searchParams.get("pool_mode")) url.searchParams.set("pool_mode", "transaction");
+    }
+    raw = url.toString();
+  } catch (e) {
+    console.warn("[db] Could not parse DATABASE_URL for normalization", e);
   }
 
+  const max = parseInt(process.env.DB_POOL_MAX || "5", 10);
+  const idleTimeoutMillis = parseInt(process.env.DB_POOL_IDLE_MS || "10000", 10);
+
   _pool = new Pool({
-    connectionString,
-    ssl: connectionString.includes("localhost") ? undefined : { rejectUnauthorized: false },
+    connectionString: raw,
+    max,
+    idleTimeoutMillis,
+    allowExitOnIdle: true,
+    ssl: /localhost|127\.0\.0\.1/.test(raw) ? undefined : { rejectUnauthorized: false },
   });
-  
+
+  _pool.on("error", (err) => {
+    console.error("[db] Pool error", err);
+  });
+
   return _pool;
 }
 
