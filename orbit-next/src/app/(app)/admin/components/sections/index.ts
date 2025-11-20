@@ -1,0 +1,27 @@
+// Section component exports
+export { SettingsSection } from "./settings";
+export { SystemAlertsSection } from "./system-alerts";
+export { UserManagementSection } from "./user-management";
+export { BookingManagementSection } from "./booking-management";
+export { ReportSchedulesSection } from "./report-schedules";
+export { AdminActivityLogsSection } from "./admin-activity-logs";
+
+// Aggregated tab constants (object or array depending on section)
+export { SETTINGS_TABS } from './settings/tabs';
+export { SYSTEM_ALERTS_TABS } from './system-alerts/tabs/index';
+export { USER_MANAGEMENT_TABS } from './user-management/tabs';
+export { BOOKING_MANAGEMENT_TABS } from './booking-management/tabs';
+export { ADMIN_ACTIVITY_LOGS_TABS } from './admin-activity-logs/tabs/index';
+
+// Individual tab constants re-export (optional granular imports)
+export * from './settings/tabs/facilities';
+export * from './system-alerts/tabs/booking';
+// Updated path: canonical file is user.tsx (not users.tsx)
+export * from './system-alerts/tabs/user';
+export * from './user-management/tabs/booking-users';
+export * from './user-management/tabs/banned-users';
+export * from './booking-management/tabs/active';
+export * from './booking-management/tabs/scheduled';
+export * from './admin-activity-logs/tabs/success';
+export * from './admin-activity-logs/tabs/history';
+export * from './admin-activity-logs/tabs/system';

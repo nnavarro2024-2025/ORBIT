@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { requireAdminUser } from "@/server/auth";
-import { storage } from "@/server/storage";
+import { requireAdminUser } from "@/server/core";
+import { storage } from "@/server/core";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -95,6 +95,7 @@ export async function POST(
         userId: booking.userId,
         isRead: false,
         createdAt: new Date(),
+        updatedAt: new Date(),
       });
     } catch (notifError) {
       console.warn("[admin/bookings/needs] Failed to create equipment update notification", notifError);

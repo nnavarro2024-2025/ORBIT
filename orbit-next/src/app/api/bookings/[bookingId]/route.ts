@@ -2,15 +2,15 @@ import { randomUUID } from "crypto";
 
 import { NextResponse, type NextRequest } from "next/server";
 
-import { requireActiveUser } from "@/server/auth";
-import { storage } from "@/server/storage";
+import { requireActiveUser } from "@/server/core";
+import { storage } from "@/server/core";
 import {
   isWithinLibraryHours,
   formatLibraryHours,
   validateSameDay,
   refreshBooking,
 } from "@/server/bookings/helpers";
-import { db } from "@/server/db";
+import { db } from "@/server/config";
 import { facilityBookings } from "@shared/schema";
 import { eq } from "drizzle-orm";
 
@@ -309,6 +309,7 @@ export async function PUT(
             userId: bookingOwnerId,
             isRead: false,
             createdAt: new Date(),
+            updatedAt: new Date(),
           });
         } catch (notifError) {
           console.warn("[bookings] Failed to create equipment update notification", notifError);

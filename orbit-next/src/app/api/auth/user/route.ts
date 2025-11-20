@@ -1,8 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { requireUser } from "@/server/auth";
-import { storage } from "@/server/storage";
-import { supabaseAdmin } from "@/server/supabaseAdmin";
+import { requireUser } from "@/server/core";
+import { storage } from "@/server/core";
+import { supabaseAdmin } from "@/server/config";
 
 export async function GET(request: NextRequest) {
   const authResult = await requireUser(request.headers);

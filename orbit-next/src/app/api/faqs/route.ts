@@ -1,8 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { randomUUID } from "crypto";
 
-import { requireActiveUser, requireAdminUser } from "@/server/auth";
-import { storage } from "@/server/storage";
+import { requireActiveUser, requireAdminUser } from "@/server/core";
+import { storage } from "@/server/core";
 import { insertFaqSchema } from "@shared/schema";
 
 export const runtime = "nodejs";

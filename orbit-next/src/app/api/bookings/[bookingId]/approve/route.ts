@@ -3,12 +3,12 @@ import { randomUUID } from "crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { and, eq, gt, lt, ne, or } from "drizzle-orm";
 
-import { requireAdminUser } from "@/server/auth";
-import { storage } from "@/server/storage";
+import { requireAdminUser } from "@/server/core";
+import { storage } from "@/server/core";
 import {
   setArrivalConfirmationDeadline,
 } from "@/server/bookings/helpers";
-import { db } from "@/server/db";
+import { db } from "@/server/config";
 import { facilityBookings } from "@shared/schema";
 
 export const runtime = "nodejs";
@@ -78,6 +78,7 @@ export async function POST(
           userId: booking.userId,
           isRead: false,
           createdAt: new Date(),
+          updatedAt: new Date(),
         });
       } catch (error) {
         console.warn("[bookings/approve] Failed to create approval notification", error);
@@ -128,6 +129,7 @@ export async function POST(
               userId: other.userId,
               isRead: false,
               createdAt: new Date(),
+              updatedAt: new Date(),
             });
           } catch (error) {
             console.warn("[bookings/approve] Failed to deny overlapping booking", error);
@@ -162,6 +164,7 @@ export async function POST(
               userId: pending.userId,
               isRead: false,
               createdAt: new Date(),
+              updatedAt: new Date(),
             });
           } catch (error) {
             console.warn("[bookings/approve] Failed to deny same-user pending booking", error);

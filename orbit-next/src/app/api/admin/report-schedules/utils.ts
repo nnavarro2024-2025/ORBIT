@@ -74,7 +74,6 @@ export function buildInsertPayload(parsed: CreateReportScheduleInput, userId: st
 
   if (parsed.description !== undefined) {
     // Allow null or string; schema ensures trimming on string path
-    // @ts-expect-error drizzle infer insert allows null here
     payload.description = parsed.description ?? null;
   }
 

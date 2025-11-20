@@ -3,8 +3,8 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { Calendar, Shield, Users } from "lucide-react";
 
-import { useAuth } from "@/hooks/useAuth";
-import { useLegacyLocation } from "@/lib/navigation";
+import { useAuth } from "@/hooks/data";
+import { useLegacyLocation } from "@/lib/utils";
 
 export default function LandingPage() {
   const { isAuthenticated, user, isLoading: authLoading } = useAuth();

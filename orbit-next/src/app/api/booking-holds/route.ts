@@ -1,12 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { requireActiveUser } from "@/server/auth";
+import { requireActiveUser } from "@/server/core";
 import {
   acquireSlotHold,
   refreshSlotHold,
   releaseSlotHold,
   serializeSlotHold,
-} from "@/server/bookingHolds";
+} from "@/server/core";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

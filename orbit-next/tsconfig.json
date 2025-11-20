@@ -26,6 +26,12 @@
       "@/*": [
         "./src/*"
       ],
+      "@admin": [
+        "./src/app/(app)/admin/index.ts"
+      ],
+      "@admin/*": [
+        "./src/app/(app)/admin/*"
+      ],
       "@shared/*": [
         "./src/shared/*",
         "../shared/*"

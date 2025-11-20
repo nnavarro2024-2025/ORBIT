@@ -4,8 +4,8 @@ import { useMemo, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type Faq } from "@shared/schema";
 import { FAQ_CATEGORIES } from "@/shared/faq";
-import { apiRequest } from "@/lib/queryClient";
-import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/api";
+import { useToast } from "@/hooks/ui";
 import { Button } from "@/components/ui/button";
 import { SkeletonTableRows } from "@/components/ui/skeleton-presets";
 import { Input } from "@/components/ui/input";
@@ -64,10 +64,12 @@ const DEFAULT_FORM: FaqFormState = {
   sortOrder: 0,
 };
 
+const SORT_ORDER_INCREMENT = 10;
+
 function normalizeSortOrder(faqs: Faq[]): number {
   if (!faqs.length) return 0;
   const max = Math.max(...faqs.map((item) => item.sortOrder ?? 0));
-  return Number.isFinite(max) ? max + 10 : 10;
+  return Number.isFinite(max) ? max + SORT_ORDER_INCREMENT : SORT_ORDER_INCREMENT;
 }
 
 export default function AdminFaqManager({ searchTerm: externalSearchTerm }: { searchTerm?: string }) {

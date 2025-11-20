@@ -4,9 +4,9 @@ import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { apiRequest } from "@/lib/queryClient";
-import { useToast } from "@/hooks/use-toast";
-import { useAuth } from "@/hooks/useAuth";
+import { apiRequest } from "@/lib/api";
+import { useToast } from "@/hooks/ui";
+import { useAuth } from "@/hooks/data";
 import { Calendar as CalendarIcon, Plus, Minus, Send, X, Loader2, TriangleAlert } from "lucide-react"; // Added Plus, Minus, Send, X, Loader2, TriangleAlert icons
 import type { Facility } from "@shared/schema";
 import {
@@ -48,7 +48,7 @@ import {
 import { Calendar } from "@/components/ui/calendar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { format } from "date-fns";
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/utils/utils";
 import { Switch } from "@/components/ui/switch";
 import {
   BOOKING_MAX_DURATION_MINUTES,

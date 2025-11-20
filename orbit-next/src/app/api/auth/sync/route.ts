@@ -1,8 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { requireActiveUser } from "@/server/auth";
-import { storage } from "@/server/storage";
-import { isBuildTime } from "@/server/build-guard";
+import { requireActiveUser } from "@/server/core";
+import { storage } from "@/server/core";
+import { isBuildTime } from "@/server/utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

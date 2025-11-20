@@ -2,8 +2,8 @@ import { randomUUID } from "crypto";
 
 import { NextResponse, type NextRequest } from "next/server";
 
-import { requireAdminUser } from "@/server/auth";
-import { storage } from "@/server/storage";
+import { requireAdminUser } from "@/server/core";
+import { storage } from "@/server/core";
 
 export const runtime = "nodejs";
 
@@ -60,6 +60,7 @@ export async function POST(
           userId: booking.userId,
           isRead: false,
           createdAt: new Date(),
+          updatedAt: new Date(),
         });
       }
     } catch (error) {

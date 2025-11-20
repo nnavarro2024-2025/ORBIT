@@ -2,9 +2,9 @@ import { randomUUID } from "crypto";
 
 import { and, asc, eq, gt, or } from "drizzle-orm";
 
-import { storage } from "@/server/storage";
+import { storage } from "@/server/core";
 import { emailService } from "@/server/emailService";
-import { db } from "@/server/db";
+import { db } from "@/server/config";
 import { BOOKING_MAX_DURATION_MS, BOOKING_MIN_DURATION_MS } from "@shared/bookingRules";
 import { facilityBookings, type Facility, type FacilityBooking } from "@shared/schema";
 
@@ -326,6 +326,7 @@ export async function sendBookingNotifications({
       userId: null,
       isRead: false,
       createdAt: new Date(),
+      updatedAt: new Date(),
     });
 
     await storage.createSystemAlert({
@@ -337,6 +338,7 @@ export async function sendBookingNotifications({
       userId,
       isRead: false,
       createdAt: new Date(),
+      updatedAt: new Date(),
     });
 
     const equipment: any = (booking as any).equipment;
@@ -374,6 +376,7 @@ export async function sendBookingNotifications({
         userId: null,
         isRead: false,
         createdAt: new Date(),
+        updatedAt: new Date(),
       });
 
       // Create user notification (user-specific)
@@ -387,6 +390,7 @@ export async function sendBookingNotifications({
         userId,
         isRead: false,
         createdAt: new Date(),
+        updatedAt: new Date(),
       });
     }
   } catch (error) {

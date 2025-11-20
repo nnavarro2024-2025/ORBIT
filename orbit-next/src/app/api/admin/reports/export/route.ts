@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { requireAdminUser } from "@/server/auth";
-import { storage } from "@/server/storage";
+import { requireAdminUser } from "@/server/core";
+import { storage } from "@/server/core";
 import { buildAdminReportPDF } from "@/server/pdf/reportBuilder";
 
 export const dynamic = "force-dynamic";

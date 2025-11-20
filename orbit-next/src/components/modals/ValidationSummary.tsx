@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { TriangleAlert } from "lucide-react";
 import { format } from "date-fns";
 
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/utils/utils";
 
 type WarningMessage = {
   title: string;

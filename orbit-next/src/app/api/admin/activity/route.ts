@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { requireAdminUser } from "@/server/auth";
-import { storage } from "@/server/storage";
+import { requireAdminUser } from "@/server/core";
+import { storage } from "@/server/core";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,8 +14,9 @@ export async function GET(request: NextRequest) {
 
   try {
     const limitParam = request.nextUrl.searchParams.get("limit");
-    const limit = limitParam ? Number(limitParam) : undefined;
-    const logs = await storage.getActivityLogs(limit && !Number.isNaN(limit) ? Math.max(1, limit) : undefined);
+    const limitNum = limitParam ? Number(limitParam) : undefined;
+    const finalLimit = limitNum && !Number.isNaN(limitNum) ? Math.max(1, limitNum) : undefined;
+    const logs = await storage.getActivityLogs(undefined, finalLimit);
     return NextResponse.json(logs ?? [], { status: 200 });
   } catch (error) {
     console.error("[admin/activity] Failed to fetch activity logs:", error);

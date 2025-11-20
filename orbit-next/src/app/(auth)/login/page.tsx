@@ -2,11 +2,11 @@
 
 import { useState, useEffect, useRef, Suspense } from "react";
 import { Check, Mail, Loader2 } from "lucide-react";
-import { supabase } from "@/lib/supabase";
-import { useAuth } from "@/hooks/useAuth";
-import { useLegacyLocation } from "@/lib/navigation";
+import { supabase } from "@/lib/config";
+import { useAuth } from "@/hooks/data";
+import { useLegacyLocation } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
-// import { loginToUic } from "@/lib/uicApi";
+// import { loginToUic } from "@/lib/api";
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";

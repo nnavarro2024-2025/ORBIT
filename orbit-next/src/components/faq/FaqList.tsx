@@ -4,13 +4,13 @@ import { useMemo, useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type Faq } from "@shared/schema";
 import { FAQ_CATEGORIES } from "@/shared/faq";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest } from "@/lib/api";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { SkeletonListItem } from "@/components/ui/skeleton-presets";
 import { Badge } from "@/components/ui/badge";
-import { useToast } from "@/hooks/use-toast";
+import { useToast } from "@/hooks/ui";
 import { Loader2, Search, ThumbsDown, ThumbsUp } from "lucide-react";
 
 const CATEGORY_OPTIONS = ["All", ...FAQ_CATEGORIES];

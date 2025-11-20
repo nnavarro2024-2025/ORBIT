@@ -1,8 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { randomUUID } from "crypto";
 
-import { requireAdminUser } from "@/server/auth";
-import { storage } from "@/server/storage";
+import { requireAdminUser } from "@/server/core";
+import { storage } from "@/server/core";
 import {
   updateReportScheduleSchema,
   buildUpdatePayload,

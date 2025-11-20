@@ -4,10 +4,10 @@ import { randomUUID } from "crypto";
 
 import { eq, inArray } from "drizzle-orm";
 
-import "../src/server/json-parse-patch";
+import "../src/server/utils/json-parse-patch";
 import * as schema from "../../shared/schema";
-import { db } from "../src/server/db";
-import { storage } from "../src/server/storage";
+import { db } from "../src/server/config";
+import { storage } from "../src/server/core";
 
 const { faqs, activityLogs } = schema;
 
