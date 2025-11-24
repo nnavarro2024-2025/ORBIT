@@ -14,14 +14,27 @@ type UseAdminHandlersProps = {
   setBannedUsersPage: (page: number) => void;
   setUserToBan: (user: User | null) => void;
   setIsBanUserModalOpen: (open: boolean) => void;
+  setUserToUnban: (user: any | null) => void;
+  setIsUnbanUserModalOpen: (open: boolean) => void;
+  setUnbannedUserEmail: (email: string) => void;
+  setIsUnbanSuccessModalOpen: (open: boolean) => void;
   setGlobalSystemAlertsSearch: (value: string) => void;
   setBookingAlertsPage: (page: number) => void;
   setUserAlertsPage: (page: number) => void;
   setFacilityForUnavailable: (facility: any) => void;
   setIsUnavailableModalOpen: (open: boolean) => void;
+  setIsScheduleReportModalOpen: (open: boolean) => void;
+  setScheduleToEdit: (schedule: any) => void;
+  setDeleteScheduleTarget: (schedule: any) => void;
+  setScheduleActionLoadingId: (id: string | null) => void;
+  setSchedulePaginationPage: (page: number) => void;
+  setScheduleSearchTerm: (term: string) => void;
+  schedulePaginationPage: number;
   markAlertReadMutation: UseMutationResult<any, any, any, any>;
+  banUserMutation: UseMutationResult<any, any, any, any>;
   unbanUserMutation: UseMutationResult<any, any, any, any>;
   toggleFacilityAvailabilityMutation: UseMutationResult<any, any, any, any>;
+  toggleScheduleActiveMutation: UseMutationResult<any, any, any, any>;
   getUserEmail: (id: any) => string;
   allBookings: FacilityBooking[];
   facilities: any[] | undefined;
@@ -37,14 +50,27 @@ export function useAdminHandlers({
   setBannedUsersPage,
   setUserToBan,
   setIsBanUserModalOpen,
+  setUserToUnban,
+  setIsUnbanUserModalOpen,
+  setUnbannedUserEmail,
+  setIsUnbanSuccessModalOpen,
   setGlobalSystemAlertsSearch,
   setBookingAlertsPage,
   setUserAlertsPage,
   setFacilityForUnavailable,
   setIsUnavailableModalOpen,
+  setIsScheduleReportModalOpen,
+  setScheduleToEdit,
+  setDeleteScheduleTarget,
+  setScheduleActionLoadingId,
+  setSchedulePaginationPage,
+  setScheduleSearchTerm,
+  schedulePaginationPage,
   markAlertReadMutation,
+  banUserMutation,
   unbanUserMutation,
   toggleFacilityAvailabilityMutation,
+  toggleScheduleActiveMutation,
   getUserEmail,
   allBookings,
   facilities,
@@ -92,9 +118,37 @@ export function useAdminHandlers({
     setIsBanUserModalOpen(true);
   }, [setUserToBan, setIsBanUserModalOpen]);
 
+  const handleBanUser = useCallback((userId: string, reason: string, duration: string, customDate?: string) => {
+    banUserMutation.mutate({ userId, reason, duration, customDate });
+    setIsBanUserModalOpen(false);
+    setUserToBan(null);
+  }, [banUserMutation, setIsBanUserModalOpen, setUserToBan]);
+
   const handleUnbanUserClick = useCallback((userId: string) => {
-    unbanUserMutation.mutate({ userId });
-  }, [unbanUserMutation]);
+    // Find the user from the users list to get their email
+    const user = (window as any).__adminUsers?.find((u: any) => String(u.id) === String(userId));
+    if (user) {
+      setUserToUnban({ id: userId, email: user.email });
+      setIsUnbanUserModalOpen(true);
+    }
+  }, [setUserToUnban, setIsUnbanUserModalOpen]);
+
+  const handleUnbanUser = useCallback((userId: string) => {
+    const user = (window as any).__adminUsers?.find((u: any) => String(u.id) === String(userId));
+    unbanUserMutation.mutate(
+      { userId },
+      {
+        onSuccess: () => {
+          setIsUnbanUserModalOpen(false);
+          setUserToUnban(null);
+          if (user?.email) {
+            setUnbannedUserEmail(user.email);
+            setIsUnbanSuccessModalOpen(true);
+          }
+        },
+      }
+    );
+  }, [unbanUserMutation, setIsUnbanUserModalOpen, setUserToUnban, setUnbannedUserEmail, setIsUnbanSuccessModalOpen]);
 
   const toggleFacilityAvailability = useCallback(async (facility: any | number, available: boolean) => {
     let facilityObj: any | undefined = undefined;
@@ -133,7 +187,65 @@ export function useAdminHandlers({
   }, [getUserEmail]);
 
   const alerts: SystemAlert[] = Array.isArray(alertsData) ? alertsData : [];
-  const userManagementAlerts = useMemo(() => alerts.filter((a: SystemAlert) => a.type === 'user'), [alerts]);
+  const userManagementAlerts = useMemo(() => {
+    return alerts.filter((a: SystemAlert) => {
+      if (a.type === 'user') return true;
+      const title = (a.title || '').toLowerCase();
+      const message = (a.message || '').toLowerCase();
+      return (
+        title.includes('equipment') ||
+        title.includes('needs') ||
+        message.includes('equipment') ||
+        message.includes('needs')
+      );
+    });
+  }, [alerts]);
+
+  // Report schedule handlers
+  const openCreateScheduleModal = useCallback(() => {
+    setScheduleToEdit(null);
+    setIsScheduleReportModalOpen(true);
+  }, [setScheduleToEdit, setIsScheduleReportModalOpen]);
+
+  const openEditScheduleModal = useCallback(
+    (schedule: any) => {
+      setScheduleToEdit(schedule);
+      setIsScheduleReportModalOpen(true);
+    },
+    [setScheduleToEdit, setIsScheduleReportModalOpen]
+  );
+
+  const handleToggleScheduleActive = useCallback(
+    (schedule: any, checked?: boolean) => {
+      const newActiveState = checked ?? !schedule.isActive;
+      setScheduleActionLoadingId(schedule.id);
+      toggleScheduleActiveMutation.mutate(
+        { id: schedule.id, isActive: newActiveState },
+        {
+          onSettled: () => {
+            setScheduleActionLoadingId(null);
+          },
+        }
+      );
+    },
+    [toggleScheduleActiveMutation, setScheduleActionLoadingId]
+  );
+
+  const handleScheduleSearchChange = useCallback(
+    (value: string) => {
+      setScheduleSearchTerm(value);
+      setSchedulePaginationPage(0);
+    },
+    [setScheduleSearchTerm, setSchedulePaginationPage]
+  );
+
+  const handleSchedulePaginationPrev = useCallback(() => {
+    setSchedulePaginationPage(Math.max(0, schedulePaginationPage - 1));
+  }, [setSchedulePaginationPage, schedulePaginationPage]);
+
+  const handleSchedulePaginationNext = useCallback(() => {
+    setSchedulePaginationPage(schedulePaginationPage + 1);
+  }, [setSchedulePaginationPage, schedulePaginationPage]);
 
   return {
     handleNavigateToBookingFromAlert,
@@ -141,12 +253,20 @@ export function useAdminHandlers({
     handleSystemAlertsSearchChange,
     handleUserManagementSearchChange,
     handleBanUserClick,
+    handleBanUser,
     handleUnbanUserClick,
+    handleUnbanUser,
     toggleFacilityAvailability,
     formatAlertMessage,
     getBookingUserStatus,
     getActorEmail,
     alerts,
     userManagementAlerts,
+    openCreateScheduleModal,
+    openEditScheduleModal,
+    handleToggleScheduleActive,
+    handleScheduleSearchChange,
+    handleSchedulePaginationPrev,
+    handleSchedulePaginationNext,
   };
 }

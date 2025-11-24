@@ -6,6 +6,7 @@ import { useAdminPagination } from "@admin/hooks/state/useAdminPagination";
 import { useAdminSearchState } from "@admin/hooks/state/useAdminSearchState";
 import { useAdminTabState } from "@admin/hooks/state/useAdminTabState";
 import { useAdminModals } from "@admin/hooks/state/useAdminModals";
+import { useReportScheduleState } from "@admin/hooks/state/useReportScheduleState";
 
 export function useAdminState() {
   // Basic UI state
@@ -13,6 +14,8 @@ export function useAdminState() {
   const [isNavigatingToBooking, setIsNavigatingToBooking] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [userToBan, setUserToBan] = useState<any | null>(null);
+  const [userToUnban, setUserToUnban] = useState<any | null>(null);
+  const [unbannedUserEmail, setUnbannedUserEmail] = useState<string>("");
   const [facilityForUnavailable, setFacilityForUnavailable] = useState<any | null>(null);
   const [unavailableDatesByFacility, setUnavailableDatesByFacility] = useState<Record<string, string[]>>({});
   const [facilityForAvailable, setFacilityForAvailable] = useState<any | null>(null);
@@ -25,6 +28,7 @@ export function useAdminState() {
   const searchState = useAdminSearchState();
   const tabState = useAdminTabState();
   const modalState = useAdminModals();
+  const scheduleState = useReportScheduleState();
 
   return {
     // Basic state
@@ -36,6 +40,10 @@ export function useAdminState() {
     setMobileSidebarOpen,
     userToBan,
     setUserToBan,
+    userToUnban,
+    setUserToUnban,
+    unbannedUserEmail,
+    setUnbannedUserEmail,
     facilityForUnavailable,
     setFacilityForUnavailable,
     unavailableDatesByFacility,
@@ -53,5 +61,6 @@ export function useAdminState() {
     ...searchState,
     ...tabState,
     ...modalState,
+    ...scheduleState,
   };
 }

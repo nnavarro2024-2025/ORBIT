@@ -1,6 +1,7 @@
 export { ActivityLogModal } from './ActivityLogModal';
 export { default as BanUserModal } from './BanUserModal';
 export { default as BookingModal } from './BookingModal';
+export { CheckEquipmentModal } from './CheckEquipmentModal';
 export { default as EditBookingModal } from './EditBookingModal';
 export { default as EditFacilityModal } from './EditFacilityModal';
 export { default as MakeAvailableModal } from './MakeAvailableModal';
@@ -13,6 +14,7 @@ export { default as ValidationSummary } from './ValidationSummary';
 export * from './ActivityLogModal';
 export * from './BanUserModal';
 export * from './BookingModal';
+export * from './CheckEquipmentModal';
 export * from './EditBookingModal';
 export * from './EditFacilityModal';
 export * from './MakeAvailableModal';

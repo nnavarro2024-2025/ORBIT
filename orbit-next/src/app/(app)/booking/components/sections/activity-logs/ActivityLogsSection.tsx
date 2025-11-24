@@ -121,16 +121,16 @@ export function ActivityLogsSection({
             <h3 className="text-xl font-semibold text-gray-900">Activity Logs</h3>
             <p className="text-sm text-gray-600 mt-1">View booking history and notification logs</p>
           </div>
-          <div className="flex items-center gap-2 overflow-x-auto">
+          <div className="flex items-center gap-2 w-full sm:w-auto">
             <button
               onClick={() => handleTabChange("booking")}
-              className={`px-3 py-2 rounded whitespace-nowrap text-sm ${activityTab === "booking" ? "bg-pink-600 text-white" : "bg-gray-100 text-gray-700"}`}
+              className={`flex-1 sm:flex-none px-3 py-2 rounded whitespace-nowrap text-sm transition-colors ${activityTab === "booking" ? "bg-pink-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}
             >
               Booking History
             </button>
             <button
               onClick={() => handleTabChange("notifications")}
-              className={`px-3 py-2 rounded whitespace-nowrap text-sm ${activityTab === "notifications" ? "bg-pink-600 text-white" : "bg-gray-100 text-gray-700"}`}
+              className={`flex-1 sm:flex-none px-3 py-2 rounded whitespace-nowrap text-sm transition-colors ${activityTab === "notifications" ? "bg-pink-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}
             >
               Notification Logs
             </button>

@@ -48,7 +48,7 @@ export function UserManagementSection({
   const bookingsList = activeBookings ?? [];
 
   const bookingUsers = useMemo(
-    () => usersList.filter(user => getBookingUserStatus(user.id)),
+    () => usersList.filter(user => getBookingUserStatus(user.id) && user.status !== "banned"),
     [usersList, getBookingUserStatus],
   );
 

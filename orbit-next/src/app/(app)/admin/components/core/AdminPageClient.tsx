@@ -1,16 +1,21 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/data";
-import { AdminLayout, AdminContent } from "../index";
+import { AdminLayout, AdminContent, Countdown } from "../index";
+import { BanUserModal } from "@/components/modals";
+import { UnbanUserModal } from "@/components/modals/UnbanUserModal";
+import { UnbanSuccessModal } from "@/components/modals/UnbanSuccessModal";
 import { formatDateTime, formatDate, formatTime, WEEKDAY_LABELS, safeJsonParse, formatScheduleFrequencyText, extractRecipientList } from "@admin";
 import { useLegacyLocation } from "@/lib/utils";
 import { useAdminState } from "@admin/hooks/state";
 import { useAdminNavigation, useSidebarItems, useSidebarClickHandler } from "@admin/hooks/navigation";
 import { useAdminQueries, useAdminDataSync, useAdminDataManagement } from "@admin/hooks/data";
 import { useInvalidateOnAdminChange, useAdminHandlers, useModalHandlers } from "@admin/hooks/effects";
+import { useReportScheduleFiltering } from "@admin/hooks/state/useReportScheduleState";
 import { PIE_CHART_COLORS, FACILITY_BAR_COLORS, WEEKLY_LINE_COLORS, ENABLE_QUICK_ACTIONS, DEBUG_MINIMAL_RENDER, DEBUG_OVERVIEW_SECTIONS, DEBUG_ANALYTICS_CHARTS, ANY_ANALYTICS_ENABLED } from "@admin/config";
+import { AdminSuspenseFallback } from "../layout/AdminSuspenseFallback";
 
 // Moved into `core/` for structural clarity. No logic changes.
 function AdminDashboardInner() {
@@ -60,6 +65,13 @@ function AdminDashboardInner() {
     { setUsersData: state.setUsersData, setActivities: state.setActivities, setFacilities: state.setFacilities, setUnavailableDatesByFacility, setUser: state.setUser }
   );
 
+  // Store users globally for handlers to access
+  useEffect(() => {
+    if (usersDataQ) {
+      (window as any).__adminUsers = usersDataQ;
+    }
+  }, [usersDataQ]);
+
   const allBookings = Array.isArray(adminBookingsData) ? adminBookingsData : [];
 
   const dataManagement = useAdminDataManagement({
@@ -83,14 +95,27 @@ function AdminDashboardInner() {
     setBannedUsersPage: state.setBannedUsersPage,
     setUserToBan: state.setUserToBan,
     setIsBanUserModalOpen: state.setIsBanUserModalOpen,
+    setUserToUnban: state.setUserToUnban,
+    setIsUnbanUserModalOpen: state.setIsUnbanUserModalOpen,
+    setUnbannedUserEmail: state.setUnbannedUserEmail,
+    setIsUnbanSuccessModalOpen: state.setIsUnbanSuccessModalOpen,
     setGlobalSystemAlertsSearch: state.setGlobalSystemAlertsSearch,
     setBookingAlertsPage: state.setBookingAlertsPage,
     setUserAlertsPage: state.setUserAlertsPage,
     setFacilityForUnavailable: state.setFacilityForUnavailable,
     setIsUnavailableModalOpen: state.setIsUnavailableModalOpen,
+    setIsScheduleReportModalOpen: state.setIsScheduleReportModalOpen,
+    setScheduleToEdit: state.setScheduleToEdit,
+    setDeleteScheduleTarget: state.setDeleteScheduleTarget,
+    setScheduleActionLoadingId: state.setScheduleActionLoadingId,
+    setSchedulePaginationPage: state.setSchedulePaginationPage,
+    setScheduleSearchTerm: state.setScheduleSearchTerm,
+    schedulePaginationPage: state.schedulePaginationPage || 0,
     markAlertReadMutation: (dataManagement as any).markAlertReadMutation,
+    banUserMutation: (dataManagement as any).banUserMutation,
     unbanUserMutation: (dataManagement as any).unbanUserMutation,
     toggleFacilityAvailabilityMutation: (dataManagement as any).toggleFacilityAvailabilityMutation,
+    toggleScheduleActiveMutation: (dataManagement as any).toggleScheduleActiveMutation,
     getUserEmail: state.getUserEmail,
     allBookings,
     facilities: state.facilities,
@@ -110,6 +135,16 @@ function AdminDashboardInner() {
     setIsExportingPdf,
   });
 
+  // Report schedule filtering
+  const scheduleFiltering = useReportScheduleFiltering(
+    reportSchedulesData || [],
+    state.scheduleSearchTerm || '',
+    state.scheduleFilter || 'all',
+    state.scheduleSort || 'next-run',
+    state.schedulePaginationPage || 0,
+    state.pageSize || 10
+  );
+
   return (
     <AdminLayout
       mobileSidebarOpen={state.mobileSidebarOpen}
@@ -124,6 +159,7 @@ function AdminDashboardInner() {
         {...dataManagement as any}
         {...handlers as any}
         {...modalHandlers as any}
+        {...scheduleFiltering}
         setLocation={setLocation}
         selectedView={state.selectedView}
         setSelectedView={state.setSelectedView}
@@ -142,6 +178,12 @@ function AdminDashboardInner() {
         WEEKDAY_LABELS={WEEKDAY_LABELS}
         formatScheduleFrequencyText={formatScheduleFrequencyText}
         extractRecipientList={extractRecipientList}
+        weekdayLabels={WEEKDAY_LABELS}
+        onScheduleSearchChange={handlers.handleScheduleSearchChange}
+        onScheduleFilterChange={state.setScheduleFilter}
+        onScheduleSortChange={state.setScheduleSort}
+        onSchedulePaginationPrev={handlers.handleSchedulePaginationPrev}
+        onSchedulePaginationNext={handlers.handleSchedulePaginationNext}
         PIE_CHART_COLORS={PIE_CHART_COLORS}
         FACILITY_BAR_COLORS={FACILITY_BAR_COLORS}
         WEEKLY_LINE_COLORS={WEEKLY_LINE_COLORS}
@@ -149,6 +191,31 @@ function AdminDashboardInner() {
         DEBUG_OVERVIEW_SECTIONS={DEBUG_OVERVIEW_SECTIONS}
         DEBUG_ANALYTICS_CHARTS={DEBUG_ANALYTICS_CHARTS}
         ANY_ANALYTICS_ENABLED={ANY_ANALYTICS_ENABLED}
+        CountdownComponent={Countdown}
+      />
+      
+      {/* Global Ban User Modal - outside AdminContent to prevent unmounting */}
+      <BanUserModal
+        isOpen={!!state.isBanUserModalOpen}
+        onClose={() => state.setIsBanUserModalOpen?.(false)}
+        user={state.userToBan || null}
+        onBanUser={handlers.handleBanUser || (() => {})}
+      />
+
+      {/* Global Unban User Modal */}
+      <UnbanUserModal
+        isOpen={!!state.isUnbanUserModalOpen}
+        onClose={() => state.setIsUnbanUserModalOpen?.(false)}
+        user={state.userToUnban || null}
+        onUnbanUser={handlers.handleUnbanUser || (() => {})}
+        isLoading={(dataManagement as any).unbanUserMutation?.isPending}
+      />
+
+      {/* Unban Success Modal */}
+      <UnbanSuccessModal
+        isOpen={!!state.isUnbanSuccessModalOpen}
+        onClose={() => state.setIsUnbanSuccessModalOpen?.(false)}
+        userEmail={state.unbannedUserEmail || ""}
       />
     </AdminLayout>
   );
@@ -156,14 +223,7 @@ function AdminDashboardInner() {
 
 export default function AdminPageClient() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-pink-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading...</p>
-        </div>
-      </div>
-    }>
+    <Suspense fallback={<AdminSuspenseFallback />}>
       <AdminDashboardInner />
     </Suspense>
   );

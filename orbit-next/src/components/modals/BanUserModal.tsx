@@ -60,7 +60,7 @@ export default function BanUserModal({
     <Dialog open={isOpen} onOpenChange={handleClose}>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>Ban User: {user?.email}</DialogTitle>
+          <DialogTitle>Ban User{user?.email ? `: ${user.email}` : ''}</DialogTitle>
         </DialogHeader>
         <div className="grid gap-4 py-4">
           <div className="grid grid-cols-4 items-center gap-4">

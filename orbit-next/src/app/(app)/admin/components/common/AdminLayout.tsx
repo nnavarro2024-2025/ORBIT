@@ -75,7 +75,7 @@ export function AdminLayout({
         </AnimatePresence>
 
         {/* Main content area (scrollable) */}
-        <div className="flex-1 md:ml-64 min-h-[calc(100vh-4rem)]">
+        <div className="flex-1 md:ml-64 min-h-[calc(100vh-4rem)] w-full overflow-x-hidden">
           {children}
         </div>
       </div>

@@ -5,6 +5,10 @@ import { useState } from "react";
 export type ModalState = {
   isBanUserModalOpen: boolean;
   setIsBanUserModalOpen: (value: boolean) => void;
+  isUnbanUserModalOpen: boolean;
+  setIsUnbanUserModalOpen: (value: boolean) => void;
+  isUnbanSuccessModalOpen: boolean;
+  setIsUnbanSuccessModalOpen: (value: boolean) => void;
   isUnavailableModalOpen: boolean;
   setIsUnavailableModalOpen: (value: boolean) => void;
   isMakeAvailableModalOpen: boolean;
@@ -21,6 +25,8 @@ export type ModalState = {
 
 export function useAdminModals(): ModalState {
   const [isBanUserModalOpen, setIsBanUserModalOpen] = useState(false);
+  const [isUnbanUserModalOpen, setIsUnbanUserModalOpen] = useState(false);
+  const [isUnbanSuccessModalOpen, setIsUnbanSuccessModalOpen] = useState(false);
   const [isUnavailableModalOpen, setIsUnavailableModalOpen] = useState(false);
   const [isMakeAvailableModalOpen, setIsMakeAvailableModalOpen] = useState(false);
   const [isScheduleReportModalOpen, setIsScheduleReportModalOpen] = useState(false);
@@ -31,6 +37,10 @@ export function useAdminModals(): ModalState {
   return {
     isBanUserModalOpen,
     setIsBanUserModalOpen,
+    isUnbanUserModalOpen,
+    setIsUnbanUserModalOpen,
+    isUnbanSuccessModalOpen,
+    setIsUnbanSuccessModalOpen,
     isUnavailableModalOpen,
     setIsUnavailableModalOpen,
     isMakeAvailableModalOpen,

@@ -6,6 +6,7 @@ import { useEquipmentHydration } from "../effects/useEquipmentHydration";
 import { useBookingMutations } from "../mutations/useBookingMutations";
 import { useUserMutations } from "../mutations/useUserMutations";
 import { useFacilityMutations } from "../mutations/useFacilityMutations";
+import { useScheduleMutations } from "../mutations/useScheduleMutations";
 import { useReportSchedules } from "./useReportSchedules";
 
 export function useAdminDataManagement(props: {
@@ -58,6 +59,7 @@ export function useAdminDataManagement(props: {
   const bookingMutations = useBookingMutations();
   const userMutations = useUserMutations();
   const facilityMutations = useFacilityMutations(setUnavailableDatesByFacility);
+  const scheduleMutations = useScheduleMutations();
 
   return {
     ...equipmentManagement,
@@ -68,5 +70,6 @@ export function useAdminDataManagement(props: {
     ...bookingMutations,
     ...userMutations,
     ...facilityMutations,
+    ...scheduleMutations,
   };
 }

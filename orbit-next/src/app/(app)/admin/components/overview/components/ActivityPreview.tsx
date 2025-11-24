@@ -32,8 +32,46 @@ export function ActivityPreview({ activities, user, usersMap, usersData, allBook
       </div>
 
       {activities && activities.length > 0 ? (
-        <div className="space-y-2">
+        <div className="space-y-2 mt-3">
           {activities.slice(0, 5).map((a: any, idx: number) => {
+            const parseEquipmentFromMessage = (message: string) => {
+              const equipmentMarker = message.indexOf('[Equipment:');
+              if (equipmentMarker !== -1) {
+                try {
+                  const baseMessage = message.substring(0, equipmentMarker).trim();
+                  const jsonStart = message.indexOf('{', equipmentMarker);
+                  if (jsonStart === -1) {
+                    return { baseMessage, equipment: null };
+                  }
+                  let depth = 0;
+                  let jsonEnd = -1;
+                  for (let i = jsonStart; i < message.length; i++) {
+                    if (message[i] === '{') depth++;
+                    if (message[i] === '}') {
+                      depth--;
+                      if (depth === 0) {
+                        jsonEnd = i + 1;
+                        break;
+                      }
+                    }
+                  }
+                  if (jsonEnd !== -1) {
+                    const jsonStr = message.substring(jsonStart, jsonEnd);
+                    const equipmentData = safeJsonParse(jsonStr);
+                    // If items is an array, return it as-is for proper rendering
+                    if (equipmentData && Array.isArray((equipmentData as any).items)) {
+                      return { baseMessage, equipment: (equipmentData as any).items };
+                    }
+                    return { baseMessage, equipment: equipmentData || null };
+                  }
+                  return { baseMessage, equipment: null };
+                } catch (e) {
+                  const baseMessage = message.substring(0, equipmentMarker).trim();
+                  return { baseMessage, equipment: null };
+                }
+              }
+              return { baseMessage: message, equipment: null };
+            };
             let actorEmail = '';
             try {
               if (a.userId) actorEmail = getUserEmail(a.userId);
@@ -116,6 +154,81 @@ export function ActivityPreview({ activities, user, usersMap, usersData, allBook
               }
             } catch {}
 
+            try {
+              const eqMatch = (a.message || a.details || '').toString().match(/Requested equipment:\s*([^\[]+)/i);
+              if (eqMatch && eqMatch[1]) {
+                const rawList = String(eqMatch[1]).trim();
+                const parts = rawList.split(/[,;]+/).map((s) => String(s).trim()).filter(Boolean);
+                let othersText = '';
+                const mapped = parts
+                  .map((it) => {
+                    const raw = String(it).trim();
+                    const lower = raw.toLowerCase();
+                    if (lower.includes('others')) {
+                      const trailing = raw.replace(/.*?others[:\s-]*/i, '').trim();
+                      if (trailing && !othersText) othersText = trailing;
+                      return null;
+                    }
+                    if (lower === 'whiteboard') return 'Whiteboard & Markers';
+                    if (lower === 'projector') return 'Projector';
+                    if (lower === 'extension cord' || lower === 'extension_cord') return 'Extension Cord';
+                    if (lower === 'hdmi') return 'HDMI Cable';
+                    if (lower === 'extra chairs' || lower === 'extra_chairs') return 'Extra Chairs';
+                    return raw;
+                  })
+                  .filter(Boolean) as string[];
+                for (let i = mapped.length - 1; i >= 0; i--) {
+                  if (/others/i.test(String(mapped[i]))) mapped.splice(i, 1);
+                  else mapped[i] = String(mapped[i]).replace(/[.,;]+$/g, '').trim();
+                }
+                const extrasMatch = rawList.match(/Others?:\s*(.*)$/i);
+                if (!othersText && extrasMatch && extrasMatch[1]) othersText = String(extrasMatch[1]).trim();
+                const equipmentItems = mapped;
+                const joinWithAnd = (arr: string[]) => {
+                  if (!arr || arr.length === 0) return '';
+                  if (arr.length === 1) return arr[0];
+                  if (arr.length === 2) return `${arr[0]} and ${arr[1]}`;
+                  return `${arr.slice(0, -1).join(', ')} and ${arr.slice(-1)[0]}`;
+                };
+                const buildWithOthers = (items: string[]) => {
+                  if (!items || items.length === 0) return 'others';
+                  if (items.length === 1) return `${items[0]} and others`;
+                  const head = items.slice(0, -1).join(', ');
+                  const last = items[items.length - 1];
+                  return `${head}, ${last} and others`;
+                };
+
+                let replacement = '';
+                if (othersText) {
+                  if (equipmentItems.length === 0) replacement = `requested equipment: others`;
+                  else replacement = `requested equipment: ${buildWithOthers(equipmentItems)}`;
+                } else {
+                  replacement = `requested equipment: ${joinWithAnd(equipmentItems)}`;
+                }
+                try {
+                  formatted = String(formatted).replace(/Requested equipment:\s*([^\[]+)/i, replacement).trim();
+                } catch (e) {}
+              }
+            } catch (e) {}
+
+            try {
+              formatted = String(formatted).replace(/,\s*(and\s+)?others(\b)/i, ' and others$2');
+              formatted = String(formatted)
+                .replace(/,?\s*Others?:\s*[^,\]]+/i, '')
+                .replace(/\s{2,}/g, ' ')
+                .trim();
+              formatted = formatted.replace(/,\s*and\s+others/i, ' and others');
+            } catch (e) {}
+            try {
+              formatted = formatted.replace(/^Admin\b[:\s,-]*/i, '');
+            } catch (e) {}
+            if (actorEmail) {
+              try {
+                const esc = String(actorEmail).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                formatted = String(formatted).replace(new RegExp(esc, 'gi'), '').replace(/\s{2,}/g, ' ').trim();
+              } catch (e) {}
+            }
+
             let targetEmail = '';
             try { const match = (a.message || a.details || '').toString().match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/); if (match) targetEmail = match[1]; } catch {}
 
@@ -153,39 +266,55 @@ export function ActivityPreview({ activities, user, usersMap, usersData, allBook
             try {
               const actionLower = String((a.title || a.action || '')).toLowerCase();
               const isEquipmentAction = /equipment|needs/i.test(actionLower) || /needs request/i.test(visibleTitle.toLowerCase());
+              const activityTime = (a as any).createdAt || (a as any).created_at || (a as any).timestamp || (a as any).time || (a as any).date || (a as any).updatedAt || (a as any).updated_at;
               const hasDateLike = /\d{1,2}\/\d{1,2}\/\d{4}|\d{1,2}:\d{2}:\d{2}/.test(subLine);
-              if (isEquipmentAction && a.createdAt && !hasDateLike) {
-                const timestamp = formatDateTime(a.createdAt);
-                if (timestamp) subLine = `${subLine} at ${timestamp}`.trim();
+              if (isEquipmentAction && activityTime && !hasDateLike) {
+                const t = formatDateTime(activityTime);
+                if (t) subLine = `${subLine} at ${t}`.trim();
               }
             } catch {}
 
-            const { baseMessage, equipment } = ((): { baseMessage: string; equipment: any } => {
-              const match = (a.message || a.details || '').toString().match(/\[Equipment:\s*(\{.*\})\]/i);
-              if (match) { try { const baseMessage = (a.message || a.details || '').substring(0, (a.message || a.details || '').indexOf(match[0])).trim(); const obj = JSON.parse(match[1]); return { baseMessage, equipment: obj.items || {} }; } catch { /* noop */ } }
-              return { baseMessage: subLine, equipment: null };
-            })();
-
+            const { baseMessage, equipment } = parseEquipmentFromMessage(a.message || a.details || '');
             const displaySubLine = equipment ? baseMessage : subLine;
 
             return (
-              <div key={a.id || idx} onClick={() => handleActivityClick(a)} className="bg-white rounded-md p-3 border border-gray-200 hover:border-gray-300 hover:shadow-sm transition-all duration-200 cursor-pointer">
+              <div 
+                key={a.id || idx} 
+                onClick={() => handleActivityClick(a)} 
+                className="bg-white rounded-md p-3 border border-gray-200 hover:border-blue-300 hover:shadow-sm transition-all duration-200 cursor-pointer"
+              >
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <h4 className="font-medium text-sm text-gray-900">{(visibleTitle || (a.title || a.action)) ?? 'System Event'}</h4>
                     <p className="text-xs text-gray-600 mt-1 break-words">{displaySubLine}</p>
                     {equipment && (
                       <div className="mt-2 flex flex-wrap gap-1.5">
-                        {Object.entries(equipment).map(([key, value]: [string, any]) => {
-                          const displayKey = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-                          return (
-                            <span key={key} className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}>{displayKey}</span>
-                          );
-                        })}
+                        {Array.isArray(equipment)
+                          ? (equipment as any[]).map((item, idx) => {
+                              const itemName = String(item).replace(/_/g, ' ');
+                              return (
+                                <span key={idx} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
+                                  {itemName}
+                                </span>
+                              );
+                            })
+                          : Object.entries(equipment).map(([key, value]: [string, any]) => {
+                              const displayKey = key
+                                .split('_')
+                                .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+                                .join(' ');
+                              return (
+                                <span key={key} className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}>
+                                  {displayKey}
+                                </span>
+                              );
+                            })}
                       </div>
                     )}
                   </div>
-                  <div className="text-xs text-gray-500 ml-4">{a.createdAt ? formatDateTime(a.createdAt) : ''}</div>
+                  <div className="text-xs text-gray-500 ml-4">
+                    {a.createdAt || a.created_at || a.timestamp || a.time || a.date || a.updatedAt || a.updated_at ? formatDateTime(a.createdAt || a.created_at || a.timestamp || a.time || a.date || a.updatedAt || a.updated_at) : ''}
+                  </div>
                 </div>
               </div>
             );

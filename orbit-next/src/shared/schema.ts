@@ -93,6 +93,11 @@ export const facilityBookings = pgTable("facility_bookings", {
   // Arrival confirmation: when an approved booking requires admin confirmation after start
   arrivalConfirmationDeadline: timestamp("arrival_confirmation_deadline"),
   arrivalConfirmed: boolean("arrival_confirmed").default(false),
+  // Database status values: pending, approved, denied, cancelled
+  // Note: "scheduled", "active", "done" are UI DISPLAY LABELS (not database values)
+  // - "Scheduled" = approved booking that hasn't started yet (status='approved' + startTime > now)
+  // - "Active" = approved booking currently in progress (status='approved' + now between start/end)
+  // - "Done" = approved booking that has ended (status='approved' + endTime < now)
   status: varchar("status").default("pending").notNull(), // pending, approved, denied, cancelled
   adminId: varchar("admin_id").references(() => users.id),
   adminResponse: text("admin_response"),

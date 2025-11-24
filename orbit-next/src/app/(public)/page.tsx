@@ -60,55 +60,54 @@ export default function LandingPage() {
         </div>
       )}
       <div className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-rose-50">
-        <div className="min-h-screen flex items-center justify-center py-12">
-          <div className="w-full max-w-4xl px-4 sm:px-6 lg:px-8">
-            <div className="text-center mb-6 sm:mb-8 lg:mb-10">
-              <div className="inline-flex items-center justify-center mb-3 sm:mb-4 lg:mb-6">
+        <div className="min-h-screen flex items-center justify-center py-8 px-4 sm:py-12 sm:px-6">
+          <div className="w-full max-w-2xl">
+            <div className="text-center mb-8 sm:mb-10">
+              <div className="inline-flex items-center justify-center mb-4 sm:mb-6">
                 <img
                   src="/orbit-logo.png"
                   alt="ORBIT Logo"
-                  className="h-12 sm:h-14 md:h-16 w-auto object-contain"
+                  className="h-16 sm:h-20 w-auto object-contain"
                 />
               </div>
-              <p className="text-lg sm:text-xl lg:text-2xl text-gray-700 mb-3 sm:mb-4 font-bold">
-                ORBIT - Integrated Library Facility Management System
-              </p>
-              <p className="text-base sm:text-lg text-gray-600 max-w-3xl mx-auto leading-snug">
-                Easily find and reserve school rooms and facilities — manage your bookings in one
-                place.
+              <h1 className="text-xl sm:text-2xl lg:text-3xl text-gray-900 mb-3 sm:mb-4 font-bold px-4">
+                ORBIT – Integrated Library Facility Management System
+              </h1>
+              <p className="text-sm sm:text-base text-gray-600 max-w-xl mx-auto leading-relaxed px-4">
+                Easily find and reserve school rooms and facilities, manage your bookings, and keep everything organized in one place.
               </p>
             </div>
 
-          <div className="mx-auto">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-5 mb-4 sm:mb-8 lg:mb-10">
-              <FeatureCard
-                icon={<Users className="h-5 w-5 sm:h-7 sm:w-7 text-white" />}
-                title="User-Friendly Interface"
-                description="Easy-to-use system designed specifically for school users"
-              />
-              <FeatureCard
-                icon={<Calendar className="h-5 w-5 sm:h-7 sm:w-7 text-white" />}
-                title="Facility Booking"
-                description="Quickly reserve rooms and manage bookings"
-              />
-              <FeatureCard
-                icon={<Shield className="h-5 w-5 sm:h-7 sm:w-7 text-white" />}
-                title="Secure UIC-only Access"
-                description="Sign in with your UIC account for authorized and secure access to system features."
-              />
-            </div>
+            <div className="mx-auto px-4">
+              <div className="grid grid-cols-1 gap-4 sm:gap-5 mb-8 sm:mb-10">
+                <FeatureCard
+                  icon={<Users className="h-6 w-6 sm:h-7 sm:w-7 text-white" />}
+                  title="User-Friendly Interface"
+                  description="Easy-to-use system designed specifically for school users."
+                />
+                <FeatureCard
+                  icon={<Calendar className="h-6 w-6 sm:h-7 sm:w-7 text-white" />}
+                  title="Facility Booking"
+                  description="Quickly reserve rooms and manage bookings without the paperwork."
+                />
+                <FeatureCard
+                  icon={<Shield className="h-6 w-6 sm:h-7 sm:w-7 text-white" />}
+                  title="Secure UIC-only Access"
+                  description="Sign in with your UIC account to keep reservations protected."
+                />
+              </div>
 
-            <div className="mt-8 flex justify-center">
-              <button
-                onClick={handleGetStarted}
-                className="bg-gradient-to-r from-pink-600 to-rose-700 hover:from-pink-700 hover:to-rose-800 text-white font-bold text-lg px-10 py-3 rounded-lg transition-all duration-150 transform hover:scale-105 shadow-lg hover:shadow-pink-500/20"
-              >
-                Get Started
-              </button>
+              <div className="flex justify-center">
+                <button
+                  onClick={handleGetStarted}
+                  className="bg-gradient-to-r from-pink-600 to-rose-700 hover:from-pink-700 hover:to-rose-800 text-white font-semibold text-base sm:text-lg px-8 sm:px-10 py-3 rounded-lg transition-all duration-150 transform hover:scale-105 shadow-lg hover:shadow-pink-500/20 w-full sm:w-auto"
+                >
+                  Get Started
+                </button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
       </div>
     </>
   );
@@ -124,14 +123,14 @@ function FeatureCard({
   description: string;
 }) {
   return (
-    <div className="bg-white border border-gray-200 rounded-2xl p-3 sm:p-4 md:p-6 text-center transform transition-all duration-200 hover:scale-105 hover:shadow-xl shadow-md">
-      <div className="inline-flex items-center justify-center w-12 h-12 sm:w-14 sm:h-14 bg-gradient-to-br from-pink-600 to-rose-700 rounded-full mb-2 sm:mb-3 md:mb-4 shadow-lg">
+    <div className="bg-white border border-gray-200 rounded-xl p-5 sm:p-6 text-center transform transition-all duration-200 hover:scale-102 hover:shadow-lg shadow-sm">
+      <div className="inline-flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 bg-gradient-to-br from-pink-600 to-rose-700 rounded-full mb-3 sm:mb-4 shadow-md">
         {icon}
       </div>
-      <h3 className="text-sm sm:text-base md:text-lg font-semibold mb-1 sm:mb-2 text-gray-900">
+      <h3 className="text-base sm:text-lg font-semibold mb-2 text-gray-900">
         {title}
       </h3>
-      <p className="text-xs sm:text-sm text-gray-600 leading-tight break-words">{description}</p>
+      <p className="text-sm sm:text-base text-gray-600 leading-relaxed">{description}</p>
     </div>
   );
 }

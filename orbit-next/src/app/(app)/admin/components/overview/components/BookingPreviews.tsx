@@ -1,8 +1,10 @@
 import React, { useState } from "react";
-import { Calendar, ArrowUpDown } from "lucide-react";
+import { Calendar, ArrowUpDown, Eye } from "lucide-react";
+import { format } from "date-fns";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Separator } from "@/components/ui/separator";
 import { FacilityBooking } from "@shared/schema";
 import type { BookingPreviewsProps } from "../../admin/types";
 import { EmptyState } from "./EmptyState";
@@ -19,6 +21,63 @@ export function BookingPreviews({ upcomingBookings, recentBookings, scheduledCou
   const closeModal = () => {
     setIsModalOpen(false);
     setSelectedBooking(null);
+  };
+
+  const renderEquipmentSection = (booking: FacilityBooking) => {
+    if (!booking.equipment || typeof booking.equipment !== 'object') return null;
+
+    const equipment = booking.equipment as any;
+    const items = Array.isArray(equipment.items) ? equipment.items : [];
+    const hasOthers = equipment.others && String(equipment.others).trim().length > 0;
+
+    if (items.length === 0 && !hasOthers) return null;
+
+    return (
+      <div>
+        <h3 className="text-sm font-semibold text-gray-700 mb-2">Equipment</h3>
+        <div className="space-y-2">
+          {items.map((item: string, idx: number) => {
+            let statusValue = "pending";
+            try {
+              const resp = String(booking?.adminResponse || "");
+              const jsonMatch = resp.match(/\{"items":\{[^}]*\}\}/);
+              if (jsonMatch) {
+                const parsed = JSON.parse(jsonMatch[0]);
+                if (parsed.items && typeof parsed.items === "object") {
+                  const itemKey = String(item).toLowerCase().replace(/\s+/g, "_");
+                  for (const [key, value] of Object.entries(parsed.items)) {
+                    const normalizedKey = String(key).toLowerCase().replace(/\s+/g, "_");
+                    if (normalizedKey === itemKey || String(key).toLowerCase() === String(item).toLowerCase()) {
+                      statusValue = String(value);
+                      break;
+                    }
+                  }
+                }
+              }
+            } catch {}
+
+            return (
+              <div key={idx} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                <span className="text-sm text-gray-700 font-medium">{item}</span>
+                <span className={`text-xs font-semibold px-2 py-1 rounded ${
+                  statusValue === "prepared" ? "bg-green-100 text-green-700" :
+                  statusValue === "not_available" || statusValue === "not available" ? "bg-red-100 text-red-700" :
+                  "bg-gray-100 text-gray-600"
+                }`}>
+                  {statusValue === "not_available" ? "not available" : statusValue}
+                </span>
+              </div>
+            );
+          })}
+          {hasOthers && (
+            <div>
+              <h4 className="text-xs font-semibold text-gray-600 mb-1">Other Equipment</h4>
+              <p className="text-sm text-gray-900 p-2 bg-gray-50 rounded">{equipment.others}</p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -53,12 +112,31 @@ export function BookingPreviews({ upcomingBookings, recentBookings, scheduledCou
           <div className="space-y-3">
             {upcomingBookings.slice(0, 5).map((booking) => (
               <div key={booking.id} onClick={() => handleBookingClick(booking)} className="bg-gray-50 rounded-lg p-3 hover:bg-gray-100 hover:shadow-sm transition-all duration-200 cursor-pointer">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="font-medium text-gray-900">{getFacilityName(booking.facilityId)}</h4>
-                    <p className="text-sm text-gray-600">{getUserEmail(booking.userId)} • {new Date(booking.startTime).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</p>
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <div className="bg-gray-100 p-2 rounded-lg flex-shrink-0">
+                      <Calendar className="h-4 w-4 text-gray-600" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <h4 className="font-semibold text-gray-900 text-sm truncate">{getFacilityName(booking.facilityId)}</h4>
+                      <p className="text-xs text-gray-500 truncate">{getUserEmail(booking.userId)}</p>
+                    </div>
                   </div>
-                  <div>{renderStatusBadge(booking.status)}</div>
+                  
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                    <div className="text-left">
+                      <p className="text-xs font-medium text-gray-500">Started</p>
+                      <p className="text-sm font-semibold text-gray-900 whitespace-nowrap">{format(new Date(booking.startTime), "h:mm a")}</p>
+                      <p className="text-xs text-gray-500">{format(new Date(booking.startTime), "M/d/yyyy")}</p>
+                    </div>
+                    <div className="text-left">
+                      <p className="text-xs font-medium text-gray-500">Ends</p>
+                      <p className="text-sm font-semibold text-gray-900 whitespace-nowrap">{format(new Date(booking.endTime), "h:mm a")}</p>
+                      <p className="text-xs text-gray-500">{format(new Date(booking.endTime), "M/d/yyyy")}</p>
+                    </div>
+                    
+                    <div className="flex-shrink-0">{renderStatusBadge(booking.status)}</div>
+                  </div>
                 </div>
               </div>
             ))}
@@ -93,13 +171,42 @@ export function BookingPreviews({ upcomingBookings, recentBookings, scheduledCou
               else statusLabel = booking.status || 'Unknown';
 
               return (
-                <div key={booking.id} onClick={() => handleBookingClick(booking)} className="bg-gray-50 rounded-lg p-3 hover:bg-gray-100 hover:shadow-sm transition-all duration-200 cursor-pointer">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="font-medium text-gray-900">{getFacilityName(booking.facilityId)}</h4>
-                      <p className="text-sm text-gray-600">{getUserEmail(booking.userId)} • {formatDateTime(actionTime)}</p>
+                <div
+                  key={booking.id}
+                  onClick={() => handleBookingClick(booking)}
+                  className="bg-white rounded-lg p-3 border border-gray-200 hover:border-pink-200 hover:shadow-sm transition-all duration-200 cursor-pointer"
+                >
+                  <div className="flex items-center justify-between gap-4">
+                    {/* Left section: Facility info */}
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <div className="bg-gray-100 p-2 rounded-lg flex-shrink-0">
+                        <Calendar className="h-4 w-4 text-gray-600" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <h4 className="font-semibold text-gray-900 text-sm truncate">{getFacilityName(booking.facilityId)}</h4>
+                        <p className="text-xs text-gray-500 truncate">
+                          {getUserEmail(booking.userId)}
+                        </p>
+                      </div>
                     </div>
-                    <div>{renderStatusBadge(statusLabel)}</div>
+                    
+                    {/* Right section: Time & Status */}
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                      {/* Time Info */}
+                      <div className="text-left">
+                        <p className="text-xs font-medium text-gray-500">Started</p>
+                        <p className="text-sm font-semibold text-gray-900 whitespace-nowrap">{format(new Date(booking.startTime), "h:mm a")}</p>
+                        <p className="text-xs text-gray-500">{format(new Date(booking.startTime), "M/d/yyyy")}</p>
+                      </div>
+                      <div className="text-left">
+                        <p className="text-xs font-medium text-gray-500">Ends</p>
+                        <p className="text-sm font-semibold text-gray-900 whitespace-nowrap">{format(new Date(booking.endTime), "h:mm a")}</p>
+                        <p className="text-xs text-gray-500">{format(new Date(booking.endTime), "M/d/yyyy")}</p>
+                      </div>
+                      
+                      {/* Status */}
+                      <div className="flex-shrink-0">{renderStatusBadge(statusLabel)}</div>
+                    </div>
                   </div>
                 </div>
               );
@@ -114,79 +221,58 @@ export function BookingPreviews({ upcomingBookings, recentBookings, scheduledCou
       </div>
 
       <Dialog open={isModalOpen} onOpenChange={closeModal}>
-        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Booking Details</DialogTitle>
           </DialogHeader>
           {selectedBooking && (
             <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 mb-1">Facility</h3>
+                <p className="text-base text-gray-900">{getFacilityName(selectedBooking.facilityId)}</p>
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 mb-1">User</h3>
+                <p className="text-base text-gray-900">{getUserEmail(selectedBooking.userId)}</p>
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <h4 className="text-sm font-medium text-gray-500 mb-1">User</h4>
-                  <p className="text-sm font-semibold text-gray-900">{getUserEmail(selectedBooking.userId)}</p>
+                  <h3 className="text-sm font-semibold text-gray-700 mb-1">Start Time</h3>
+                  <p className="text-base text-gray-900">{format(new Date(selectedBooking.startTime), "PPpp")}</p>
                 </div>
                 <div>
-                  <h4 className="text-sm font-medium text-gray-500 mb-1">Status</h4>
-                  {renderStatusBadge(selectedBooking.status)}
+                  <h3 className="text-sm font-semibold text-gray-700 mb-1">End Time</h3>
+                  <p className="text-base text-gray-900">{format(new Date(selectedBooking.endTime), "PPpp")}</p>
                 </div>
               </div>
-              <Separator />
               <div>
-                <h4 className="text-sm font-medium text-gray-500 mb-1">Facility</h4>
-                <p className="text-sm text-gray-900">{getFacilityName(selectedBooking.facilityId)}</p>
+                <h3 className="text-sm font-semibold text-gray-700 mb-1">Status</h3>
+                <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${
+                  selectedBooking.status === "approved" ? "bg-green-100 text-green-800" :
+                  selectedBooking.status === "pending" ? "bg-yellow-100 text-yellow-800" :
+                  selectedBooking.status === "denied" ? "bg-red-100 text-red-800" :
+                  "bg-gray-100 text-gray-800"
+                }`}>
+                  {selectedBooking.status || "Unknown"}
+                </span>
               </div>
-              <Separator />
-              <div className="grid grid-cols-2 gap-4">
+              {selectedBooking.purpose && (
                 <div>
-                  <h4 className="text-sm font-medium text-gray-500 mb-1">Start Time</h4>
-                  <p className="text-sm text-gray-900">{formatDateTime(selectedBooking.startTime)}</p>
+                  <h3 className="text-sm font-semibold text-gray-700 mb-1">Purpose</h3>
+                  <p className="text-base text-gray-900 whitespace-pre-wrap">{selectedBooking.purpose}</p>
                 </div>
-                <div>
-                  <h4 className="text-sm font-medium text-gray-500 mb-1">End Time</h4>
-                  <p className="text-sm text-gray-900">{formatDateTime(selectedBooking.endTime)}</p>
-                </div>
-              </div>
-              <Separator />
+              )}
               <div>
-                <h4 className="text-sm font-medium text-gray-500 mb-1">Participants</h4>
-                <p className="text-sm text-gray-900">{selectedBooking.participants || 0}</p>
+                <h3 className="text-sm font-semibold text-gray-700 mb-1">Participants</h3>
+                <p className="text-base text-gray-900">{selectedBooking.participants || 0}</p>
               </div>
               {selectedBooking.courseYearDept && (
-                <>
-                  <Separator />
-                  <div>
-                    <h4 className="text-sm font-medium text-gray-500 mb-1">Course/Year/Dept</h4>
-                    <p className="text-sm text-gray-900">{selectedBooking.courseYearDept}</p>
-                  </div>
-                </>
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-700 mb-1">Course/Year/Dept</h3>
+                  <p className="text-base text-gray-900">{selectedBooking.courseYearDept}</p>
+                </div>
               )}
-              {selectedBooking.purpose && (
-                <>
-                  <Separator />
-                  <div>
-                    <h4 className="text-sm font-medium text-gray-500 mb-1">Purpose</h4>
-                    <p className="text-sm text-gray-900 whitespace-pre-wrap">{selectedBooking.purpose}</p>
-                  </div>
-                </>
-              )}
-              {selectedBooking.equipment != null && (
-                <>
-                  <Separator />
-                  <div>
-                    <h4 className="text-sm font-medium text-gray-500 mb-2">Equipment</h4>
-                    <p className="text-sm text-gray-900">Equipment requested: {JSON.stringify(selectedBooking.equipment)}</p>
-                  </div>
-                </>
-              )}
-              {selectedBooking.createdAt && (
-                <>
-                  <Separator />
-                  <div>
-                    <h4 className="text-sm font-medium text-gray-500 mb-1">Created At</h4>
-                    <p className="text-sm text-gray-900">{formatDateTime(selectedBooking.createdAt)}</p>
-                  </div>
-                </>
-              )}
+              {renderEquipmentSection(selectedBooking)}
             </div>
           )}
         </DialogContent>

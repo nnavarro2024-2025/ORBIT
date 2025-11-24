@@ -56,80 +56,222 @@ export function SuccessTab({
       <p className="text-sm text-gray-600 mt-1">Completed bookings which were approved and had confirmed arrival.</p>
       {filteredSuccessfullyBooked.length > 0 ? (
         <>
-          <div className="space-y-2 mt-3">
+          <div className="space-y-3 mt-3">
             {filteredSuccessfullyBooked
               .slice(successPage * itemsPerPage, (successPage + 1) * itemsPerPage)
-              .map((b: FacilityBooking) => (
+              .map((b: FacilityBooking) => {
+                const equipment: any = b.equipment || {};
+                const items = Array.isArray(equipment.items) ? equipment.items : [];
+                const hasOthers = equipment.others && String(equipment.others).trim().length > 0;
+
+                return (
                 <div 
                   key={b.id} 
-                  className="bg-white rounded-md p-3 border border-gray-200 cursor-pointer hover:border-blue-300 hover:shadow-sm transition-all duration-200"
+                  className="bg-white rounded-lg p-4 border border-gray-200 cursor-pointer hover:border-blue-300 hover:shadow-md transition-all duration-200"
                   onClick={() => handleBookingClick(b)}
                 >
-                  <div className="flex flex-col md:flex-row items-start md:items-center gap-4">
-                    <div className="flex-1 min-w-0">
-                      <h4 className="font-medium text-sm text-gray-900">{getUserEmail(b.userId)}</h4>
-                      <p className="text-xs text-gray-600">{getFacilityName(b.facilityId)}</p>
-                      <p className="text-xs text-gray-500 mt-1">Participants: <span className="text-xs text-gray-700">{b.participants || 0}</span></p>
+                  <div className="grid grid-cols-1 lg:grid-cols-10 gap-4">
+                    {/* Left Column - User Info */}
+                    <div className="lg:col-span-2">
+                      <h4 className="font-semibold text-sm text-gray-900 mb-1">{getUserEmail(b.userId)}</h4>
+                      <p className="text-xs text-gray-600 mb-2">{getFacilityName(b.facilityId)}</p>
+                      <div className="flex flex-wrap gap-2 items-center">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 text-xs">
+                          <svg className="h-3 w-3 text-gray-600" viewBox="0 0 8 8" fill="currentColor">
+                            <circle cx="4" cy="4" r="4" />
+                          </svg>
+                          {b.participants || 0}
+                        </span>
+                        {b.courseYearDept && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-xs font-medium">
+                            <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+                              <path d="M10.394 2.08a1 1 0 00-.788 0l-7 3a1 1 0 000 1.84L5.25 8.051a.999.999 0 01.356-.257l4-1.714a1 1 0 11.788 1.838L7.667 9.088l1.94.831a1 1 0 00.787 0l7-3a1 1 0 000-1.838l-7-3zM3.31 9.397L5 10.12v4.102a8.969 8.969 0 00-1.05-.174 1 1 0 01-.89-.89 11.115 11.115 0 01.25-3.762zM9.3 16.573A9.026 9.026 0 007 14.935v-3.957l1.818.78a3 3 0 002.364 0l5.508-2.361a11.026 11.026 0 01.25 3.762 1 1 0 01-.89.89 8.968 8.968 0 00-5.35 2.524 1 1 0 01-1.4 0zM6 18a1 1 0 001-1v-2.065a8.935 8.935 0 00-2-.712V17a1 1 0 001 1z" />
+                            </svg>
+                            {b.courseYearDept}
+                          </span>
+                        )}
+                      </div>
                     </div>
 
-                    <div className="w-full md:flex-1 flex flex-col md:flex-row items-start md:items-center min-w-0">
-                      <div className="w-full md:flex-1 flex items-center justify-start md:justify-end gap-2 text-xs text-gray-500 min-w-0">
-                        <span className="text-xs text-gray-500">Purpose:</span>
-                        {b.purpose ? (() => {
-                          const id = `purpose-${b.id}`;
-                          const isOpen = !!openPurpose[id];
-                          return (
-                            <Popover open={isOpen} onOpenChange={(v) => setOpenPurpose((prev) => ({ ...prev, [id]: v }))}>
+                    {/* Middle Column - Time & Purpose */}
+                    <div className="lg:col-span-3">
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="text-gray-500 font-medium">Purpose:</span>
+                          {b.purpose ? (
+                            <Popover>
                               <TooltipProvider>
                                 <Tooltip>
                                   <TooltipTrigger asChild>
                                     <PopoverTrigger asChild>
-                                      <button
-                                        onClick={() => setOpenPurpose((prev) => ({ ...prev, [id]: !prev[id] }))}
-                                        className="flex items-center gap-1 cursor-help text-xs text-pink-600"
-                                        aria-expanded={isOpen}
-                                      >
-                                        <Eye className="h-3 w-3 text-pink-600" />
-                                        <span>View</span>
+                                      <button className="flex items-center gap-1 cursor-help text-pink-600 hover:text-pink-700">
+                                        <Eye className="h-3 w-3" />
+                                        <span className="text-xs">View</span>
                                       </button>
                                     </PopoverTrigger>
                                   </TooltipTrigger>
-                                  <TooltipContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
+                                  <TooltipContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
                                     <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                                      <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
+                                      <p className="font-semibold text-sm text-gray-800">Purpose</p>
                                     </div>
-                                    <div className="p-3">
-                                      <p className="text-sm text-gray-900 leading-5 break-words text-left">{b.purpose}</p>
+                                    <div className="p-3 max-h-48 overflow-y-auto">
+                                      <p className="text-sm text-gray-900 leading-5 break-words">{b.purpose}</p>
                                     </div>
                                   </TooltipContent>
                                 </Tooltip>
                               </TooltipProvider>
-                              <PopoverContent side="top" align="end" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50">
+                              <PopoverContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50">
                                 <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                                  <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
+                                  <p className="font-semibold text-sm text-gray-800">Purpose</p>
                                 </div>
-                                <div className="p-3">
-                                  <p className="text-sm text-gray-900 leading-5 break-words text-left">{b.purpose}</p>
+                                <div className="p-3 max-h-48 overflow-y-auto">
+                                  <p className="text-sm text-gray-900 leading-5 break-words">{b.purpose}</p>
                                 </div>
                               </PopoverContent>
                             </Popover>
-                          );
-                        })() : null}
-                        <span className="text-xs text-gray-400 whitespace-nowrap">|</span>
-                        <span className="text-xs text-gray-500 whitespace-nowrap">Starts:</span>
-                        <span className="text-xs text-gray-900 whitespace-nowrap">{formatDateTime(b.startTime)}</span>
-                        <span className="text-xs text-gray-400 whitespace-nowrap">|</span>
-                        <span className="text-xs text-gray-500 whitespace-nowrap">Ends:</span>
-                        <span className="text-xs text-gray-900 whitespace-nowrap">{formatDateTime(b.endTime)}</span>
+                          ) : (
+                            <span className="text-xs text-gray-400">None</span>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          <div>
+                            <span className="text-gray-500">Starts:</span>
+                            <p className="text-gray-900 font-medium">{formatDateTime(b.startTime)}</p>
+                          </div>
+                          <div>
+                            <span className="text-gray-500">Ends:</span>
+                            <p className="text-gray-900 font-medium">{formatDateTime(b.endTime)}</p>
+                          </div>
+                        </div>
                       </div>
-                      <div className="w-full md:w-36 text-right mt-2 md:mt-0 md:ml-4 flex items-center justify-end gap-2 md:whitespace-nowrap">
-                        <span className="text-xs text-gray-400">|</span>
-                        <span className={`text-xs font-medium ${statusClass(b.status)} capitalize`}>Status: {String(b.status || '')}</span>
-                      </div>
+                    </div>
+
+                    {/* Equipment Column */}
+                    <div className="lg:col-span-3">
+                      {items.length > 0 ? (
+                        <div className="bg-white rounded-lg p-2.5 border border-gray-200 h-[120px] flex flex-col">
+                          <div className="flex items-center justify-between mb-1.5 flex-shrink-0">
+                            <span className="text-xs font-medium text-gray-500">Equipment or Needs</span>
+                          </div>
+                          <div className="space-y-1 overflow-y-auto flex-1">
+                            {items.map((item: string, idx: number) => {
+                              let statusValue = 'pending';
+                              try {
+                                const resp = String(b?.adminResponse || '');
+                                const jsonMatch = resp.match(/\{"items":\{[^}]*\}\}/);
+                                if (jsonMatch) {
+                                  const parsed = JSON.parse(jsonMatch[0]);
+                                  if (parsed.items && typeof parsed.items === 'object') {
+                                    const itemKey = String(item).toLowerCase().replace(/\s+/g, '_');
+                                    for (const [key, value] of Object.entries(parsed.items)) {
+                                      const normalizedKey = String(key).toLowerCase().replace(/\s+/g, '_');
+                                      if (normalizedKey === itemKey || String(key).toLowerCase() === String(item).toLowerCase()) {
+                                        statusValue = String(value);
+                                        break;
+                                      }
+                                    }
+                                  }
+                                }
+                              } catch {}
+
+                              return (
+                                <div key={`eq-${b.id}-${idx}`} className="flex items-center justify-between py-0.5">
+                                  <span className="text-xs text-gray-700">{item}</span>
+                                  <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                                    statusValue === 'prepared' ? 'bg-green-100 text-green-700' :
+                                    statusValue === 'not_available' || statusValue === 'not available' ? 'bg-red-100 text-red-700' :
+                                    'bg-gray-100 text-gray-600'
+                                  }`}>
+                                    {statusValue === 'not_available' ? 'not available' : statusValue}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                            {hasOthers && (() => {
+                              let otherStatusValue = 'pending';
+                              try {
+                                const resp = String(b?.adminResponse || '');
+                                const jsonMatch = resp.match(/\{"items":\{[^}]*\}\}/);
+                                if (jsonMatch) {
+                                  const parsed = JSON.parse(jsonMatch[0]);
+                                  if (parsed.items && typeof parsed.items === 'object') {
+                                    const otherText = String(equipment.others).trim().toLowerCase();
+                                    for (const [key, value] of Object.entries(parsed.items)) {
+                                      if (String(key).toLowerCase() === otherText || String(key).toLowerCase().includes('other')) {
+                                        otherStatusValue = String(value);
+                                        break;
+                                      }
+                                    }
+                                  }
+                                }
+                              } catch {}
+                              
+                              return (
+                                <div className="flex items-center justify-between py-0.5">
+                                  <Popover>
+                                    <TooltipProvider>
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <PopoverTrigger asChild>
+                                            <button
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                e.preventDefault();
+                                              }}
+                                              className="text-xs text-pink-600 hover:text-pink-700 font-medium transition-colors"
+                                            >
+                                              View other
+                                            </button>
+                                          </PopoverTrigger>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
+                                          <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                            <p className="font-semibold text-sm text-gray-800">Other equipment</p>
+                                          </div>
+                                          <div className="p-3">
+                                            <p className="text-sm text-gray-900 leading-5 break-words">{String(equipment.others).trim()}</p>
+                                          </div>
+                                        </TooltipContent>
+                                      </Tooltip>
+                                    </TooltipProvider>
+                                    <PopoverContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50">
+                                      <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                        <p className="font-semibold text-sm text-gray-800">Other equipment</p>
+                                      </div>
+                                      <div className="p-3 max-h-48 overflow-y-auto">
+                                        <p className="text-sm text-gray-900 leading-5 break-words">{String(equipment.others).trim()}</p>
+                                      </div>
+                                    </PopoverContent>
+                                  </Popover>
+                                  <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                                    otherStatusValue === 'prepared' ? 'bg-green-100 text-green-700' :
+                                    otherStatusValue === 'not_available' || otherStatusValue === 'not available' ? 'bg-red-100 text-red-700' :
+                                    'bg-gray-100 text-gray-600'
+                                  }`}>
+                                    {otherStatusValue === 'not_available' ? 'not available' : otherStatusValue}
+                                  </span>
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="bg-white rounded-lg p-2.5 border border-gray-200 h-[120px] flex items-center justify-center">
+                          <p className="text-xs text-gray-500">No equipment</p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Status Column */}
+                    <div className="lg:col-span-2 flex items-center justify-end">
+                      <span className={`text-xs font-semibold ${statusClass(b.status)} capitalize px-3 py-1.5 rounded-full`}>
+                        {String(b.status || '')}
+                      </span>
                     </div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
           </div>
 
           {filteredSuccessfullyBooked.length > itemsPerPage && (
@@ -238,6 +380,88 @@ export function SuccessTab({
                   </div>
                 </>
               )}
+
+              {/* Equipment Status */}
+              {(() => {
+                const eq: any = selectedBooking.equipment || {};
+                const eqItems = Array.isArray(eq.items) ? eq.items : [];
+                if (eqItems.length > 0) {
+                  return (
+                    <>
+                      <Separator />
+                      <div>
+                        <h3 className="font-semibold text-sm text-muted-foreground mb-2">Equipment Status</h3>
+                        <div className="space-y-2">
+                          {eqItems.map((item: string, idx: number) => {
+                            let statusValue = 'pending';
+                            try {
+                              const resp = String(selectedBooking?.adminResponse || '');
+                              const jsonMatch = resp.match(/\{"items":\{[^}]*\}\}/);
+                              if (jsonMatch) {
+                                const parsed = JSON.parse(jsonMatch[0]);
+                                if (parsed.items && typeof parsed.items === 'object') {
+                                  const itemKey = String(item).toLowerCase().replace(/\s+/g, '_');
+                                  for (const [key, value] of Object.entries(parsed.items)) {
+                                    const normalizedKey = String(key).toLowerCase().replace(/\s+/g, '_');
+                                    if (normalizedKey === itemKey || String(key).toLowerCase() === String(item).toLowerCase()) {
+                                      statusValue = String(value);
+                                      break;
+                                    }
+                                  }
+                                }
+                              }
+                            } catch {}
+
+                            return (
+                              <div key={`modal-eq-${idx}`} className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded-lg">
+                                <span className="text-sm text-gray-900 font-medium">{item}</span>
+                                <Badge variant={
+                                  statusValue === 'prepared' ? 'default' :
+                                  statusValue === 'not_available' || statusValue === 'not available' ? 'destructive' :
+                                  'secondary'
+                                }>
+                                  {statusValue === 'not_available' ? 'not available' : statusValue}
+                                </Badge>
+                              </div>
+                            );
+                          })}
+                          {eq.others && String(eq.others).trim().length > 0 && (
+                            <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                              <p className="text-xs font-semibold text-blue-900 mb-1">Additional Notes:</p>
+                              <p className="text-sm text-blue-800 leading-relaxed whitespace-pre-wrap break-words">
+                                {String(eq.others).trim()}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  );
+                }
+                return null;
+              })()}
+
+              {/* Admin Notes - Only show if there's non-JSON text */}
+              {(() => {
+                const resp = String(selectedBooking.adminResponse || '');
+                const withoutJson = resp.replace(/\{"items":\{[^}]*\}\}/, '').trim();
+                const cleanResp = withoutJson.replace(/^Needs:\s*(Not Available|Available)\s*—\s*/, '').trim();
+                
+                if (cleanResp.length > 0) {
+                  return (
+                    <>
+                      <Separator />
+                      <div>
+                        <h3 className="font-semibold text-sm text-muted-foreground mb-2">Admin Notes</h3>
+                        <p className="text-base leading-relaxed whitespace-pre-wrap break-words">
+                          {cleanResp}
+                        </p>
+                      </div>
+                    </>
+                  );
+                }
+                return null;
+              })()}
 
               {/* Arrival Confirmed */}
               {selectedBooking.arrivalConfirmed && (

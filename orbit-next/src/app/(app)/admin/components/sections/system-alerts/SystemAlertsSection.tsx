@@ -61,9 +61,19 @@ export function SystemAlertsSection({
   const bookingAlertsAll = useMemo(() => {
     return (alerts || [])
       .filter((alert) => {
-        if (alert.type === "booking") return true;
         const title = (alert.title || "").toLowerCase();
         const message = (alert.message || "").toLowerCase();
+        
+        // Exclude equipment and needs alerts from booking alerts - they belong in User Management
+        if (title.includes("equipment") || title.includes("needs") || 
+            title.includes("request") && (message.includes("equipment") || message.includes("needs")) ||
+            message.includes("equipment") || message.includes("needs") ||
+            message.includes("[equipment:")) {
+          return false;
+        }
+        
+        // Include booking-related alerts
+        if (alert.type === "booking") return true;
         return (
           title.includes("booking cancelled") ||
           title.includes("booking canceled") ||

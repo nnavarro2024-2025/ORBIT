@@ -23,6 +23,11 @@ export async function POST(
   }
 
   const { bookingId } = await context.params;
+  
+  // Check if this is an auto-cancellation due to arrival timeout
+  const { searchParams } = new URL(request.url);
+  const reason = searchParams.get('reason');
+  const isArrivalTimeout = reason === 'arrival_timeout';
 
   try {
     const booking = await storage.getFacilityBooking(bookingId);
@@ -31,7 +36,13 @@ export async function POST(
       return NextResponse.json({ message: "Booking not found." }, { status: 404 });
     }
 
-    if (String(booking.userId) !== String(authResult.user.id)) {
+    // Check if user is admin
+    const requesterId = authResult.user.id;
+    const requesterRecord = authResult.userRecord ?? (await storage.getUser(requesterId));
+    const isAdmin = requesterRecord?.role === "admin";
+
+    // Allow admin or booking owner to cancel
+    if (!isAdmin && String(booking.userId) !== String(authResult.user.id)) {
       return NextResponse.json({ message: "You are not allowed to cancel this booking." }, { status: 403 });
     }
 
@@ -82,12 +93,23 @@ export async function POST(
     try {
       const facility = await storage.getFacility(booking.facilityId).catch(() => null);
       const wasActive = start <= new Date() && new Date() <= end;
+      
+      // Determine action type based on cancellation reason
+      let action = "Booking Cancelled";
+      let details = `User cancelled booking for ${facility?.name || `Facility ${booking.facilityId}`} (${start.toLocaleString()} - ${end.toLocaleString()})`;
+      
+      if (isArrivalTimeout) {
+        action = "Booking Auto-Cancelled";
+        details = `Booking for ${facility?.name || `Facility ${booking.facilityId}`} was automatically cancelled due to arrival confirmation timeout (${start.toLocaleString()} - ${end.toLocaleString()})`;
+      } else if (wasActive) {
+        action = "Booking Ended";
+        details = `User ended booking for ${facility?.name || `Facility ${booking.facilityId}`} (${start.toLocaleString()} - ${end.toLocaleString()})`;
+      }
+      
       await storage.createActivityLog({
         id: randomUUID(),
-        action: wasActive ? "Booking Ended" : "Booking Cancelled",
-        details: `User ${wasActive ? "ended" : "cancelled"} booking for ${
-          facility?.name || `Facility ${booking.facilityId}`
-        } (${start.toLocaleString()} - ${end.toLocaleString()})`,
+        action,
+        details,
         userId: booking.userId,
         ipAddress: null,
         userAgent: request.headers.get("user-agent") ?? null,

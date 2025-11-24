@@ -27,7 +27,7 @@ const OverviewTile = ({ title, count, subtitle, onClick, icon }: OverviewTilePro
 
 export function StatsCards({ activeBookings, upcomingBookings, userManagementAlerts, onNavigateToBookingManagement, onNavigateToSecurity }: StatsCardsProps) {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-3 gap-3 sm:gap-4 md:gap-6">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 md:gap-6">
       <OverviewTile
         title="Active Bookings"
         count={activeBookings?.length || 0}
@@ -45,9 +45,9 @@ export function StatsCards({ activeBookings, upcomingBookings, userManagementAle
       />
 
       <OverviewTile
-        title="System Alerts"
+        title="User Management Alerts"
         count={userManagementAlerts.length}
-        subtitle="Requiring attention"
+        subtitle="Equipment & user actions"
         onClick={onNavigateToSecurity}
         icon={<TriangleAlert className="h-6 w-6 text-orange-600" />}
       />

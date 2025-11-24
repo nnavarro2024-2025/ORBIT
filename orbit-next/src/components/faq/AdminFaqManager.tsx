@@ -250,168 +250,169 @@ export default function AdminFaqManager({ searchTerm: externalSearchTerm }: { se
     return d.toLocaleDateString();
   }
   return (
-    <div className="space-y-6">
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
-        <div className="p-4 sm:p-6 space-y-6">
-          {!externalSearchTerm && (
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-              <div className="space-y-1">
-                <h1 className="text-2xl font-bold text-gray-900">FAQ Management</h1>
-                <p className="text-sm text-gray-600">
-                  Create, edit, and reorder FAQs shown to students in the booking dashboard.
-                </p>
+    <div className="space-y-4 sm:space-y-6">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+        {!externalSearchTerm && (
+          <div className="flex flex-col gap-4 mb-4 sm:mb-6">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 lg:gap-6">
+              <div className="flex-1 min-w-0">
+                <div className="space-y-2">
+                  <h2 className="text-xl sm:text-2xl font-bold text-gray-900">FAQ Management</h2>
+                  <p className="text-xs sm:text-sm text-gray-600">
+                    Create, edit, and reorder FAQs shown to students in the booking dashboard.
+                  </p>
+                </div>
               </div>
-              <Button onClick={openCreateDialog} size="sm" className="self-start sm:self-auto bg-pink-600 hover:bg-pink-700 text-white">
+              <Button onClick={openCreateDialog} size="sm" className="bg-pink-600 hover:bg-pink-700 text-white">
                 <Plus className="mr-2 h-4 w-4" />
                 Add FAQ
               </Button>
             </div>
-          )}
-          {!externalSearchTerm && <Separator />}
-          {!externalSearchTerm && (
-                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                  <div className="flex flex-1 items-center gap-3">
-                    <div className="flex-1">
-                      <Label htmlFor="faq-search" className="text-xs uppercase tracking-wide text-gray-500">
-                        Search
-                      </Label>
-                      <Input
-                        id="faq-search"
-                        placeholder="Search by question or answer"
-                        value={localSearchTerm}
-                        onChange={(event) => setLocalSearchTerm(event.target.value)}
-                        className="focus:border-pink-600 focus:ring-pink-600"
-                      />
-                    </div>
-                    <div className="w-full md:w-52">
-                      <Label className="text-xs uppercase tracking-wide text-gray-500">Category</Label>
-                      <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="All categories" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={ALL_CATEGORIES_OPTION}>All categories</SelectItem>
-                          {FAQ_CATEGORIES.map((category) => (
-                            <SelectItem key={category} value={category}>
-                              {category}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  <div className="text-xs text-gray-500">
-                    {isFetching ? "Refreshing list…" : `${filteredFaqs.length} FAQ${filteredFaqs.length === 1 ? "" : "s"}`}
-                  </div>
-                </div>
-              )}
-          {isLoading ? (
-            <div className="overflow-x-auto">
-              <SkeletonTableRows rows={5} />
+          </div>
+        )}
+        {!externalSearchTerm && (
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4 sm:mb-6">
+            <div className="flex flex-1 items-center gap-3">
+              <div className="flex-1">
+                <Label htmlFor="faq-search" className="text-xs uppercase tracking-wide text-gray-500">
+                  Search
+                </Label>
+                <Input
+                  id="faq-search"
+                  placeholder="Search by question or answer"
+                  value={localSearchTerm}
+                  onChange={(event) => setLocalSearchTerm(event.target.value)}
+                  className="focus:border-pink-600 focus:ring-pink-600"
+                />
+              </div>
+              <div className="w-full md:w-52">
+                <Label className="text-xs uppercase tracking-wide text-gray-500">Category</Label>
+                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="All categories" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_CATEGORIES_OPTION}>All categories</SelectItem>
+                    {FAQ_CATEGORIES.map((category) => (
+                      <SelectItem key={category} value={category}>
+                        {category}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-          ) : isError ? (
-            <div className="flex flex-col items-center justify-center gap-3 py-10 text-center">
-              <p className="text-sm text-red-600">We couldn't load FAQs right now.</p>
-              <Button variant="outline" size="sm" onClick={() => refetch()}>
-                Try again
-              </Button>
+            <div className="text-xs text-gray-500">
+              {isFetching ? "Refreshing list…" : `${filteredFaqs.length} FAQ${filteredFaqs.length === 1 ? "" : "s"}`}
             </div>
-          ) : filteredFaqs.length === 0 ? (
-            <div className="text-center py-16">
-              <p className="text-sm text-gray-500">No FAQs found. Try adjusting your filters or add a new FAQ.</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-16 text-center">Order</TableHead>
-                    <TableHead>Question</TableHead>
-                    <TableHead className="hidden md:table-cell">Category</TableHead>
-                    <TableHead className="hidden md:table-cell">Helpful</TableHead>
-                    <TableHead className="hidden md:table-cell">Last updated</TableHead>
-                    <TableHead className="w-40 text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredFaqs.map((faq, index) => {
-                    const canMoveUp = index > 0;
-                    const canMoveDown = index < filteredFaqs.length - 1;
-                    return (
-                      <TableRow key={faq.id}>
-                        <TableCell className="text-center align-middle">
-                          <div className="flex items-center justify-center gap-1">
-                            <Button
-                              type="button"
-                              size="icon"
-                              variant="ghost"
-                              disabled={!canMoveUp || reorderFaqsMutation.isPending}
-                              onClick={() => handleMove(faq, "up")}
-                              aria-label="Move FAQ up"
-                            >
-                              <ArrowUp className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              type="button"
-                              size="icon"
-                              variant="ghost"
-                              disabled={!canMoveDown || reorderFaqsMutation.isPending}
-                              onClick={() => handleMove(faq, "down")}
-                              aria-label="Move FAQ down"
-                            >
-                              <ArrowDown className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                        <TableCell className="align-middle">
-                          <div className="font-medium text-gray-900 leading-snug line-clamp-2">{faq.question}</div>
-                          <div className="mt-1 text-xs text-gray-500 md:hidden">
-                            <Badge variant="outline" className="bg-pink-50 border-pink-200 text-pink-700">{faq.category}</Badge>
-                          </div>
-                        </TableCell>
-                        <TableCell className="hidden md:table-cell align-middle">
+          </div>
+        )}
+        {isLoading ? (
+          <div className="overflow-x-auto">
+            <SkeletonTableRows rows={5} />
+          </div>
+        ) : isError ? (
+          <div className="flex flex-col items-center justify-center gap-3 py-10 text-center">
+            <p className="text-sm text-red-600">We couldn't load FAQs right now.</p>
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              Try again
+            </Button>
+          </div>
+        ) : filteredFaqs.length === 0 ? (
+          <div className="text-center py-16">
+            <p className="text-sm text-gray-500">No FAQs found. Try adjusting your filters or add a new FAQ.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-16 text-center">Order</TableHead>
+                  <TableHead>Question</TableHead>
+                  <TableHead className="hidden md:table-cell">Category</TableHead>
+                  <TableHead className="hidden md:table-cell">Helpful</TableHead>
+                  <TableHead className="hidden md:table-cell">Last updated</TableHead>
+                  <TableHead className="w-40 text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredFaqs.map((faq, index) => {
+                  const canMoveUp = index > 0;
+                  const canMoveDown = index < filteredFaqs.length - 1;
+                  return (
+                    <TableRow key={faq.id}>
+                      <TableCell className="text-center align-middle">
+                        <div className="flex items-center justify-center gap-1">
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            disabled={!canMoveUp || reorderFaqsMutation.isPending}
+                            onClick={() => handleMove(faq, "up")}
+                            aria-label="Move FAQ up"
+                          >
+                            <ArrowUp className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            disabled={!canMoveDown || reorderFaqsMutation.isPending}
+                            onClick={() => handleMove(faq, "down")}
+                            aria-label="Move FAQ down"
+                          >
+                            <ArrowDown className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                      <TableCell className="align-middle">
+                        <div className="font-medium text-gray-900 leading-snug line-clamp-2">{faq.question}</div>
+                        <div className="mt-1 text-xs text-gray-500 md:hidden">
                           <Badge variant="outline" className="bg-pink-50 border-pink-200 text-pink-700">{faq.category}</Badge>
-                        </TableCell>
-                        <TableCell className="hidden md:table-cell align-middle text-sm text-gray-600">
-                          <span className="font-medium text-green-600">{faq.helpfulCount}</span>
-                          <span className="mx-1 text-gray-400">/</span>
-                          <span className="text-red-500">{faq.notHelpfulCount}</span>
-                        </TableCell>
-                        <TableCell className="hidden md:table-cell align-middle text-sm text-gray-600">
-                          {formatDate(faq.updatedAt)}
-                        </TableCell>
-                        <TableCell className="align-middle text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={() => openEditDialog(faq)}
-                              disabled={updateFaqMutation.isPending && editingFaq?.id === faq.id}
-                              className="border-pink-200 text-pink-600 hover:bg-pink-50"
-                            >
-                              <Pencil className="mr-1.5 h-3.5 w-3.5" /> Edit
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="text-red-600 border-red-200 hover:bg-red-50"
-                              onClick={() => setFaqToDelete(faq)}
-                              disabled={deleteFaqMutation.isPending && faqToDelete?.id === faq.id}
-                            >
-                              <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="hidden md:table-cell align-middle">
+                        <Badge variant="outline" className="bg-pink-50 border-pink-200 text-pink-700">{faq.category}</Badge>
+                      </TableCell>
+                      <TableCell className="hidden md:table-cell align-middle text-sm text-gray-600">
+                        <span className="font-medium text-green-600">{faq.helpfulCount}</span>
+                        <span className="mx-1 text-gray-400">/</span>
+                        <span className="text-red-500">{faq.notHelpfulCount}</span>
+                      </TableCell>
+                      <TableCell className="hidden md:table-cell align-middle text-sm text-gray-600">
+                        {formatDate(faq.updatedAt)}
+                      </TableCell>
+                      <TableCell className="align-middle text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => openEditDialog(faq)}
+                            disabled={updateFaqMutation.isPending && editingFaq?.id === faq.id}
+                            className="border-pink-200 text-pink-600 hover:bg-pink-50"
+                          >
+                            <Pencil className="mr-1.5 h-3.5 w-3.5" /> Edit
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="text-red-600 border-red-200 hover:bg-red-50"
+                            onClick={() => setFaqToDelete(faq)}
+                            disabled={deleteFaqMutation.isPending && faqToDelete?.id === faq.id}
+                          >
+                            <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        )}
       </div>
 
       {/* Create dialog */}

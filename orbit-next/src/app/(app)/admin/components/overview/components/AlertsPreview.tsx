@@ -23,9 +23,18 @@ export function AlertsPreview({ alerts, alertsPreviewTab, setAlertsPreviewTab, f
   };
 
   const bookingAlerts = alerts?.filter(a => {
-    if (a.type === 'booking') return true;
     const t = (a.title || '').toLowerCase();
     const m = (a.message || '').toLowerCase();
+    
+    // Exclude equipment and needs alerts - they belong in User Management
+    if (t.includes('equipment') || t.includes('needs') || 
+        m.includes('equipment') || m.includes('needs') ||
+        m.includes('[equipment:')) {
+      return false;
+    }
+    
+    // Include booking-related alerts
+    if (a.type === 'booking') return true;
     return t.includes('booking') || m.includes('booking');
   }).slice(0, 5) || [];
 
@@ -43,19 +52,42 @@ export function AlertsPreview({ alerts, alertsPreviewTab, setAlertsPreviewTab, f
     const shouldAppendTime = isEquipmentRelated && !hasDateLike && !equipment;
     const fmWithTime = shouldAppendTime ? `${fm} at ${formatDateTime(alert.createdAt)}` : fm;
 
+    // Determine if this is a user management alert
+    const isUnbanActivity = (alert.title || '').toLowerCase().includes('unbanned') || (alert.message || '').toLowerCase().includes('unbanned');
+    const isBanActivity = (alert.title || '').toLowerCase().includes('banned') && !isUnbanActivity;
+    const isUserAlert = alertsPreviewTab === 'users';
+    const isBookingAlert = alertsPreviewTab === 'booking';
+
     return (
-      <div key={alert.id} onClick={() => handleAlertClick(alert)} className="bg-white rounded-md p-3 border border-gray-200 hover:border-gray-300 hover:shadow-sm transition-all duration-200 cursor-pointer">
+      <div 
+        key={alert.id} 
+        onClick={() => handleAlertClick(alert)} 
+        className={`bg-white rounded-md p-3 border transition-all duration-200 cursor-pointer ${
+          isUserAlert && isBanActivity
+            ? "border-red-200 hover:border-red-300 hover:shadow-sm"
+            : isUserAlert && isUnbanActivity
+            ? "border-green-200 hover:border-green-300 hover:shadow-sm"
+            : "border-gray-200 hover:border-blue-300 hover:shadow-sm"
+        }`}
+      >
         <div className="flex flex-col gap-2 md:hidden">
           <h4 className="font-medium text-gray-900 text-sm break-words">{alert.title}</h4>
           <div className="text-xs text-gray-500">{formatDateTime(alert.createdAt)}</div>
           <p className="text-xs text-gray-600 break-words">{fmWithTime}</p>
-          {equipment && (
+          {equipment && Object.keys(equipment).length > 0 && (
             <div className="flex flex-wrap gap-1.5">
               {Object.entries(equipment).map(([key, value]: [string, any]) => {
+                if (key === 'others' && value) {
+                  return (
+                    <span key={key} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                      Other: {value}
+                    </span>
+                  );
+                }
                 const displayKey = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
                 return (
                   <span key={key} className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}>
-                    {displayKey}
+                    {displayKey}: {String(value).charAt(0).toUpperCase() + String(value).slice(1).toLowerCase()}
                   </span>
                 );
               })}
@@ -67,13 +99,20 @@ export function AlertsPreview({ alerts, alertsPreviewTab, setAlertsPreviewTab, f
           <div className="flex-1 min-w-0 pr-4">
             <h4 className="font-medium text-gray-900 text-sm">{alert.title}</h4>
             <p className="text-xs text-gray-600 break-words">{fmWithTime}</p>
-            {equipment && (
+            {equipment && Object.keys(equipment).length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {Object.entries(equipment).map(([key, value]: [string, any]) => {
+                  if (key === 'others' && value) {
+                    return (
+                      <span key={key} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                        Other: {value}
+                      </span>
+                    );
+                  }
                   const displayKey = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
                   return (
                     <span key={key} className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}>
-                      {displayKey}
+                      {displayKey}: {String(value).charAt(0).toUpperCase() + String(value).slice(1).toLowerCase()}
                     </span>
                   );
                 })}
@@ -105,9 +144,9 @@ export function AlertsPreview({ alerts, alertsPreviewTab, setAlertsPreviewTab, f
 
       <div>
         {alertsPreviewTab === 'booking' ? (
-          <div className="space-y-2">{(bookingAlerts.length > 0) ? bookingAlerts.map(renderAlert) : (<EmptyState Icon={AlertCircle} message="No booking alerts" />)}</div>
+          <div className="space-y-3">{(bookingAlerts.length > 0) ? bookingAlerts.map(renderAlert) : (<EmptyState Icon={AlertCircle} message="No booking alerts" />)}</div>
         ) : (
-          <div className="space-y-2">{(userAlerts.length > 0) ? userAlerts.map(renderAlert) : (<EmptyState Icon={AlertCircle} message="No user management alerts" />)}</div>
+          <div className="space-y-3">{(userAlerts.length > 0) ? userAlerts.map(renderAlert) : (<EmptyState Icon={AlertCircle} message="No user management alerts" />)}</div>
         )}
       </div>
 

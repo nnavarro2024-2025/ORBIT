@@ -35,7 +35,6 @@ export type BookingManagementSectionProps = {
   setActiveBookingsPage: Dispatch<SetStateAction<number>>;
   upcomingBookingsPage: number;
   setUpcomingBookingsPage: Dispatch<SetStateAction<number>>;
-  renderEquipmentLine: (booking: FacilityBooking) => React.ReactNode;
   getNeedsStatusForBooking: (booking: FacilityBooking) => "prepared" | "not_available" | undefined;
   openPurpose: Record<string, boolean>;
   setOpenPurpose: Dispatch<SetStateAction<Record<string, boolean>>>;
@@ -44,7 +43,7 @@ export type BookingManagementSectionProps = {
   formatDateTime: (value: FacilityBooking["startTime"]) => string;
   formatDate: (value: FacilityBooking["startTime"]) => string;
   formatTime: (value: FacilityBooking["startTime"]) => string;
-  CountdownComponent: (props: { expiry: string | Date | undefined; onExpire?: () => void }) => React.ReactNode;
+  CountdownComponent: React.ComponentType<{ expiry: string | Date | undefined; onExpire?: () => void }>;
   onArrivalExpire: (booking: FacilityBooking) => void;
   onBookingEndExpire: (booking: FacilityBooking) => void;
   confirmArrivalMutation: MutationRef<{ bookingId: FacilityBooking["id"] }>;
@@ -71,7 +70,6 @@ export function BookingManagementSection({
   setActiveBookingsPage,
   upcomingBookingsPage,
   setUpcomingBookingsPage,
-  renderEquipmentLine,
   getNeedsStatusForBooking,
   openPurpose,
   setOpenPurpose,
@@ -155,12 +153,12 @@ export function BookingManagementSection({
                 <button
                   onClick={() => setOpenPurpose((prev) => ({ ...prev, [id]: !prev[id] }))}
                   className={
-                    triggerClass || "flex items-center gap-1 text-xs text-pink-600 hover:text-pink-700 transition-colors"
+                    triggerClass || "inline-flex items-center gap-1 text-pink-600 hover:text-pink-700 transition-colors"
                   }
                   aria-expanded={isOpen}
                 >
-                  <Eye className="h-3 w-3 text-pink-600" />
-                  <span>View purpose</span>
+                  <Eye className="h-3.5 w-3.5" />
+                  <span className="text-xs">Purpose</span>
                 </button>
               </PopoverTrigger>
             </TooltipTrigger>
@@ -188,6 +186,160 @@ export function BookingManagementSection({
         </PopoverContent>
       </Popover>
     );
+  };
+
+  const renderEquipmentLine = (booking: FacilityBooking) => {
+    if (!booking.equipment) return null;
+    
+    try {
+      const equipment = booking.equipment;
+      const items: { label: string; isOther: boolean; otherValue?: string }[] = [];
+      
+      if (typeof equipment === 'object' && equipment !== null) {
+        // Handle new format with items array
+        if (Array.isArray((equipment as any).items)) {
+          (equipment as any).items.forEach((item: string) => {
+            const displayKey = item
+              .split("_")
+              .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+              .join(" ");
+            items.push({ label: displayKey, isOther: false });
+          });
+        } else {
+          // Handle legacy format (flat object)
+          Object.entries(equipment).forEach(([key, value]) => {
+            if (key === 'others') {
+              // Skip 'others' here, will add it at the end
+            } else if (value === true || value === 'prepared' || value === 'requested') {
+              const displayKey = key
+                .split("_")
+                .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+                .join(" ");
+              items.push({ label: displayKey, isOther: false });
+            }
+          });
+        }
+        
+        // Handle "others" field (works for both formats)
+        if ((equipment as any).others) {
+          items.push({ label: String((equipment as any).others), isOther: true, otherValue: String((equipment as any).others) });
+        }
+      }
+      
+      if (items.length === 0) return null;
+      
+      // Parse equipment statuses from adminResponse
+      const getItemStatus = (itemLabel: string): string => {
+        // Check if booking is active and equipment hasn't been checked
+        const now = new Date();
+        const startTime = new Date(booking.startTime);
+        const endTime = new Date(booking.endTime);
+        const isActive = startTime <= now && now <= endTime;
+        const equipmentChecked = hasEquipmentBeenChecked(booking);
+        
+        // If booking is active and equipment was never checked, mark as not available
+        if (isActive && !equipmentChecked) {
+          return 'not_available';
+        }
+        
+        try {
+          const resp = String(booking?.adminResponse || '');
+          const jsonMatch = resp.match(/\{"items":\{[^}]*\}\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            if (parsed.items && typeof parsed.items === 'object') {
+              const itemKey = String(itemLabel).toLowerCase().replace(/\s+/g, '_');
+              for (const [key, value] of Object.entries(parsed.items)) {
+                const normalizedKey = String(key).toLowerCase().replace(/\s+/g, '_');
+                if (normalizedKey === itemKey || String(key).toLowerCase() === String(itemLabel).toLowerCase()) {
+                  return String(value);
+                }
+              }
+            }
+          }
+        } catch (e) {
+          // If parsing fails, return pending
+        }
+        return 'pending';
+      };
+      
+      return (
+        <>
+          {items.map((item, idx) => {
+            const statusValue = getItemStatus(item.label);
+            return (
+              <div key={idx} className="flex items-center justify-between py-1">
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-gray-900 font-medium">
+                    {item.isOther ? '' : item.label.toLowerCase()}
+                  </span>
+                  {item.isOther && item.otherValue && (
+                    <Popover>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <PopoverTrigger asChild>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  e.preventDefault();
+                                }}
+                                className="text-xs text-pink-600 hover:text-pink-700 font-medium transition-colors ml-1"
+                              >
+                                View other
+                              </button>
+                            </PopoverTrigger>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="max-w-[90vw] sm:max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
+                            <div className="bg-gray-50 px-3 sm:px-4 py-2 border-b border-gray-200">
+                              <p className="font-semibold text-xs sm:text-sm text-gray-800">Other equipment</p>
+                            </div>
+                            <div className="p-3 max-h-48 overflow-y-auto">
+                              <p className="text-xs sm:text-sm text-gray-900 leading-5 break-words">{item.otherValue}</p>
+                            </div>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                      <PopoverContent side="top" className="max-w-[90vw] sm:max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50">
+                        <div className="bg-gray-50 px-3 sm:px-4 py-2 border-b border-gray-200">
+                          <p className="font-semibold text-xs sm:text-sm text-gray-800">Other equipment</p>
+                        </div>
+                        <div className="p-3 max-h-48 overflow-y-auto">
+                          <p className="text-xs sm:text-sm text-gray-900 leading-5 break-words">{item.otherValue}</p>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                  )}
+                </div>
+                <span
+                  className={`text-xs font-semibold px-2 py-0.5 rounded ${
+                    statusValue === 'prepared'
+                      ? 'bg-green-100 text-green-700'
+                      : statusValue === 'not_available' || statusValue === 'not available'
+                        ? 'bg-red-100 text-red-700'
+                        : 'bg-gray-100 text-gray-600'
+                  }`}
+                >
+                  {statusValue === 'not_available' ? 'not available' : statusValue}
+                </span>
+              </div>
+            );
+          })}
+        </>
+      );
+    } catch (e) {
+      return null;
+    }
+  };
+
+  const hasEquipmentBeenChecked = (booking: FacilityBooking): boolean => {
+    try {
+      const resp = String(booking?.adminResponse || '');
+      const jsonMatch = resp.match(/\{"items":\{[^}]*\}\}/);
+      return !!jsonMatch;
+    } catch (e) {
+      return false;
+    }
   };
 
   const renderNeedsBadge = (booking: FacilityBooking) => {
@@ -357,6 +509,7 @@ export function BookingManagementSection({
               isAdmin={isAdmin}
               openEquipmentModal={openEquipmentModal}
               getNeedsStatusForBooking={getNeedsStatusForBooking}
+              hasEquipmentBeenChecked={hasEquipmentBeenChecked}
               onArrivalExpire={onArrivalExpire}
               confirmArrivalMutation={confirmArrivalMutation}
               onBookingEndExpire={onBookingEndExpire}
@@ -377,12 +530,15 @@ export function BookingManagementSection({
               getUserEmail={getUserEmail}
               getFacilityName={getFacilityName}
               formatDateTime={formatDateTime}
+              formatTime={formatTime}
+              formatDate={formatDate}
               renderPurposeButton={renderPurposeButton}
               renderEquipmentLine={renderEquipmentLine}
               renderNeedsBadge={renderNeedsBadge}
               isAdmin={isAdmin}
               openEquipmentModal={openEquipmentModal}
               getNeedsStatusForBooking={getNeedsStatusForBooking}
+              hasEquipmentBeenChecked={hasEquipmentBeenChecked}
               forceActiveBookingMutation={forceActiveBookingMutation}
               renderPagination={renderPagination}
             />

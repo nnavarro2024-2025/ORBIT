@@ -1391,9 +1391,26 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
                       <button
                         onClick={() => {
                           try {
+                            const currentPath = window.location.pathname;
+                            const isOnBookingDashboard = currentPath.includes('/booking');
+                            
+                            // If admin is on booking dashboard, navigate to booking activity logs
+                            if (isAdmin && isOnBookingDashboard) {
+                              const newHash = '#activity-logs:notifications';
+                              window.location.hash = newHash;
+                              window.dispatchEvent(new HashChangeEvent('hashchange'));
+                              return;
+                            }
+                            
                             if (isAdmin) {
-                              // Admin: same behavior as before
-                              setLocation('/admin/alerts');
+                              // Navigate to System Alerts section, User Management tab
+                              setLocation('/admin');
+                              setTimeout(() => {
+                                try {
+                                  window.location.hash = '#security:users';
+                                  window.dispatchEvent(new HashChangeEvent('hashchange'));
+                                } catch (_) {}
+                              }, 100);
                               return;
                             }
 
@@ -1405,7 +1422,7 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
                           } catch (e) {
                             // Fallbacks
                             if (isAdmin) {
-                              try { window.location.replace('/admin/alerts'); } catch (_) { setLocation('/admin/alerts'); }
+                              try { window.location.replace('/admin'); } catch (_) { setLocation('/admin'); }
                             } else {
                               try { window.location.replace('/booking#activity-logs:notifications'); } catch (_) { setLocation('/booking#activity-logs:notifications'); }
                             }
@@ -1427,7 +1444,14 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
                       onClick={() => {
                         try {
                           if (isAdmin) {
-                            setLocation('/admin/alerts');
+                            // Navigate to System Alerts section
+                            setLocation('/admin');
+                            setTimeout(() => {
+                              try {
+                                window.location.hash = '#security:users';
+                                window.dispatchEvent(new HashChangeEvent('hashchange'));
+                              } catch (_) {}
+                            }, 100);
                             return;
                           }
                           // Navigate to Activity Logs → Notification Logs tab in booking dashboard
@@ -1447,7 +1471,7 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
                         } catch (e) {
                           // Fallback
                           if (isAdmin) {
-                            try { window.location.replace('/admin/alerts'); } catch (_) { setLocation('/admin/alerts'); }
+                            try { window.location.replace('/admin'); } catch (_) { setLocation('/admin'); }
                           } else {
                             try { window.location.replace('/booking#activity-logs:notifications'); } catch (_) { setLocation('/booking#activity-logs:notifications'); }
                           }

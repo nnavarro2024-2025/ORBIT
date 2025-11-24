@@ -104,19 +104,33 @@ export function getFacilityBookingStatus(
 /**
  * Get the display label and styling for a booking status
  */
+/**
+ * Get booking display status based on database status and time
+ * 
+ * IMPORTANT: Database statuses are: pending, approved, denied, cancelled
+ * This function returns DISPLAY LABELS for the UI:
+ * - "Scheduled" = approved booking that hasn't started (status='approved' + startTime > now)
+ * - "Active" = approved booking currently in progress (status='approved' + start <= now <= end)
+ * - "Completed" = approved booking that has ended (status='approved' + endTime < now)
+ * - "Denied" = booking was denied by admin (status='denied')
+ * - "Cancelled" = booking was cancelled (status='cancelled')
+ * - "Pending" = waiting for approval (status='pending')
+ * 
+ * Never use "scheduled", "active", or "completed" as database status values!
+ */
 export function getBookingStatus(booking: any): { label: string; badgeClass: string } {
   const now = new Date();
   const start = new Date(booking.startTime);
   const end = new Date(booking.endTime);
-  const isPending = booking.status === 'pending';
   
   if (booking.status === "denied") return { label: "Denied", badgeClass: "denied" };
   if (booking.status === "cancelled") return { label: "Cancelled", badgeClass: "cancelled" };
+  if (booking.status === "pending") return { label: "Pending", badgeClass: "bg-blue-100 text-blue-800" };
   
-  if (booking.status === "approved" || isPending) {
+  if (booking.status === "approved") {
     if (now < start) return { label: "Scheduled", badgeClass: "bg-yellow-100 text-yellow-800" };
     if (now >= start && now <= end) return { label: "Active", badgeClass: "active" };
-    if (now > end) return { label: "Done", badgeClass: "inactive" };
+    if (now > end) return { label: "Completed", badgeClass: "bg-gray-100 text-gray-800" };
   }
   
   return { label: booking.status, badgeClass: booking.status };

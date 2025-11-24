@@ -88,7 +88,11 @@ export function SystemTab({
                       if (jsonEnd !== -1) {
                         const jsonStr = message.substring(jsonStart, jsonEnd);
                         const equipmentData = safeJsonParse(jsonStr);
-                        return { baseMessage, equipment: (equipmentData as any).items || equipmentData || {} };
+                        // If items is an array, return it as-is for proper rendering
+                        if (equipmentData && Array.isArray((equipmentData as any).items)) {
+                          return { baseMessage, equipment: (equipmentData as any).items };
+                        }
+                        return { baseMessage, equipment: equipmentData || null };
                       }
                       return { baseMessage, equipment: null };
                     } catch (e) {
@@ -103,6 +107,7 @@ export function SystemTab({
                   const normalized = status.toLowerCase().replace(/_/g, ' ');
                   if (normalized === 'prepared' || normalized === 'available') return 'bg-green-100 text-green-800';
                   if (normalized === 'not available') return 'bg-red-100 text-red-800';
+                  if (normalized === 'requested' || normalized === 'pending') return 'bg-yellow-100 text-yellow-800';
                   return 'bg-gray-100 text-gray-800';
                 };
 
@@ -392,11 +397,14 @@ export function SystemTab({
                           {equipment && (
                             <div className="flex flex-wrap gap-1.5">
                               {Array.isArray(equipment)
-                                ? (equipment as any[]).map((label, idx) => (
-                                    <span key={idx} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
-                                      {String(label)}
-                                    </span>
-                                  ))
+                                ? (equipment as any[]).map((item, idx) => {
+                                    const itemName = String(item).replace(/_/g, ' ');
+                                    return (
+                                      <span key={idx} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
+                                        {itemName}
+                                      </span>
+                                    );
+                                  })
                                 : Object.entries(equipment).map(([key, value]: [string, any]) => {
                                     const displayKey = key
                                       .split('_')
@@ -419,17 +427,26 @@ export function SystemTab({
                             <p className="text-xs text-gray-600 mt-1">{displaySubLine}</p>
                             {equipment && (
                               <div className="mt-2 flex flex-wrap gap-1.5">
-                                {Object.entries(equipment).map(([key, value]: [string, any]) => {
-                                  const displayKey = key
-                                    .split('_')
-                                    .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
-                                    .join(' ');
-                                  return (
-                                    <span key={key} className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}>
-                                      {displayKey}
-                                    </span>
-                                  );
-                                })}
+                                {Array.isArray(equipment)
+                                  ? (equipment as any[]).map((item, idx) => {
+                                      const itemName = String(item).replace(/_/g, ' ');
+                                      return (
+                                        <span key={idx} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
+                                          {itemName}
+                                        </span>
+                                      );
+                                    })
+                                  : Object.entries(equipment).map(([key, value]: [string, any]) => {
+                                      const displayKey = key
+                                        .split('_')
+                                        .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+                                        .join(' ');
+                                      return (
+                                        <span key={key} className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}>
+                                          {displayKey}
+                                        </span>
+                                      );
+                                    })}
                               </div>
                             )}
                             <div className="mt-1 text-xs text-gray-400">{a.source ? `Source: ${a.source}` : ''}</div>

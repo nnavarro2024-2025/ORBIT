@@ -18,6 +18,9 @@ const getEquipmentStatusColor = (status: string) => {
   if (normalized === "not available") {
     return "bg-red-100 text-red-800";
   }
+  if (normalized === "requested" || normalized === "pending") {
+    return "bg-yellow-100 text-yellow-800";
+  }
   return "bg-gray-100 text-gray-800";
 };
 
@@ -72,10 +75,20 @@ export function UserTab({
   };
 
   const renderEquipmentChips = (equipment: Record<string, any> | null | undefined) => {
-    if (!equipment) return null;
+    if (!equipment || Object.keys(equipment).length === 0) return null;
     return (
       <div className="mt-2 flex flex-wrap gap-1.5">
         {Object.entries(equipment).map(([key, value]) => {
+          if (key === 'others' && value) {
+            return (
+              <span
+                key={key}
+                className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800"
+              >
+                Other: {value}
+              </span>
+            );
+          }
           const displayKey = key
             .split("_")
             .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
@@ -85,7 +98,7 @@ export function UserTab({
               key={key}
               className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getEquipmentStatusColor(String(value))}`}
             >
-              {displayKey}
+              {displayKey}: {String(value).charAt(0).toUpperCase() + String(value).slice(1).toLowerCase()}
             </span>
           );
         })}
@@ -122,7 +135,25 @@ export function UserTab({
       if (jsonEnd !== -1) {
         const jsonStr = message.substring(jsonStart, jsonEnd);
         const equipmentData = safeJsonParse(jsonStr);
-        return { baseMessage, equipment: equipmentData?.items || equipmentData || {} };
+        
+        // Handle new format with items array
+        if (equipmentData?.items && Array.isArray(equipmentData.items)) {
+          const equipmentObj: Record<string, string> = {};
+          equipmentData.items.forEach((item: any) => {
+            if (typeof item === 'string') {
+              equipmentObj[item.replace(/\s+/g, '_').toLowerCase()] = 'requested';
+            } else if (item?.name) {
+              equipmentObj[item.name.replace(/\s+/g, '_').toLowerCase()] = item.status || 'requested';
+            }
+          });
+          if (equipmentData.others) {
+            equipmentObj['others'] = equipmentData.others;
+          }
+          return { baseMessage, equipment: equipmentObj };
+        }
+        
+        // Handle legacy format
+        return { baseMessage, equipment: equipmentData || {} };
       }
 
       return { baseMessage, equipment: null };
@@ -215,7 +246,10 @@ export function UserTab({
                   type="button"
                   size="sm"
                   className="w-full text-xs"
-                  onClick={() => handleMarkAlertRead(alert)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleMarkAlertRead(alert);
+                  }}
                   disabled={isMarkingAlert}
                 >
                   Mark as Read
@@ -275,7 +309,10 @@ export function UserTab({
                     type="button"
                     size="sm"
                     className="text-xs"
-                    onClick={() => handleMarkAlertRead(alert)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleMarkAlertRead(alert);
+                    }}
                     disabled={isMarkingAlert}
                   >
                     Mark as Read

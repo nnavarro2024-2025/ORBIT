@@ -58,13 +58,13 @@ export function BannedUsersTab(props: BannedUsersTabProps) {
             .map(userItem => (
               <div key={userItem.id} onClick={() => handleUserClick(userItem)} className="bg-white rounded-lg p-4 border border-red-200 hover:border-red-300 hover:shadow-sm transition-all duration-200 cursor-pointer">
                 <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
-                  <div className="flex items-center gap-4">
-                    <div className="bg-red-100 p-2 rounded-lg">
+                  <div className="flex items-start gap-3 min-w-0 flex-1 overflow-hidden">
+                    <div className="bg-red-100 p-2 rounded-lg flex-shrink-0">
                       <UserX className="h-5 w-5 text-red-600" />
                     </div>
-                    <div>
-                      <h4 className="font-medium text-gray-900">{userItem.email}</h4>
-                      <p className="text-sm text-gray-600">Account suspended</p>
+                    <div className="min-w-0 flex-1 overflow-hidden">
+                      <h4 className="font-medium text-gray-900 break-all text-sm">{userItem.email}</h4>
+                      <p className="text-xs sm:text-sm text-gray-600">Account suspended</p>
                       <div className="flex items-center gap-2 mt-1">
                         <span className="text-xs font-medium text-gray-500">Role:</span>
                         <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
@@ -74,7 +74,7 @@ export function BannedUsersTab(props: BannedUsersTabProps) {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
                     <span className="px-3 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
                       {userItem.status}
                     </span>
@@ -82,7 +82,11 @@ export function BannedUsersTab(props: BannedUsersTabProps) {
                       type="button"
                       size="sm"
                       className="inline-flex items-center gap-1 bg-green-600 text-white hover:bg-green-700"
-                      onClick={() => onRequestUnban(String(userItem.id))}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        onRequestUnban(String(userItem.id));
+                      }}
                     >
                       <CheckCircle className="h-3.5 w-3.5" />
                       Unban User

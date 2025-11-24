@@ -10,6 +10,16 @@ type CountdownProps = {
 export function Countdown({ expiry, onExpire }: CountdownProps) {
   const [now, setNow] = useState(new Date());
   const hasFiredRef = useRef(false);
+  const expiryKeyRef = useRef<string>("");
+  
+  // Reset hasFiredRef when expiry changes
+  useEffect(() => {
+    const newKey = expiry ? String(expiry) : "";
+    if (newKey !== expiryKeyRef.current) {
+      hasFiredRef.current = false;
+      expiryKeyRef.current = newKey;
+    }
+  }, [expiry]);
   
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -21,12 +31,24 @@ export function Countdown({ expiry, onExpire }: CountdownProps) {
   const exp = new Date(expiry);
   const diff = Math.max(0, Math.floor((exp.getTime() - now.getTime()) / 1000));
   
+  // Fire onExpire when countdown reaches zero
   useEffect(() => {
     if (diff <= 0 && onExpire && !hasFiredRef.current) {
       hasFiredRef.current = true;
       onExpire();
     }
   }, [diff, onExpire]);
+  
+  // Also check on mount if already expired
+  useEffect(() => {
+    if (!expiry || !onExpire || hasFiredRef.current) return;
+    const expTime = new Date(expiry).getTime();
+    const nowTime = Date.now();
+    if (expTime <= nowTime) {
+      hasFiredRef.current = true;
+      onExpire();
+    }
+  }, [expiry, onExpire]);
   
   const hours = Math.floor(diff / 3600).toString().padStart(2, '0');
   const minutes = Math.floor((diff % 3600) / 60).toString().padStart(2, '0');

@@ -49,7 +49,19 @@ export function useAdminNavigation({ setSelectedView, setSecurityTab, location }
         const normalized = rawHash.replace('/', ':');
         const parts = normalized.split(':');
         
-        if (parts[0] === 'activity' && parts[1] === 'notifications') {
+        if (parts[0] === 'security' && parts[1] === 'users') {
+          setSelectedView('security');
+          setSecurityTab('users');
+          
+          if (isReloadNavigation()) {
+            try {
+              const overviewTarget = '/admin#overview';
+              if (window.location.pathname + window.location.hash !== overviewTarget) {
+                window.history.replaceState({}, '', overviewTarget);
+              }
+            } catch (e) { /* ignore */ }
+          }
+        } else if (parts[0] === 'activity' && parts[1] === 'notifications') {
           setSelectedView('security');
           setSecurityTab('booking');
           

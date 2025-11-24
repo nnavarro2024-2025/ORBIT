@@ -159,7 +159,7 @@ export function MyBookingsSection({
           const statusColors: Record<string, string> = {
             Active: "bg-pink-100 text-pink-800 border-pink-200",
             Scheduled: "bg-yellow-50 text-yellow-800 border-yellow-100",
-            Done: "bg-gray-100 text-gray-800 border-gray-200",
+            Completed: "bg-gray-100 text-gray-800 border-gray-200",
             Denied: "bg-red-100 text-red-800 border-red-200",
             Cancelled: "bg-gray-50 text-gray-700 border-gray-100",
           };
@@ -187,7 +187,7 @@ export function MyBookingsSection({
                         ? "bg-green-500"
                         : status.label === "Scheduled"
                           ? "bg-yellow-500"
-                          : status.label === "Done"
+                          : status.label === "Completed"
                             ? "bg-gray-500"
                             : status.label === "Denied"
                               ? "bg-red-500"
@@ -307,51 +307,14 @@ export function MyBookingsSection({
                 </div>
 
                 <div className="bg-gray-50 rounded-lg p-3 sm:p-4">
-                  {booking.equipment && (hasOthers || items.length > 0) && (
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <div className="text-xs sm:text-sm font-medium text-gray-700">Equipment or Needs</div>
-                        {hasOthers && (
-                          <Popover open={!!openOthers[id]} onOpenChange={(v) => setOpenOthers((prev) => ({ ...prev, [id]: v }))}>
-                            <TooltipProvider>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <PopoverTrigger asChild>
-                                    <button
-                                      onClick={() => setOpenOthers((prev) => ({ ...prev, [id]: !prev[id] }))}
-                                      className="flex items-center gap-1 text-[10px] sm:text-[11px] text-gray-700 hover:text-pink-600 transition-colors"
-                                      aria-expanded={!!openOthers[id]}
-                                    >
-                                      <Eye className="h-3 w-3 text-pink-600" />
-                                      <span>View other</span>
-                                    </button>
-                                  </PopoverTrigger>
-                                </TooltipTrigger>
-                                <TooltipContent side="top" className="max-w-[90vw] sm:max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
-                                  <div className="bg-gray-50 px-3 sm:px-4 py-2 border-b border-gray-200">
-                                    <p className="font-semibold text-xs sm:text-sm text-gray-800">Other equipment</p>
-                                  </div>
-                                  <div className="p-3 max-h-48 overflow-y-auto">
-                                    <p className="whitespace-pre-wrap text-xs sm:text-sm text-gray-900 leading-5 break-words font-normal">{String(eq.others).trim()}</p>
-                                  </div>
-                                </TooltipContent>
-                              </Tooltip>
-                            </TooltipProvider>
-                            <PopoverContent side="top" className="max-w-[90vw] sm:max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50">
-                              <div className="bg-gray-50 px-3 sm:px-4 py-2 border-b border-gray-200">
-                                <p className="font-semibold text-xs sm:text-sm text-gray-800">Other equipment</p>
-                              </div>
-                              <div className="p-3 max-h-48 overflow-y-auto">
-                                <p className="text-xs sm:text-sm text-gray-900 leading-5 break-words font-normal">{String(eq.others).trim()}</p>
-                              </div>
-                            </PopoverContent>
-                          </Popover>
-                        )}
+                  {booking.equipment && (hasOthers || items.length > 0) ? (
+                    <div className="bg-white rounded-lg p-2.5 border border-gray-200 h-[120px] flex flex-col">
+                      <div className="flex items-center justify-between mb-1.5 flex-shrink-0">
+                        <span className="text-xs font-medium text-gray-500">Equipment or Needs</span>
                       </div>
-
-                      <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap mt-2">
+                      <div className="space-y-1 overflow-y-auto flex-1">
                         {items.map((item: string, idx: number) => {
-                          let itemStatus: "prepared" | "not_available" | undefined;
+                          let statusValue = "pending";
                           try {
                             const resp = String(booking?.adminResponse || "");
                             const jsonMatch = resp.match(/\{"items":\{[^}]*\}\}/);
@@ -359,50 +322,110 @@ export function MyBookingsSection({
                               const parsed = JSON.parse(jsonMatch[0]);
                               if (parsed.items && typeof parsed.items === "object") {
                                 const itemKey = String(item).toLowerCase().replace(/\s+/g, "_");
-                                const itemKeyNoUnderscore = String(item).toLowerCase().replace(/_/g, " ");
                                 for (const [key, value] of Object.entries(parsed.items)) {
                                   const normalizedKey = String(key).toLowerCase().replace(/\s+/g, "_");
-                                  const keyNoUnderscore = String(key).toLowerCase().replace(/_/g, " ");
-                                  if (
-                                    normalizedKey === itemKey ||
-                                    key === item ||
-                                    keyNoUnderscore === itemKeyNoUnderscore ||
-                                    String(key).toLowerCase() === String(item).toLowerCase()
-                                  ) {
-                                    const val = String(value).toLowerCase();
-                                    if (val === "prepared" || val === "true" || val === "yes") {
-                                      itemStatus = "prepared";
-                                    } else if (val === "not_available" || val === "not available" || val === "false" || val === "no") {
-                                      itemStatus = "not_available";
-                                    }
+                                  if (normalizedKey === itemKey || String(key).toLowerCase() === String(item).toLowerCase()) {
+                                    statusValue = String(value);
                                     break;
                                   }
                                 }
                               }
                             }
-
-                            if (!itemStatus) {
-                              const match = resp.match(/Needs:\s*(Prepared|Not Available)/i);
-                              if (match) itemStatus = /prepared/i.test(match[1]) ? "prepared" : "not_available";
-                            }
-                          } catch {
-                            // ignore parse errors
-                          }
-
-                          let chipClass = "text-[10px] sm:text-xs bg-pink-50 text-pink-700 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full border border-pink-200 whitespace-nowrap";
-                          if (itemStatus === "prepared") {
-                            chipClass = "text-[10px] sm:text-xs bg-green-100 text-green-800 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full border border-green-200 whitespace-nowrap";
-                          } else if (itemStatus === "not_available") {
-                            chipClass = "text-[10px] sm:text-xs bg-red-100 text-red-800 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-full border border-red-200 whitespace-nowrap";
-                          }
+                          } catch {}
 
                           return (
-                            <span key={`eq-${id}-${idx}`} className={chipClass}>
-                              {item}
-                            </span>
+                            <div key={`eq-${id}-${idx}`} className="flex items-center justify-between py-1">
+                              <span className="text-xs text-gray-700 font-medium">{item}</span>
+                              <span
+                                className={`text-xs font-semibold px-2 py-0.5 rounded ${
+                                  statusValue === "prepared"
+                                    ? "bg-green-100 text-green-700"
+                                    : statusValue === "not_available" || statusValue === "not available"
+                                      ? "bg-red-100 text-red-700"
+                                      : "bg-gray-100 text-gray-600"
+                                }`}
+                              >
+                                {statusValue === "not_available" ? "not available" : statusValue}
+                              </span>
+                            </div>
                           );
                         })}
+                        {hasOthers && (() => {
+                          let otherStatusValue = "pending";
+                          try {
+                            const resp = String(booking?.adminResponse || "");
+                            const jsonMatch = resp.match(/\{"items":\{[^}]*\}\}/);
+                            if (jsonMatch) {
+                              const parsed = JSON.parse(jsonMatch[0]);
+                              if (parsed.items && typeof parsed.items === "object") {
+                                const otherText = String(eq.others).trim().toLowerCase();
+                                for (const [key, value] of Object.entries(parsed.items)) {
+                                  if (String(key).toLowerCase() === otherText || String(key).toLowerCase().includes('other')) {
+                                    otherStatusValue = String(value);
+                                    break;
+                                  }
+                                }
+                              }
+                            }
+                          } catch {}
+                          
+                          return (
+                            <div className="flex items-center justify-between py-1">
+                              <Popover open={!!openOthers[id]} onOpenChange={(v) => setOpenOthers((prev) => ({ ...prev, [id]: v }))}>
+                                <TooltipProvider>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <PopoverTrigger asChild>
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            e.preventDefault();
+                                            setOpenOthers((prev) => ({ ...prev, [id]: !prev[id] }));
+                                          }}
+                                          className="text-xs text-pink-600 hover:text-pink-700 font-medium transition-colors"
+                                        >
+                                          View other
+                                        </button>
+                                      </PopoverTrigger>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top" className="max-w-[90vw] sm:max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
+                                      <div className="bg-gray-50 px-3 sm:px-4 py-2 border-b border-gray-200">
+                                        <p className="font-semibold text-xs sm:text-sm text-gray-800">Other equipment</p>
+                                      </div>
+                                      <div className="p-3 max-h-48 overflow-y-auto">
+                                        <p className="text-xs sm:text-sm text-gray-900 leading-5 break-words">{String(eq.others).trim()}</p>
+                                      </div>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                                <PopoverContent side="top" className="max-w-[90vw] sm:max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50">
+                                  <div className="bg-gray-50 px-3 sm:px-4 py-2 border-b border-gray-200">
+                                    <p className="font-semibold text-xs sm:text-sm text-gray-800">Other equipment</p>
+                                  </div>
+                                  <div className="p-3 max-h-48 overflow-y-auto">
+                                    <p className="text-xs sm:text-sm text-gray-900 leading-5 break-words">{String(eq.others).trim()}</p>
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
+                              <span
+                                className={`text-xs font-semibold px-2 py-0.5 rounded ${
+                                  otherStatusValue === "prepared"
+                                    ? "bg-green-100 text-green-700"
+                                    : otherStatusValue === "not_available" || otherStatusValue === "not available"
+                                      ? "bg-red-100 text-red-700"
+                                      : "bg-gray-100 text-gray-600"
+                                }`}
+                              >
+                                {otherStatusValue === "not_available" ? "not available" : otherStatusValue}
+                              </span>
+                            </div>
+                          );
+                        })()}
                       </div>
+                    </div>
+                  ) : (
+                    <div className="bg-white rounded-lg p-2.5 border border-gray-200 h-[120px] flex items-center justify-center">
+                      <p className="text-xs text-gray-500">No equipment</p>
                     </div>
                   )}
                 </div>

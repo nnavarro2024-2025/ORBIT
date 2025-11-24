@@ -149,7 +149,8 @@ export function BookingTab({
 
     const cleaned = raw
       .replace(/\s*\[booking:[^\]]+\]/, "")
-      .replace(/Needs:\s*\{[\s\S]*\}\s*/i, "")
+      .replace(/\[Equipment:[^\]]*\]/, "")
+      .replace(/Needs:\s*\{[\s\S]*?\}\s*/i, "")
       .replace(/Requested equipment:\s*([^\[]+)/i, "")
       .trim();
 
@@ -203,7 +204,10 @@ export function BookingTab({
             {bookingId && (
               <div className="mt-2">
                 <button
-                  onClick={() => onNavigateToBooking(bookingId)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onNavigateToBooking(bookingId);
+                  }}
                   className="text-xs text-blue-600 underline"
                 >
                   View booking
@@ -221,7 +225,10 @@ export function BookingTab({
                   type="button"
                   size="sm"
                   className="w-full text-xs"
-                  onClick={() => handleMarkAlertRead(alert)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleMarkAlertRead(alert);
+                  }}
                   disabled={isMarkingAlert}
                 >
                   Mark as Read
@@ -268,7 +275,10 @@ export function BookingTab({
                   {bookingId && (
                     <div className="mt-2">
                       <button
-                        onClick={() => onNavigateToBooking(bookingId)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onNavigateToBooking(bookingId);
+                        }}
                         className="text-xs text-blue-600 underline"
                       >
                         View booking
@@ -288,7 +298,10 @@ export function BookingTab({
                     type="button"
                     size="sm"
                     className="text-xs"
-                    onClick={() => handleMarkAlertRead(alert)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleMarkAlertRead(alert);
+                    }}
                     disabled={isMarkingAlert}
                   >
                     Mark as Read

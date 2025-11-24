@@ -65,13 +65,13 @@ export function BookingUsersTab(props: BookingUsersTabProps) {
               return (
                 <div key={userItem.id} onClick={() => handleUserClick(userItem)} className="bg-white rounded-lg p-4 border border-gray-200 hover:border-blue-300 hover:shadow-sm transition-all duration-200 cursor-pointer">
                   <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
-                    <div className="flex items-center gap-4">
-                      <div className="bg-blue-100 p-2 rounded-lg">
+                    <div className="flex items-start gap-3 min-w-0 flex-1 overflow-hidden">
+                      <div className="bg-blue-100 p-2 rounded-lg flex-shrink-0">
                         <UserIcon className="h-5 w-5 text-blue-600" />
                       </div>
-                      <div>
-                        <h4 className="font-medium text-gray-900">{userItem.email}</h4>
-                        <p className="text-sm text-gray-600">
+                      <div className="min-w-0 flex-1 overflow-hidden">
+                        <h4 className="font-medium text-gray-900 break-all text-sm">{userItem.email}</h4>
+                        <p className="text-xs sm:text-sm text-gray-600 truncate">
                           Active facilities: {userBookings.map(booking => getFacilityName(booking.facilityId)).join(", ") || "None"}
                         </p>
                         <div className="flex items-center gap-2 mt-1">
@@ -83,7 +83,7 @@ export function BookingUsersTab(props: BookingUsersTabProps) {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
                       <span
                         className={`px-3 py-1 rounded-full text-xs font-medium ${
                           userItem.status === "active"
@@ -97,7 +97,11 @@ export function BookingUsersTab(props: BookingUsersTabProps) {
                         type="button"
                         size="sm"
                         className="inline-flex items-center gap-1 bg-red-600 text-white hover:bg-red-700"
-                        onClick={() => onRequestBan(userItem)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          onRequestBan(userItem);
+                        }}
                       >
                         <UserX className="h-3.5 w-3.5" />
                         Ban User

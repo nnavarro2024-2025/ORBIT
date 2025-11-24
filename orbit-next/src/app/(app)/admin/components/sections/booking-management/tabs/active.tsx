@@ -24,10 +24,11 @@ export type ActiveBookingsTabProps = {
   isAdmin: boolean;
   openEquipmentModal: (booking: FacilityBooking) => void;
   getNeedsStatusForBooking: (booking: FacilityBooking) => 'prepared' | 'not_available' | undefined;
+  hasEquipmentBeenChecked: (booking: FacilityBooking) => boolean;
   onArrivalExpire: (booking: FacilityBooking) => void;
   confirmArrivalMutation: { mutate: (arg: { bookingId: FacilityBooking['id'] }) => void; isPending: boolean };
   onBookingEndExpire: (booking: FacilityBooking) => void;
-  CountdownComponent: (props: { expiry: string | Date | undefined; onExpire?: () => void }) => React.ReactNode;
+  CountdownComponent: React.ComponentType<{ expiry: string | Date | undefined; onExpire?: () => void }>;
   renderPagination: (totalItems: number, page: number, setPage: React.Dispatch<React.SetStateAction<number>>) => React.ReactNode;
 };
 
@@ -48,6 +49,7 @@ export function ActiveBookingsTab(props: ActiveBookingsTabProps) {
     isAdmin,
     openEquipmentModal,
     getNeedsStatusForBooking,
+    hasEquipmentBeenChecked,
     onArrivalExpire,
     confirmArrivalMutation,
     onBookingEndExpire,
@@ -93,16 +95,7 @@ export function ActiveBookingsTab(props: ActiveBookingsTabProps) {
                     <div className="flex-1 min-w-0">
                       <h4 className="font-medium text-sm text-gray-900 break-words">{getUserEmail(booking.userId)}</h4>
                       <p className="text-xs text-gray-600 mt-0.5 break-words">{getFacilityName(booking.facilityId)}</p>
-                      {booking.courseYearDept && (
-                        <p className="text-xs text-blue-700 mt-0.5 break-words font-semibold">
-                          <span className="text-[10px] text-gray-500 mr-1">Course/Year/Dept:</span>
-                          {booking.courseYearDept}
-                        </p>
-                      )}
                     </div>
-                    <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 whitespace-nowrap flex-shrink-0">
-                      Active
-                    </span>
                   </div>
                   <div className="flex items-center gap-2 pl-11">
                     <span className="text-xs font-medium text-gray-500">Participants:</span>
@@ -122,32 +115,147 @@ export function ActiveBookingsTab(props: ActiveBookingsTabProps) {
                       <p className="text-xs text-gray-500">{formatDate(booking.endTime)}</p>
                     </div>
                   </div>
-                  {(booking.purpose || booking.courseYearDept) && (
-                    <div className="pl-11">{renderPurposeButton(booking, 'active-mobile')}</div>
-                  )}
-                  {(booking.status === 'approved' || String(booking.status).toLowerCase() === 'pending') && (
-                    <div className="pl-11">
-                      {renderEquipmentLine(booking)}
-                      {isAdmin && !!booking.equipment && new Date(booking.startTime) > new Date() && !getNeedsStatusForBooking(booking) && (
-                        <Button size="sm" onClick={() => openEquipmentModal(booking)} aria-label={`Check equipment for ${booking.id}`} className="w-full mt-2 text-xs">
-                          🔎 Check Equipment
-                        </Button>
-                      )}
+                  <div className="flex flex-wrap gap-2 pl-11">
+                    <span className="inline-flex items-center justify-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">Active</span>
+                  </div>
+                  {booking.purpose && <div className="pl-11">{renderPurposeButton(booking, 'active-mobile')}</div>}
+                  {!!booking.equipment && (
+                    <div className="pl-11 mt-2">
+                      <div className="bg-white border border-gray-200 rounded-lg p-3">
+                        <h5 className="text-xs font-semibold text-gray-700 mb-3">Equipment or Needs</h5>
+                        <div className="space-y-2">
+                          {renderEquipmentLine(booking)}
+                        </div>
+                        <div className="flex flex-col gap-2 mt-3">
+                          {booking.arrivalConfirmationDeadline && !booking.arrivalConfirmed && (
+                            <>
+                              <div className="text-xs text-gray-500 text-center">Confirmation required in:</div>
+                              <div className="flex justify-center">
+                                <CountdownComponent expiry={booking.arrivalConfirmationDeadline} onExpire={() => onArrivalExpire(booking)} />
+                              </div>
+                              <Button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  e.preventDefault();
+                                  confirmArrivalMutation.mutate({ bookingId: booking.id });
+                                }}
+                                variant="outline"
+                                size="sm"
+                                disabled={confirmArrivalMutation.isPending}
+                                aria-label={`Confirm arrival for booking ${booking.id}`}
+                                className="w-full text-xs"
+                              >
+                                {confirmArrivalMutation.isPending ? (
+                                  <span className="flex items-center gap-2">
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                    Confirming...
+                                  </span>
+                                ) : (
+                                  'Confirm Arrival'
+                                )}
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   )}
-                  {(booking.status === 'approved' || String(booking.status).toLowerCase() === 'pending') && (
-                    <div className="pl-11">
-                      {booking.arrivalConfirmationDeadline && !booking.arrivalConfirmed ? (
-                        <div className="flex flex-col gap-2">
+                  {!booking.equipment && booking.arrivalConfirmationDeadline && !booking.arrivalConfirmed && (
+                    <div className="pl-11 space-y-2">
+                      <div className="text-xs text-gray-500 text-center">Confirmation required in:</div>
+                      <div className="flex justify-center">
+                        <CountdownComponent expiry={booking.arrivalConfirmationDeadline} onExpire={() => onArrivalExpire(booking)} />
+                      </div>
+                      <Button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          confirmArrivalMutation.mutate({ bookingId: booking.id });
+                        }}
+                        variant="outline"
+                        size="sm"
+                        disabled={confirmArrivalMutation.isPending}
+                        aria-label={`Confirm arrival for booking ${booking.id}`}
+                        className="w-full text-xs"
+                      >
+                        {confirmArrivalMutation.isPending ? (
+                          <span className="flex items-center gap-2">
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            Confirming...
+                          </span>
+                        ) : (
+                          'Confirm Arrival'
+                        )}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+                {/* Desktop layout */}
+                <div className="hidden md:flex items-center justify-between gap-6">
+                  {/* Left section: User info */}
+                  <div className="flex-shrink-0">
+                    <div className="flex items-center gap-3">
+                      <div className="bg-green-100 p-2.5 rounded-lg">
+                        <CheckCircle className="h-5 w-5 text-green-600" />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-gray-900 text-base leading-tight">{getUserEmail(booking.userId)}</h4>
+                        <p className="text-sm text-gray-600 mt-0.5 leading-tight">{getFacilityName(booking.facilityId)}</p>
+                        {booking.courseYearDept && (
+                          <p className="text-xs text-gray-500 mt-1 leading-tight">
+                            <span className="font-medium">Course/Year/Dept:</span> <span className="text-blue-700 font-semibold">{booking.courseYearDept}</span>
+                          </p>
+                        )}
+                        <div className="flex items-center gap-2 mt-1.5">
+                          <span className="text-xs text-gray-500">Participants:</span>
+                          <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">{booking.participants || 0}</span>
+                          {booking.purpose && (
+                            <>
+                              <span className="text-gray-300">•</span>
+                              {renderPurposeButton(booking, 'active-desktop', 'inline-flex items-center gap-1 text-xs text-pink-600 hover:text-pink-700 transition-colors')}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  {/* Right section: Time, Status, Equipment, and Actions */}
+                  <div className="flex items-center gap-6">
+                    {/* Time Info */}
+                    <div className="flex items-center gap-4">
+                      <div className="text-center">
+                        <p className="text-xs font-medium text-gray-500 mb-1">Started</p>
+                        <p className="text-lg font-semibold text-gray-900 whitespace-nowrap">{formatTime(booking.startTime)}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">{formatDate(booking.startTime)}</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xs font-medium text-gray-500 mb-1">Ends</p>
+                        <p className="text-lg font-semibold text-gray-900 whitespace-nowrap">{formatTime(booking.endTime)}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">{formatDate(booking.endTime)}</p>
+                      </div>
+                    </div>
+                    {/* Status and Actions */}
+                    <div className="flex flex-col gap-2.5">
+                      <div className="flex items-center gap-2">
+                        <span className="px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 whitespace-nowrap">Active</span>
+                      </div>
+                      {booking.arrivalConfirmationDeadline && !booking.arrivalConfirmed && (
+                        <div className="flex flex-col gap-2 items-end">
                           <div className="text-xs text-gray-500">Confirmation required in:</div>
                           <CountdownComponent expiry={booking.arrivalConfirmationDeadline} onExpire={() => onArrivalExpire(booking)} />
                           <Button
-                            onClick={() => confirmArrivalMutation.mutate({ bookingId: booking.id })}
-                            variant="outline"
                             size="sm"
+                            type="button"
+                            variant="outline"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              console.log('Confirm Arrival clicked', booking);
+                              confirmArrivalMutation.mutate({ bookingId: booking.id });
+                            }}
                             disabled={confirmArrivalMutation.isPending}
+                            className="text-xs font-medium h-7 px-3 pointer-events-auto"
                             aria-label={`Confirm arrival for booking ${booking.id}`}
-                            className="w-full text-xs"
                           >
                             {confirmArrivalMutation.isPending ? (
                               <span className="flex items-center gap-2">
@@ -159,104 +267,19 @@ export function ActiveBookingsTab(props: ActiveBookingsTabProps) {
                             )}
                           </Button>
                         </div>
-                      ) : (
-                        <div className="flex flex-col gap-1">
-                          <div className="text-xs font-medium text-gray-500">Time remaining</div>
-                          <div className="px-3 py-1.5 bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-lg">
-                            <CountdownComponent expiry={booking.endTime} onExpire={() => onBookingEndExpire(booking)} />
+                      )}
+                    </div>
+                    {/* Equipment List */}
+                    {!!booking.equipment && (
+                      <div className="bg-gradient-to-br from-gray-50 to-gray-100 border border-gray-200 rounded-xl p-3.5 w-[250px] h-[145px] flex flex-col shadow-sm">
+                        <div className="flex items-center justify-between mb-2.5 flex-shrink-0">
+                          <h5 className="text-[10px] font-bold text-gray-700 uppercase tracking-wider">Equipment or Needs</h5>
+                        </div>
+                        <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent hover:scrollbar-thumb-gray-400">
+                          <div className="space-y-0">
+                            {renderEquipmentLine(booking)}
                           </div>
                         </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-                {/* Desktop layout */}
-                <div className="hidden md:flex items-start justify-between gap-4">
-                  <div className="flex items-center gap-4">
-                    <div className="bg-green-100 p-2 rounded-lg">
-                      <CheckCircle className="h-5 w-5 text-green-600" />
-                    </div>
-                    <div>
-                      <h4 className="font-medium text-gray-900">{getUserEmail(booking.userId)}</h4>
-                      <p className="text-sm text-gray-600">{getFacilityName(booking.facilityId)}</p>
-                      {booking.courseYearDept && (
-                        <p className="text-xs text-blue-700 mt-0.5 break-words font-semibold">
-                          <span className="text-[10px] text-gray-500 mr-1">Course/Year/Dept:</span>
-                          {booking.courseYearDept}
-                        </p>
-                      )}
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-xs font-medium text-gray-500">Participants:</span>
-                        <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
-                          {booking.participants || 0}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex flex-col md:flex-row items-start md:items-center gap-4 md:gap-6 w-full md:w-auto md:flex-1 md:justify-end">
-                    {booking.purpose && (
-                      <div className="text-right">
-                        {renderPurposeButton(
-                          booking,
-                          'active-desktop',
-                          'flex items-center gap-1 cursor-help text-xs text-pink-600 hover:text-pink-700 transition-colors'
-                        )}
-                      </div>
-                    )}
-                    <div className="text-right">
-                      <p className="text-sm font-medium text-gray-900">Started</p>
-                      <p className="text-xs text-gray-600">{formatTime(booking.startTime)}</p>
-                      <p className="text-xs text-gray-500">{formatDate(booking.startTime)}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm font-medium text-gray-900">Ends</p>
-                      <p className="text-xs text-gray-600">{formatTime(booking.endTime)}</p>
-                      <p className="text-xs text-gray-500">{formatDate(booking.endTime)}</p>
-                    </div>
-                    <div className="flex items-center">
-                      <span className="px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">Active</span>
-                    </div>
-                    <div className="text-right">
-                      {(booking.status === 'approved' || String(booking.status).toLowerCase() === 'pending') && renderEquipmentLine(booking)}
-                      {isAdmin && !!booking.equipment && (booking.status === 'approved' || String(booking.status).toLowerCase() === 'pending') && new Date(booking.startTime) > new Date() && !getNeedsStatusForBooking(booking) && (
-                        <div className="flex items-center gap-2 mt-2">
-                          <Button size="sm" onClick={() => openEquipmentModal(booking)} aria-label={`Check equipment for ${booking.id}`}>
-                            🔎 Check Equipment
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                    {(booking.status === 'approved' || String(booking.status).toLowerCase() === 'pending') && (
-                      <div className="text-right">
-                        {booking.arrivalConfirmationDeadline && !booking.arrivalConfirmed ? (
-                          <div className="flex flex-col items-end gap-2">
-                            <div className="text-xs text-gray-500">Confirmation required in:</div>
-                            <CountdownComponent expiry={booking.arrivalConfirmationDeadline} onExpire={() => onArrivalExpire(booking)} />
-                            <Button
-                              onClick={() => confirmArrivalMutation.mutate({ bookingId: booking.id })}
-                              variant="outline"
-                              size="sm"
-                              disabled={confirmArrivalMutation.isPending}
-                              aria-label={`Confirm arrival for booking ${booking.id}`}
-                            >
-                              {confirmArrivalMutation.isPending ? (
-                                <span className="flex items-center gap-2">
-                                  <Loader2 className="h-3 w-3 animate-spin" />
-                                  Confirming...
-                                </span>
-                              ) : (
-                                'Confirm Arrival'
-                              )}
-                            </Button>
-                          </div>
-                        ) : (
-                          <div className="flex flex-col gap-1 items-end">
-                            <div className="text-xs font-medium text-gray-500">Time remaining</div>
-                            <div className="px-3 py-1.5 bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-lg">
-                              <CountdownComponent expiry={booking.endTime} onExpire={() => onBookingEndExpire(booking)} />
-                            </div>
-                          </div>
-                        )}
                       </div>
                     )}
                   </div>
@@ -332,15 +355,65 @@ export function ActiveBookingsTab(props: ActiveBookingsTabProps) {
                   </div>
                 </>
               )}
-              {selectedBooking.equipment != null && (
-                <>
-                  <Separator />
-                  <div>
-                    <h4 className="text-sm font-medium text-gray-500 mb-2">Equipment</h4>
-                    <p className="text-sm text-gray-900">Equipment requested: {JSON.stringify(selectedBooking.equipment)}</p>
-                  </div>
-                </>
-              )}
+              {/* Equipment Status */}
+              {(() => {
+                const eq: any = selectedBooking.equipment || {};
+                const eqItems = Array.isArray(eq.items) ? eq.items : [];
+                if (eqItems.length > 0) {
+                  return (
+                    <>
+                      <Separator />
+                      <div>
+                        <h3 className="font-semibold text-sm text-muted-foreground mb-2">Equipment Status</h3>
+                        <div className="space-y-2">
+                          {eqItems.map((item: string, idx: number) => {
+                            let statusValue = 'pending';
+                            try {
+                              const resp = String(selectedBooking?.adminResponse || '');
+                              const jsonMatch = resp.match(/\{"items":\{[^}]*\}\}/);
+                              if (jsonMatch) {
+                                const parsed = JSON.parse(jsonMatch[0]);
+                                if (parsed.items && typeof parsed.items === 'object') {
+                                  const itemKey = String(item).toLowerCase().replace(/\s+/g, '_');
+                                  for (const [key, value] of Object.entries(parsed.items)) {
+                                    const normalizedKey = String(key).toLowerCase().replace(/\s+/g, '_');
+                                    if (normalizedKey === itemKey || String(key).toLowerCase() === String(item).toLowerCase()) {
+                                      statusValue = String(value);
+                                      break;
+                                    }
+                                  }
+                                }
+                              }
+                            } catch {}
+
+                            return (
+                              <div key={`modal-eq-${idx}`} className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded-lg">
+                                <span className="text-sm text-gray-900 font-medium">{item}</span>
+                                <Badge variant={
+                                  statusValue === 'prepared' ? 'default' :
+                                  statusValue === 'not_available' || statusValue === 'not available' ? 'destructive' :
+                                  'secondary'
+                                }>
+                                  {statusValue === 'not_available' ? 'not available' : statusValue}
+                                </Badge>
+                              </div>
+                            );
+                          })}
+                          {eq.others && String(eq.others).trim().length > 0 && (
+                            <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                              <p className="text-xs font-semibold text-blue-900 mb-1">Additional Notes:</p>
+                              <p className="text-sm text-blue-800 leading-relaxed whitespace-pre-wrap break-words">
+                                {String(eq.others).trim()}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  );
+                }
+                return null;
+              })()}
             </div>
           )}
         </DialogContent>

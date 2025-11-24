@@ -12,7 +12,7 @@ import { EmptyState } from "./EmptyState";
 
 export function AnalyticsCharts({ DEBUG_ANALYTICS_CHARTS, PIE_CHART_COLORS, FACILITY_BAR_COLORS, WEEKLY_LINE_COLORS, departmentChartData, facilityUtilizationData, weeklyTrendData }: AnalyticsChartsProps) {
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-3 gap-3 sm:gap-4 md:gap-6">
+    <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4 md:gap-6">
       {DEBUG_ANALYTICS_CHARTS.department && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
           <div className="flex items-center justify-between mb-4">

@@ -275,13 +275,16 @@ export function BookingDashboardInner() {
 
   if (isInitialLoading) {
     return (
-      <LoadingSkeleton
-        sidebarItems={sidebarItems}
-        selectedView={viewState.selectedView}
-        handleSidebarClick={handleSidebarClick}
-        isMobileSidebarOpen={viewState.isMobileSidebarOpen}
-        setIsMobileSidebarOpen={viewState.setIsMobileSidebarOpen}
-      />
+      <div className="min-h-screen bg-background flex flex-col">
+        <Header onMobileToggle={() => viewState.setIsMobileSidebarOpen(!viewState.isMobileSidebarOpen)} />
+        <LoadingSkeleton
+          sidebarItems={sidebarItems}
+          selectedView={viewState.selectedView}
+          handleSidebarClick={handleSidebarClick}
+          isMobileSidebarOpen={viewState.isMobileSidebarOpen}
+          setIsMobileSidebarOpen={viewState.setIsMobileSidebarOpen}
+        />
+      </div>
     );
   }
 
@@ -320,7 +323,8 @@ export function BookingDashboardInner() {
         </div>
 
         {/* Main Content */}
-        <div className="flex-1 lg:ml-64 ml-0 container mx-auto px-4 sm:px-6 py-4 sm:py-8">
+        <div className="flex-1 lg:ml-64 ml-0 w-full overflow-x-hidden">
+          <div className="container mx-auto px-4 sm:px-6 py-4 sm:py-8">
           <ContentRenderer
             selectedView={viewState.selectedView}
             user={user}
@@ -383,6 +387,7 @@ export function BookingDashboardInner() {
             setActivityTab={activityState.setActivityTab}
             setActivityBookingPage={activityState.setActivityBookingPage}
           />
+          </div>
         </div>
       </div>
       

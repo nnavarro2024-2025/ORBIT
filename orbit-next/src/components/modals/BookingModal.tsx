@@ -1827,7 +1827,8 @@ export default function BookingModal({
           const providedStartValid = isWithinLibraryHours(initialStartTime);
           const providedEndValid = isWithinLibraryHours(initialEndTime);
 
-          const blockingStatuses = new Set(['approved', 'scheduled', 'pending']);
+          // Note: 'scheduled' is a UI display label, not a database status. Schema statuses are: pending, approved, denied, cancelled
+          const blockingStatuses = new Set(['approved', 'pending']);
           const providedHasConflict = (allBookings || []).filter((b: any) => b.facilityId === facId && blockingStatuses.has(b.status))
             .some((b: any) => initialStartTime < new Date(b.endTime) && initialEndTime > new Date(b.startTime));
 
@@ -1891,7 +1892,8 @@ export default function BookingModal({
         const startValid = isWithinLibraryHours(currentStart);
         const endValid = isWithinLibraryHours(currentEnd);
 
-        const blockingStatuses = new Set(['approved', 'scheduled', 'pending']);
+        // Note: 'scheduled' is a UI display label, not a database status. Schema statuses are: pending, approved, denied, cancelled
+        const blockingStatuses = new Set(['approved', 'pending']);
         const hasConflict = (() => {
           if (!currentStart || !currentEnd) return true;
           const conflicts = (allBookings || []).filter((b: any) => b.facilityId === facId && blockingStatuses.has(b.status))

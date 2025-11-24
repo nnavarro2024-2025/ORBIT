@@ -12,6 +12,8 @@ export function useFacilities() {
       const response = await apiRequest("GET", "/api/facilities");
       return response.json();
     },
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
   });
 }
 
@@ -27,6 +29,8 @@ export function useAvailability(todayDateStr: string, user: any, authLoading: bo
     },
     staleTime: AVAILABILITY_STALE_TIME,
     enabled: !!user && !authLoading,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
   });
 }
 
@@ -42,6 +46,8 @@ export function useUserBookings(user: any, authLoading: boolean) {
     },
     enabled: !!user && !authLoading,
     refetchInterval: false,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
   });
 }
 
@@ -57,6 +63,8 @@ export function useAllBookings(user: any, authLoading: boolean) {
     },
     enabled: !!user && !authLoading,
     refetchInterval: false,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
   });
 }
 
@@ -76,5 +84,7 @@ export function useNotifications(user: any, authLoading: boolean) {
     },
     enabled: !!user && !authLoading,
     staleTime: NOTIFICATIONS_STALE_TIME,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
   });
 }

@@ -17,6 +17,8 @@ export function useUserMutations() {
         queryClient.invalidateQueries({ queryKey: ['/api/admin/activity'] }),
         queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] }),
       ]);
+      // Force refetch to update UI immediately
+      await queryClient.refetchQueries({ queryKey: ['/api/admin/users'] });
     },
   });
 
@@ -31,6 +33,8 @@ export function useUserMutations() {
         queryClient.invalidateQueries({ queryKey: ['/api/admin/activity'] }),
         queryClient.invalidateQueries({ queryKey: ['/api/admin/stats'] }),
       ]);
+      // Force refetch to update UI immediately
+      await queryClient.refetchQueries({ queryKey: ['/api/admin/users'] });
     },
   });
 

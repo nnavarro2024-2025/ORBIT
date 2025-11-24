@@ -1,11 +1,21 @@
 import { useEffect, useState } from "react";
+import { useRouter, usePathname } from "next/navigation";
 import { supabase } from "@/lib/config";
 import { authenticatedFetch } from "@/lib/api";
 
 export function useAuth() {
+  const router = useRouter();
+  const pathname = usePathname();
   const [user, setUser] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+
+  // Redirect banned users to suspended page
+  useEffect(() => {
+    if (user && user.status === "banned" && pathname !== "/suspended") {
+      router.push("/suspended");
+    }
+  }, [user, pathname, router]);
 
   useEffect(() => {
     let isMounted = true;
@@ -49,12 +59,25 @@ export function useAuth() {
             try { sessionStorage.removeItem('orbit:domain_blocked'); } catch (_) {}
           } catch (syncError) {
             console.error("Auth sync failed.", syncError);
-            // If we can't sync the user with our backend, we shouldn't let them proceed.
-            // This prevents data inconsistency and logs the user out cleanly.
+            const errorMessage = (syncError as any)?.message || '';
+            
+            // Check if user is banned - handle differently from other errors
+            if (errorMessage.includes('User is banned') || errorMessage.includes('User is suspended')) {
+              // For banned users, set minimal user data so redirect can happen
+              if (isMounted) {
+                setUser({
+                  id: data.user.id,
+                  email: data.user.email,
+                  status: "banned",
+                });
+              }
+              return; // Don't sign out, let the redirect handle it
+            }
+            
+            // For other errors (not banned), sign out
             await supabase.auth.signOut();
             if (isMounted) setUser(null);
             // Check if it's a 403 domain block error
-            const errorMessage = (syncError as any)?.message || '';
             if (errorMessage.includes('403') || errorMessage.includes('restricted')) {
               // Redirect to login with a notification unless we've already
               // performed the domain-block flow (to avoid redirect spam).
