@@ -70,7 +70,113 @@ export function SuccessTab({
                   className="bg-white rounded-lg p-4 border border-gray-200 cursor-pointer hover:border-blue-300 hover:shadow-md transition-all duration-200"
                   onClick={() => handleBookingClick(b)}
                 >
-                  <div className="grid grid-cols-1 lg:grid-cols-10 gap-4">
+                  {/* Mobile Layout */}
+                  <div className="lg:hidden space-y-3">
+                    <div className="flex items-start gap-2">
+                      <div className="flex-1 min-w-0">
+                        <h4 className="font-semibold text-sm text-gray-900 mb-1 break-words">{getUserEmail(b.userId)}</h4>
+                        <p className="text-xs text-gray-600 mb-2">{getFacilityName(b.facilityId)}</p>
+                        <div className="flex flex-wrap gap-2 items-center">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 text-xs">
+                            <svg className="h-3 w-3 text-gray-600" viewBox="0 0 8 8" fill="currentColor">
+                              <circle cx="4" cy="4" r="4" />
+                            </svg>
+                            {b.participants || 0}
+                          </span>
+                          {b.courseYearDept && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-xs font-medium">
+                              {b.courseYearDept}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <span className={`text-xs font-semibold ${statusClass(b.status)} capitalize px-3 py-1.5 rounded-full flex-shrink-0`}>
+                        {String(b.status || '')}
+                      </span>
+                    </div>
+                    
+                    <div className="space-y-2">
+                      {b.purpose && (
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="text-gray-500 font-medium">Purpose:</span>
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <button className="flex items-center gap-1 text-pink-600 hover:text-pink-700" onClick={(e) => e.stopPropagation()}>
+                                <Eye className="h-3 w-3" />
+                                <span className="text-xs">View</span>
+                              </button>
+                            </PopoverTrigger>
+                            <PopoverContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50">
+                              <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                <p className="font-semibold text-sm text-gray-800">Purpose</p>
+                              </div>
+                              <div className="p-3 max-h-48 overflow-y-auto">
+                                <p className="text-sm text-gray-900 leading-5 break-words">{b.purpose}</p>
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                        </div>
+                      )}
+                      
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div>
+                          <span className="text-gray-500">Starts:</span>
+                          <p className="text-gray-900 font-medium">{formatDateTime(b.startTime)}</p>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">Ends:</span>
+                          <p className="text-gray-900 font-medium">{formatDateTime(b.endTime)}</p>
+                        </div>
+                      </div>
+                      
+                      {items.length > 0 && (
+                        <div className="bg-gray-50 rounded-lg p-2 border border-gray-200">
+                          <span className="text-xs font-medium text-gray-500 block mb-1">Equipment</span>
+                          <div className="space-y-1 max-h-24 overflow-y-auto">
+                            {items.slice(0, 3).map((item: string, idx: number) => {
+                              let statusValue = 'pending';
+                              try {
+                                const resp = String(b?.adminResponse || '');
+                                const jsonMatch = resp.match(/\{"items":\{[^}]*\}\}/);
+                                if (jsonMatch) {
+                                  const parsed = JSON.parse(jsonMatch[0]);
+                                  if (parsed.items && typeof parsed.items === 'object') {
+                                    const itemKey = String(item).toLowerCase().replace(/\s+/g, '_');
+                                    for (const [key, value] of Object.entries(parsed.items)) {
+                                      const normalizedKey = String(key).toLowerCase().replace(/\s+/g, '_');
+                                      if (normalizedKey === itemKey || String(key).toLowerCase() === String(item).toLowerCase()) {
+                                        statusValue = String(value);
+                                        break;
+                                      }
+                                    }
+                                  }
+                                }
+                              } catch {}
+
+                              return (
+                                <div key={`eq-mob-${b.id}-${idx}`} className="flex items-center justify-between text-xs">
+                                  <span className="text-gray-700 truncate">{item}</span>
+                                  <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded flex-shrink-0 ml-2 ${
+                                    statusValue === 'prepared' ? 'bg-green-100 text-green-700' :
+                                    statusValue === 'not_available' || statusValue === 'not available' ? 'bg-red-100 text-red-700' :
+                                    'bg-gray-100 text-gray-600'
+                                  }`}>
+                                    {statusValue === 'not_available' ? 'N/A' : statusValue}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                            {items.length > 3 && (
+                              <p className="text-xs text-pink-600 font-medium">+{items.length - 3} more (tap to view)</p>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Desktop Layout */}
+                  <div className="hidden lg:grid lg:grid-cols-10 lg:gap-4">
                     {/* Left Column - User Info */}
                     <div className="lg:col-span-2">
                       <h4 className="font-semibold text-sm text-gray-900 mb-1">{getUserEmail(b.userId)}</h4>

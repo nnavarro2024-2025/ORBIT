@@ -1,12 +1,14 @@
 "use client";
 
-import { ReactNode, useEffect, useRef, useState } from "react";
+export const dynamic = 'force-dynamic';
+
+import { ReactNode, Suspense, useEffect, useRef, useState } from "react";
 import { Calendar, Shield, Users } from "lucide-react";
 
 import { useAuth } from "@/hooks/data";
 import { useLegacyLocation } from "@/lib/utils";
 
-export default function LandingPage() {
+function LandingPageContent() {
   const { isAuthenticated, user, isLoading: authLoading } = useAuth();
   const [, setLocation] = useLegacyLocation();
   const processedOAuthRef = useRef(false);
@@ -110,6 +112,23 @@ export default function LandingPage() {
         </div>
       </div>
     </>
+  );
+}
+
+export default function LandingPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-rose-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="inline-flex items-center justify-center mb-4">
+            <img src="/orbit-logo.png" alt="ORBIT" className="h-20 w-auto animate-pulse" />
+          </div>
+          <p className="text-gray-600 text-sm">Loading...</p>
+        </div>
+      </div>
+    }>
+      <LandingPageContent />
+    </Suspense>
   );
 }
 

@@ -162,22 +162,19 @@ export function BookingTab({
         className={`bg-white rounded-md p-3 border border-gray-200 cursor-pointer hover:border-blue-300 hover:shadow-sm transition-all duration-200 ${alert.isRead ? "opacity-60" : ""}`}
         onClick={() => handleAlertClick(alert)}
       >
-        <div className="flex flex-col gap-3 md:hidden">
-          <div className="flex items-start gap-3">
-            <div className={`p-2 rounded-lg flex-shrink-0 ${isHighPriority ? "bg-red-100" : "bg-orange-100"}`}>
+        <div className="md:hidden space-y-2">
+          <div className="flex items-start gap-2">
+            <div className={`p-1.5 rounded-lg flex-shrink-0 ${isHighPriority ? "bg-red-100" : "bg-orange-100"}`}>
               <AlertTriangle
                 className={`h-5 w-5 ${isHighPriority ? "text-red-600" : "text-orange-600"}`}
               />
             </div>
             <div className="flex-1 min-w-0">
               <p className="font-medium text-sm text-gray-900 break-words">{visibleTitle}</p>
-              {titleRequesterEmail ? (
-                <div className="text-xs text-gray-500 mt-0.5 break-words">{titleRequesterEmail}</div>
-              ) : null}
             </div>
           </div>
 
-          <div className="pl-11">
+          <div>
             <div className="text-xs text-gray-500 mb-2">{formatDateTime(alert.createdAt)}</div>
             <p className="text-xs text-gray-600 break-words whitespace-pre-wrap">{cleaned}</p>
 
@@ -236,10 +233,14 @@ export function BookingTab({
               )}
             </div>
           </div>
+
+          {titleRequesterEmail ? (
+            <div className="text-xs text-gray-500 break-words">{titleRequesterEmail}</div>
+          ) : null}
         </div>
 
-        <div className="hidden md:flex items-start gap-3">
-          <div className={`p-2 rounded-lg flex-shrink-0 ${isHighPriority ? "bg-red-100" : "bg-orange-100"}`}>
+        <div className="hidden md:flex items-start gap-2">
+          <div className={`p-1.5 rounded-lg flex-shrink-0 ${isHighPriority ? "bg-red-100" : "bg-orange-100"}`}>
             <AlertTriangle
               className={`h-5 w-5 ${isHighPriority ? "text-red-600" : "text-orange-600"}`}
             />

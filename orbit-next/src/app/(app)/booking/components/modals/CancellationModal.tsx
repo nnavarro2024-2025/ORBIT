@@ -37,7 +37,7 @@ export function CancellationModal({
 
   return (
     <Dialog open={showCancelModal} onOpenChange={setShowCancelModal}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="w-full h-[100dvh] md:w-auto md:h-auto md:max-w-md max-h-[100dvh] md:max-h-[90vh] overflow-y-auto p-4 sm:p-6">
         <DialogHeader>
           <div className="flex items-center gap-3">
             <div className="p-2 bg-red-100 rounded-full">

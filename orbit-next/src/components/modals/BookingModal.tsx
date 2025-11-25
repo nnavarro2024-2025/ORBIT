@@ -1976,10 +1976,10 @@ export default function BookingModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-  <DialogContent className="w-full h-full md:w-auto md:h-auto md:max-w-2xl md:max-h-[90vh] overflow-y-auto">
+  <DialogContent className="w-full h-[100dvh] md:w-auto md:h-auto md:max-w-2xl max-h-[100dvh] md:max-h-[90vh] overflow-y-auto p-4 sm:p-6">
         <DialogHeader>
-          <DialogTitle className="text-2xl font-semibold">New Facility Booking</DialogTitle>
-          <DialogDescription>
+          <DialogTitle className="text-xl sm:text-2xl font-semibold">New Facility Booking</DialogTitle>
+          <DialogDescription className="text-sm">
             Create a new booking by selecting a facility, date, and time. Please follow school hours and room capacity rules.
           </DialogDescription>
         </DialogHeader>

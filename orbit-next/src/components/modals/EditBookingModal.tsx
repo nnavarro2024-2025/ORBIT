@@ -873,10 +873,10 @@ function EditBookingModalContent({
     .filter((key) => !(key === "others" && equipmentOtherText));
 
   return (
-    <DialogContent className="w-full h-full md:w-auto md:h-auto md:max-w-2xl md:max-h-[90vh] overflow-y-auto">
+    <DialogContent className="w-full h-[100dvh] md:w-auto md:h-auto md:max-w-2xl max-h-[100dvh] md:max-h-[90vh] overflow-y-auto p-4 sm:p-6">
       <DialogHeader>
-        <DialogTitle className="text-2xl font-semibold">Edit Booking</DialogTitle>
-        <DialogDescription>Update booking details: date, time, participants, and purpose.</DialogDescription>
+        <DialogTitle className="text-xl sm:text-2xl font-semibold">Edit Booking</DialogTitle>
+        <DialogDescription className="text-sm">Update booking details: date, time, participants, and purpose.</DialogDescription>
       </DialogHeader>
 
       <div className="grid gap-6">

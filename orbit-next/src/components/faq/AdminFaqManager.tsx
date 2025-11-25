@@ -263,7 +263,7 @@ export default function AdminFaqManager({ searchTerm: externalSearchTerm }: { se
                   </p>
                 </div>
               </div>
-              <Button onClick={openCreateDialog} size="sm" className="bg-pink-600 hover:bg-pink-700 text-white">
+              <Button onClick={openCreateDialog} size="sm" className="bg-pink-600 hover:bg-pink-700 text-white w-full lg:w-auto">
                 <Plus className="mr-2 h-4 w-4" />
                 Add FAQ
               </Button>
@@ -271,8 +271,8 @@ export default function AdminFaqManager({ searchTerm: externalSearchTerm }: { se
           </div>
         )}
         {!externalSearchTerm && (
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4 sm:mb-6">
-            <div className="flex flex-1 items-center gap-3">
+          <div className="flex flex-col gap-3 mb-4 sm:mb-6">
+            <div className="flex flex-col md:flex-row md:items-end gap-3">
               <div className="flex-1">
                 <Label htmlFor="faq-search" className="text-xs uppercase tracking-wide text-gray-500">
                   Search
@@ -302,7 +302,7 @@ export default function AdminFaqManager({ searchTerm: externalSearchTerm }: { se
                 </Select>
               </div>
             </div>
-            <div className="text-xs text-gray-500">
+            <div className="text-xs text-gray-500 text-right md:text-left">
               {isFetching ? "Refreshing list…" : `${filteredFaqs.length} FAQ${filteredFaqs.length === 1 ? "" : "s"}`}
             </div>
           </div>
@@ -328,7 +328,7 @@ export default function AdminFaqManager({ searchTerm: externalSearchTerm }: { se
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-16 text-center">Order</TableHead>
-                  <TableHead>Question</TableHead>
+                  <TableHead className="min-w-[200px]">Question</TableHead>
                   <TableHead className="hidden md:table-cell">Category</TableHead>
                   <TableHead className="hidden md:table-cell">Helpful</TableHead>
                   <TableHead className="hidden md:table-cell">Last updated</TableHead>
@@ -366,9 +366,17 @@ export default function AdminFaqManager({ searchTerm: externalSearchTerm }: { se
                         </div>
                       </TableCell>
                       <TableCell className="align-middle">
-                        <div className="font-medium text-gray-900 leading-snug line-clamp-2">{faq.question}</div>
-                        <div className="mt-1 text-xs text-gray-500 md:hidden">
+                        <div className="font-medium text-gray-900 leading-snug break-words">{faq.question}</div>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500 md:hidden">
                           <Badge variant="outline" className="bg-pink-50 border-pink-200 text-pink-700">{faq.category}</Badge>
+                          <span className="text-gray-400">•</span>
+                          <span>
+                            <span className="font-medium text-green-600">{faq.helpfulCount}</span>
+                            <span className="mx-1">/</span>
+                            <span className="text-red-500">{faq.notHelpfulCount}</span>
+                          </span>
+                          <span className="text-gray-400">•</span>
+                          <span>{formatDate(faq.updatedAt)}</span>
                         </div>
                       </TableCell>
                       <TableCell className="hidden md:table-cell align-middle">

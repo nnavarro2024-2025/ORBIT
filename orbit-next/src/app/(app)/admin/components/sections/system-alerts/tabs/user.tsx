@@ -192,10 +192,10 @@ export function UserTab({
             : "border-gray-200 hover:border-gray-300 hover:shadow-sm"
         } ${alert.isRead ? "opacity-60" : ""}`}
       >
-        <div className="flex flex-col gap-3 md:hidden">
-          <div className="flex items-start gap-3">
+        <div className="md:hidden space-y-2">
+          <div className="flex items-start gap-2">
             <div
-              className={`p-2 rounded-lg flex-shrink-0 ${
+              className={`p-1.5 rounded-lg flex-shrink-0 ${
                 isBanActivity ? "bg-red-100" : isUnbanActivity ? "bg-green-100" : "bg-blue-100"
               }`}
             >
@@ -212,7 +212,7 @@ export function UserTab({
             </div>
           </div>
 
-          <div className="pl-11">
+          <div>
             <div className="text-xs text-gray-500 mb-2">{formatDateTime(alert.createdAt)}</div>
             <p className="text-xs text-gray-600 break-words whitespace-pre-wrap">
               {formattedMessageWithTime}
@@ -259,9 +259,9 @@ export function UserTab({
           </div>
         </div>
 
-        <div className="hidden md:flex items-start gap-3">
+        <div className="hidden md:flex items-start gap-2">
           <div
-            className={`p-2 rounded-lg flex-shrink-0 ${
+            className={`p-1.5 rounded-lg flex-shrink-0 ${
               isBanActivity ? "bg-red-100" : isUnbanActivity ? "bg-green-100" : "bg-blue-100"
             }`}
           >

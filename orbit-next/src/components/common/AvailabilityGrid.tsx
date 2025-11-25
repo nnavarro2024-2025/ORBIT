@@ -24,9 +24,9 @@ interface FacilityAvailability {
 const formatFacilityName = (name: string) => {
   if (!name) return name;
   const lower = name.toLowerCase();
-  // Ensure proper facility naming - add "Facility" prefix if missing for Lounge
-  if (lower === 'lounge' && !lower.includes('facility')) {
-    return 'Facility Lounge';
+  // Ensure proper facility naming - add "Faculty" prefix if missing for Lounge
+  if (lower === 'lounge' && !lower.includes('faculty')) {
+    return 'Faculty Lounge';
   }
   return name;
 };
@@ -136,13 +136,13 @@ export default function AvailabilityGrid({ date, onSelectRange, unavailableDates
     'Collaborative Learning 1': ['student', 'admin'],
     'Collaborative Learning 2': ['student', 'admin'],
     'Board Room': ['faculty', 'admin'],
-    'Facility Lounge': ['faculty', 'admin'],
+    'Faculty Lounge': ['faculty', 'admin'],
   };
   const roomList = [
     { name: 'Collaborative Learning 1', match: /collaborative learning room 1/i },
     { name: 'Collaborative Learning 2', match: /collaborative learning room 2/i },
     { name: 'Board Room', match: /board room/i },
-    { name: 'Facility Lounge', match: /lounge|facility lounge/i },
+    { name: 'Faculty Lounge', match: /lounge|faculty lounge/i },
   ];
   // Map roomList to facility ids
   const roomMap = facilities.reduce((acc, f) => {

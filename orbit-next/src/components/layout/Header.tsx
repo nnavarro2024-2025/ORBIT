@@ -20,6 +20,7 @@ import { useLegacyLocation } from "@/lib/utils";
 import ProfileModal from "../modals/ProfileModal";
 import SearchBar from "@/components/ui/SearchBar";
 import { useMemo, useRef, useCallback, useState, useEffect } from "react";
+import { usePathname } from "next/navigation";
 
 // Helper: parse alert for equipment-related content in a safe, testable way
 function parseEquipmentAlert(alert: any) {
@@ -607,6 +608,13 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
 
   // Admin alerts (notifications)
   const isAdmin = !!(user && user.role === 'admin');
+  const pathname = usePathname();
+  
+  // Check if admin is on booking dashboard - if so, treat them as a regular user for notifications
+  // This ensures admins see booking-specific user notifications when using the booking dashboard,
+  // and admin/system notifications when using the admin dashboard. Prevents confusion.
+  const isOnBookingDashboard = pathname?.startsWith('/booking');
+  const shouldShowUserNotifications = isOnBookingDashboard && isAdmin;
 
   const {
     adminAlerts,
@@ -615,7 +623,7 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
     isLoadingAdminAlerts: adminLoading,
     isLoadingUserAlerts: userLoading,
     markAsRead,
-  } = useNotifications({ enabled: !!user, isAdmin });
+  } = useNotifications({ enabled: !!user, isAdmin: isAdmin && !isOnBookingDashboard });
 
   const handleMarkAlertRead = useCallback(async (alertId: string) => {
     setPendingMarkIds((prev) => {
@@ -654,8 +662,35 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
   
   // Compute visible alerts in a memo so it updates when ownerAdminAlerts resolves
   const alertsData = useMemo(() => {
-    // admins see adminAlerts
-    if (isAdmin) return adminAlerts || [];
+    // If admin is on booking dashboard, show user notifications (not admin alerts)
+    if (shouldShowUserNotifications) {
+      const base = Array.isArray(userAlertsFiltered) ? userAlertsFiltered.slice() : [];
+      // Deduplicate and return
+      try {
+        const groups: Record<string, any> = {};
+        for (const a of base) {
+          try {
+            const firstLine = String(a.message || a.details || '').split('\n')[0].trim();
+            const key = `${a.title || ''}||${firstLine}`;
+            const existing = groups[key];
+            if (!existing) groups[key] = a;
+            else {
+              const existingTime = new Date(existing.createdAt).getTime();
+              const thisTime = new Date(a.createdAt).getTime();
+              if (thisTime > existingTime) groups[key] = a;
+            }
+          } catch (e) {
+            groups[`__${a.id}`] = groups[`__${a.id}`] || a;
+          }
+        }
+        return Object.values(groups).sort((x: any, y: any) => new Date(y.createdAt).getTime() - new Date(x.createdAt).getTime());
+      } catch (e) {
+        return base;
+      }
+    }
+    
+    // admins on admin dashboard see adminAlerts
+    if (isAdmin && !isOnBookingDashboard) return adminAlerts || [];
 
     // non-admin users: start with their own filtered alerts
     const base = Array.isArray(userAlertsFiltered) ? userAlertsFiltered.slice() : [];
@@ -700,7 +735,7 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
     } catch (e) {
       return base;
     }
-  }, [isAdmin, adminAlerts, userAlertsFiltered, ownerAdminAlerts, user?.email]);
+  }, [isAdmin, isOnBookingDashboard, shouldShowUserNotifications, adminAlerts, userAlertsFiltered, ownerAdminAlerts, user?.email]);
 
   // Helpful debug in development: log when ownerAdminAlerts or alertsData changes
   useEffect(() => {
@@ -711,7 +746,7 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
       }
     } catch (e) { }
   }, [ownerAdminAlerts, alertsData]);
-  const alertsLoading = isAdmin ? adminLoading : userLoading;
+  const alertsLoading = (isAdmin && !isOnBookingDashboard) ? adminLoading : userLoading;
   
   // Unread count should reflect only visible (non-hidden) alerts in the bell
   const unreadCount = useMemo(() => {
@@ -1345,11 +1380,12 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
 
                       return (
                         <div key={alert.id} className={`p-2 rounded-md ${alert.isRead ? 'opacity-70' : ''}`}>
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex-1 pr-4">
-                              <div className="flex items-start justify-between">
-                                <div className="font-medium text-sm text-gray-900">{parsed.visibleTitle}</div>
-                                <div className="ml-4 flex items-center gap-2">
+                          <div className="flex flex-col gap-2">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1 min-w-0">
+                                <div className="font-medium text-sm text-gray-900 break-words">{parsed.visibleTitle}</div>
+                              </div>
+                              <div className="flex items-center gap-2 flex-shrink-0">
                                   {!alert.isRead && (
                                     <button
                                       onClick={() => { void handleMarkAlertRead(alert.id); }}
@@ -1371,13 +1407,12 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
                                 </div>
                               </div>
 
-                              <div className="text-xs text-gray-600 mt-1 break-words">
-                                <div>{smallMessage}</div>
-                                {itemsDisplay}
-                              </div>
-
-                              {/* 'View other' removed by user request */}
+                            <div className="text-xs text-gray-600 break-words">
+                              <div>{smallMessage}</div>
+                              {itemsDisplay}
                             </div>
+
+                            {/* 'View other' removed by user request */}
                           </div>
                         </div>
                       );

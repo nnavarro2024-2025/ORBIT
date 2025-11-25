@@ -120,7 +120,8 @@ export function AvailableRoomsSection({
   const renderFacilityCard = (facility: any) => {
     const bookingStatus = getFacilityBookingStatus(facility.id);
     const isAvailableForBooking = facility.isActive && bookingStatus.status === "available";
-    const canRequestBooking = facility.isActive && (bookingStatus.status === "available" || bookingStatus.status === "closed");
+    // Allow booking request if facility is active (regardless of current booking status)
+    const canRequestBooking = facility.isActive;
     const isOwnerOrAdmin = user?.role === "admin" || bookingStatus.booking?.userId === user?.id;
 
     const nextAvailableInfo = (() => {
@@ -291,19 +292,21 @@ export function AvailableRoomsSection({
                   }}
                   disabled={!canRequestBooking}
                   className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors duration-200 shadow-sm flex-shrink-0 ${
-                    isAvailableForBooking
-                      ? "bg-pink-600 hover:bg-pink-700 text-white"
-                      : bookingStatus.status === "closed"
-                        ? "bg-pink-50 text-pink-700 border border-pink-200"
-                        : "bg-gray-300 text-gray-500 cursor-not-allowed"
+                    !facility.isActive
+                      ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                      : isAvailableForBooking
+                        ? "bg-pink-600 hover:bg-pink-700 text-white"
+                        : "bg-pink-50 hover:bg-pink-100 text-pink-700 border border-pink-200"
                   }`}
                 >
-                  {isAvailableForBooking ? "Book Now" : bookingStatus.status === "closed" ? "Request Booking" : "Unavailable"}
+                  {!facility.isActive ? "Unavailable" : isAvailableForBooking ? "Book Now" : "Request Booking"}
                 </button>
 
-                {bookingStatus.status === "closed" && (
+                {!isAvailableForBooking && facility.isActive && (
                   <p className="text-xs text-gray-500 mt-2 text-right max-w-xs">
-                    If requested outside school hours, the system will schedule it automatically and notify you of any changes.
+                    {bookingStatus.status === "closed" 
+                      ? "If requested outside school hours, the system will schedule it automatically and notify you of any changes."
+                      : "Select a different time slot when booking"}
                   </p>
                 )}
               </div>

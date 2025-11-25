@@ -93,8 +93,101 @@ export function BookingHistoryTab({
                 setIsModalOpen(true);
               }}
             >
+              {/* Mobile layout */}
+              <div className="lg:hidden">
+                <div className="flex items-center gap-2 mb-3">
+                  <div className={`${
+                    status.label === "Active" ? "bg-green-100" : 
+                    status.label === "Scheduled" ? "bg-pink-100" : 
+                    "bg-gray-100"
+                  } p-2 rounded-lg flex-shrink-0`}>
+                    <Calendar className={`h-4 w-4 ${
+                      status.label === "Active" ? "text-green-600" : 
+                      status.label === "Scheduled" ? "text-pink-600" : 
+                      "text-gray-600"
+                    }`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-semibold text-gray-900 text-sm leading-tight break-words">{getFacilityDisplay(booking.facilityId)}</h4>
+                    {booking.courseYearDept && (
+                      <p className="text-xs text-gray-500 mt-0.5 leading-tight break-words">
+                        <span className="font-medium">Course/Year/Dept:</span> <span className="text-blue-700 font-semibold">{booking.courseYearDept}</span>
+                      </p>
+                    )}
+                  </div>
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0 ${
+                    status.label === "Active" ? "bg-green-100 text-green-800" :
+                    status.label === "Scheduled" ? "bg-pink-100 text-pink-800" :
+                    status.label === "Denied" ? "bg-red-100 text-red-800" :
+                    "bg-gray-100 text-gray-800"
+                  }`}>
+                    {status.label}
+                  </span>
+                </div>
+                
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <div className="flex items-center gap-3">
+                    <div className="text-left">
+                      <p className="text-xs font-medium text-gray-500">Started</p>
+                      <p className="text-sm font-semibold text-gray-900 whitespace-nowrap">{format(new Date(booking.startTime), "h:mm a")}</p>
+                      <p className="text-xs text-gray-500">{format(new Date(booking.startTime), "M/d/yyyy")}</p>
+                    </div>
+                    <div className="text-left">
+                      <p className="text-xs font-medium text-gray-500">Ends</p>
+                      <p className="text-sm font-semibold text-gray-900 whitespace-nowrap">{format(new Date(booking.endTime), "h:mm a")}</p>
+                      <p className="text-xs text-gray-500">{format(new Date(booking.endTime), "M/d/yyyy")}</p>
+                    </div>
+                  </div>
+                  <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800 whitespace-nowrap">{booking.participants || 0} ppl</span>
+                </div>
+
+                {items.length > 0 && (
+                  <div className="bg-gradient-to-br from-gray-50 to-gray-100 border border-gray-200 rounded-lg p-2 mt-2">
+                    <h5 className="text-[10px] font-bold text-gray-700 uppercase tracking-wider mb-1">Equipment</h5>
+                    <div className="space-y-1 max-h-24 overflow-y-auto">
+                      {items.slice(0, 3).map((item: string, idx: number) => {
+                        let statusValue = "pending";
+                        try {
+                          const resp = String(booking?.adminResponse || "");
+                          const jsonMatch = resp.match(/\{"items":\{[^}]*\}\}/);
+                          if (jsonMatch) {
+                            const parsed = JSON.parse(jsonMatch[0]);
+                            if (parsed.items && typeof parsed.items === "object") {
+                              const itemKey = String(item).toLowerCase().replace(/\s+/g, "_");
+                              for (const [key, value] of Object.entries(parsed.items)) {
+                                const normalizedKey = String(key).toLowerCase().replace(/\s+/g, "_");
+                                if (normalizedKey === itemKey || String(key).toLowerCase() === String(item).toLowerCase()) {
+                                  statusValue = String(value);
+                                  break;
+                                }
+                              }
+                            }
+                          }
+                        } catch {}
+
+                        return (
+                          <div key={`eq-mob-${id}-${idx}`} className="flex items-center justify-between text-xs">
+                            <span className="text-gray-700 font-medium truncate">{item}</span>
+                            <span className={`font-semibold px-1.5 py-0.5 rounded flex-shrink-0 ml-2 ${
+                              statusValue === "prepared" ? "bg-green-100 text-green-700" :
+                              statusValue === "not_available" || statusValue === "not available" ? "bg-red-100 text-red-700" :
+                              "bg-gray-100 text-gray-600"
+                            }`}>
+                              {statusValue === "not_available" ? "N/A" : statusValue}
+                            </span>
+                          </div>
+                        );
+                      })}
+                      {items.length > 3 && (
+                        <p className="text-xs text-pink-600 font-medium">+{items.length - 3} more (tap to view)</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Desktop layout */}
-              <div className="flex items-center justify-between gap-4">
+              <div className="hidden lg:flex lg:items-center lg:justify-between lg:gap-4">
                 {/* Left section: User info */}
                 <div className="flex-shrink-0">
                   <div className="flex items-center gap-2">
@@ -328,6 +421,7 @@ export function BookingHistoryTab({
                   )}
                 </div>
               </div>
+              {/* End desktop layout */}
             </div>
           );
         })}

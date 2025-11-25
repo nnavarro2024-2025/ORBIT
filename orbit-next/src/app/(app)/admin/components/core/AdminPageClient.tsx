@@ -18,16 +18,7 @@ import { PIE_CHART_COLORS, FACILITY_BAR_COLORS, WEEKLY_LINE_COLORS, ENABLE_QUICK
 import { AdminSuspenseFallback } from "../layout/AdminSuspenseFallback";
 
 // Moved into `core/` for structural clarity. No logic changes.
-function AdminDashboardInner() {
-  if (DEBUG_MINIMAL_RENDER) {
-    return (
-      <div className="p-6">
-        <h1 className="text-xl font-semibold">Admin Dashboard (debug stub)</h1>
-        <p className="text-sm text-gray-500 mt-2">Full dashboard temporarily disabled while isolating the render loop.</p>
-      </div>
-    );
-  }
-
+function AdminDashboardContent() {
   const state = useAdminState();
   const {
     setSelectedView, setSecurityTab, setSettingsTab, setLocation: _unusedSetLocation,
@@ -218,6 +209,23 @@ function AdminDashboardInner() {
         userEmail={state.unbannedUserEmail || ""}
       />
     </AdminLayout>
+  );
+}
+
+function AdminDashboardInner() {
+  if (DEBUG_MINIMAL_RENDER) {
+    return (
+      <div className="p-6">
+        <h1 className="text-xl font-semibold">Admin Dashboard (debug stub)</h1>
+        <p className="text-sm text-gray-500 mt-2">Full dashboard temporarily disabled while isolating the render loop.</p>
+      </div>
+    );
+  }
+
+  return (
+    <Suspense fallback={<AdminSuspenseFallback />}>
+      <AdminDashboardContent />
+    </Suspense>
   );
 }
 

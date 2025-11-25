@@ -77,7 +77,54 @@ export function HistoryTab({
               className="bg-white rounded-lg p-4 border border-gray-200 hover:border-pink-200 hover:shadow-sm transition-all duration-200 cursor-pointer"
               onClick={() => handleBookingClick(b)}
             >
-              <div className="flex items-center justify-between gap-4">
+              {/* Mobile layout */}
+              <div className="lg:hidden space-y-3">
+                <div className="flex items-start gap-2">
+                  <div className="bg-gray-100 p-2 rounded-lg flex-shrink-0">
+                    <Calendar className="h-4 w-4 text-gray-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-semibold text-gray-900 text-sm break-words">{getFacilityName(b.facilityId)}</h4>
+                    {b.courseYearDept && (
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        <span className="font-medium">Course/Year/Dept:</span> <span className="text-blue-700 font-semibold">{b.courseYearDept}</span>
+                      </p>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="space-y-2 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-500">User:</span>
+                    <span className="text-gray-700 font-medium truncate">{getUserEmail(b.userId)}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-500">Participants:</span>
+                    <span className="px-2 py-0.5 rounded font-medium bg-gray-100 text-gray-800">{b.participants || 0}</span>
+                  </div>
+                </div>
+                
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="text-left">
+                      <p className="text-xs font-medium text-gray-500">Started</p>
+                      <p className="text-sm font-semibold text-gray-900 whitespace-nowrap">{format(new Date(b.startTime), "h:mm a")}</p>
+                      <p className="text-xs text-gray-500">{format(new Date(b.startTime), "M/d/yyyy")}</p>
+                    </div>
+                    <div className="text-left">
+                      <p className="text-xs font-medium text-gray-500">Ends</p>
+                      <p className="text-sm font-semibold text-gray-900 whitespace-nowrap">{format(new Date(b.endTime), "h:mm a")}</p>
+                      <p className="text-xs text-gray-500">{format(new Date(b.endTime), "M/d/yyyy")}</p>
+                    </div>
+                  </div>
+                  <span className={`text-xs font-semibold ${statusClass(b.status)} capitalize px-3 py-1.5 rounded-full flex-shrink-0`}>
+                    {String(b.status || '')}
+                  </span>
+                </div>
+              </div>
+
+              {/* Desktop layout */}
+              <div className="hidden lg:flex lg:items-center lg:justify-between lg:gap-4">
                 {/* Left section: User info */}
                 <div className="flex-shrink-0">
                   <div className="flex items-center gap-2">

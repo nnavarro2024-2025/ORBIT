@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = 'force-dynamic';
+
 import { useState, useEffect, useRef, Suspense } from "react";
 import { Check, Mail, Loader2 } from "lucide-react";
 import { supabase } from "@/lib/config";

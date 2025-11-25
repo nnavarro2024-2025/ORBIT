@@ -182,8 +182,8 @@ export function getFacilityDisplay(facilityId: number, facilities: any[]): strin
   let name = facility.name || `Facility ${facilityId}`;
   
   const lower = name.toLowerCase();
-  if (lower === 'lounge' && !lower.includes('facility')) {
-    name = 'Facility Lounge';
+  if (lower === 'lounge' && !lower.includes('faculty')) {
+    name = 'Faculty Lounge';
   }
   
   return name;
@@ -204,8 +204,8 @@ export function isRestrictedFacility(facility?: any): boolean {
 export function formatFacilityName(name: string): string {
   if (!name) return name;
   const lower = name.toLowerCase();
-  if (lower === 'lounge' && !lower.includes('facility')) {
-    return 'Facility Lounge';
+  if (lower === 'lounge' && !lower.includes('faculty')) {
+    return 'Faculty Lounge';
   }
   return name;
 }
