@@ -91,3 +91,5 @@ export function DeleteScheduleConfirmModal({ isOpen, onClose, schedule }: Delete
     </div>
   );
 }
+
+export default DeleteScheduleConfirmModal;

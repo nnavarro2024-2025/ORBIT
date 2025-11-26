@@ -156,3 +156,5 @@ export function ActivityLogModal({ log, isOpen, onClose }: ActivityLogModalProps
     </Dialog>
   );
 }
+
+export default ActivityLogModal;

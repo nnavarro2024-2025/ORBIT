@@ -98,3 +98,5 @@ export function UnbanUserModal(props: UnbanUserModalProps) {
     </Dialog>
   );
 }
+
+export default UnbanUserModal;

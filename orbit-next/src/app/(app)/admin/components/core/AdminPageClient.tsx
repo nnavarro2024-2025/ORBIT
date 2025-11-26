@@ -4,9 +4,13 @@ import { Suspense, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/data";
 import { AdminLayout, AdminContent, Countdown } from "../index";
-import { BanUserModal, ScheduleReportModal, DeleteScheduleConfirmModal } from "@/components/modals";
-import { UnbanUserModal } from "@/components/modals/UnbanUserModal";
-import { UnbanSuccessModal } from "@/components/modals/UnbanSuccessModal";
+import { 
+  BanUserModal, 
+  UnbanUserModal, 
+  UnbanSuccessModal,
+  ScheduleReportModal, 
+  DeleteScheduleConfirmModal 
+} from "@/components/modals";
 import { formatDateTime, formatDate, formatTime, WEEKDAY_LABELS, safeJsonParse, formatScheduleFrequencyText, extractRecipientList } from "@admin";
 import { useLegacyLocation } from "@/lib/utils";
 import { useAdminState } from "@admin/hooks/state";

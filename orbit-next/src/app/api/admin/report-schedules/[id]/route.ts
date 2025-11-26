@@ -14,13 +14,14 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type RouteContext = {
-  params: {
+  params: Promise<{
     id?: string;
-  };
+  }>;
 };
 
-function getScheduleId(context: RouteContext): string | null {
-  const id = context.params?.id;
+async function getScheduleId(context: RouteContext): Promise<string | null> {
+  const params = await context.params;
+  const id = params?.id;
   if (!id || typeof id !== "string" || !id.trim()) {
     return null;
   }
@@ -33,7 +34,7 @@ export async function PUT(request: NextRequest, context: RouteContext) {
     return authResult.response;
   }
 
-  const scheduleId = getScheduleId(context);
+  const scheduleId = await getScheduleId(context);
   if (!scheduleId) {
     return NextResponse.json({ message: "Invalid schedule id" }, { status: 400 });
   }
@@ -122,7 +123,7 @@ export async function DELETE(_request: NextRequest, context: RouteContext) {
     return authResult.response;
   }
 
-  const scheduleId = getScheduleId(context);
+  const scheduleId = await getScheduleId(context);
   if (!scheduleId) {
     return NextResponse.json({ message: "Invalid schedule id" }, { status: 400 });
   }

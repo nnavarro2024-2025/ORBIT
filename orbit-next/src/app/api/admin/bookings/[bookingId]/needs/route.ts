@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { bookingId: string } }
+  { params }: { params: Promise<{ bookingId: string }> }
 ) {
   const authResult = await requireAdminUser(request.headers);
   if (!authResult.ok) {
@@ -16,7 +16,7 @@ export async function POST(
   }
 
   try {
-    const { bookingId } = params;
+    const { bookingId } = await params;
     const payload = await request.json();
     const { status, note } = payload;
 

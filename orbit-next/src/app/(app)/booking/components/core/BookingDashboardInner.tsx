@@ -5,8 +5,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/data";
 import { useToast } from "@/hooks/ui";
 import { Header, Sidebar } from "@/components/layout";
-import BookingModal from "@/components/modals/BookingModal";
-import EditBookingModal from "@/components/modals/EditBookingModal";
+import BookingModal from "@/components/modals/booking/BookingModal";
+import EditBookingModal from "@/components/modals/booking/EditBookingModal";
 import { format } from 'date-fns';
 import { useLegacyLocation } from "@/lib/utils";
 

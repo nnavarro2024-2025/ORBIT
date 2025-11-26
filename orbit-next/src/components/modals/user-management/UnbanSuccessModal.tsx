@@ -77,3 +77,5 @@ export function UnbanSuccessModal(props: UnbanSuccessModalProps) {
     </Dialog>
   );
 }
+
+export default UnbanSuccessModal;
