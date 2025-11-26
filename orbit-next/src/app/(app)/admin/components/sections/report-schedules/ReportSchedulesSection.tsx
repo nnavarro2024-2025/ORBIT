@@ -1,7 +1,7 @@
 "use client";
 
 import { Dispatch, SetStateAction } from "react";
-import { CalendarClock, PenSquare, Plus, Trash2 } from "lucide-react";
+import { CalendarClock, PenSquare, Plus, Trash2, Loader2 } from "lucide-react";
 import { ReportSchedule } from "@shared/schema";
 import { AdminSearchBar } from "@/components/common";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { SkeletonTableRows } from "@/components/ui/skeleton-presets";
+import { cn } from "@/lib/utils";
 
 export type ScheduleFilter = "all" | "active" | "paused";
 export type ScheduleSort = "next-run" | "name";
@@ -221,17 +222,27 @@ export function ReportSchedulesSection({
                             onCheckedChange={(val) => handleToggleScheduleActive(schedule, val)}
                             disabled={isPending}
                             aria-label={schedule.isActive !== false ? "Pause schedule" : "Activate schedule"}
-                            className="data-[state=checked]:bg-pink-600"
+                            className={cn(
+                              "data-[state=checked]:bg-pink-600",
+                              isPending && "opacity-50 cursor-not-allowed"
+                            )}
                           />
-                          <Badge
-                            className={
-                              schedule.isActive !== false
-                                ? "bg-pink-50 text-pink-700 border border-pink-200"
-                                : "bg-gray-100 text-gray-700 border border-gray-300"
-                            }
-                          >
-                            {schedule.isActive !== false ? "Active" : "Paused"}
-                          </Badge>
+                          {isPending ? (
+                            <div className="flex items-center gap-1.5">
+                              <Loader2 className="h-3 w-3 animate-spin text-gray-500" />
+                              <span className="text-xs text-gray-500">Updating...</span>
+                            </div>
+                          ) : (
+                            <Badge
+                              className={
+                                schedule.isActive !== false
+                                  ? "bg-pink-50 text-pink-700 border border-pink-200"
+                                  : "bg-gray-100 text-gray-700 border border-gray-300"
+                              }
+                            >
+                              {schedule.isActive !== false ? "Active" : "Paused"}
+                            </Badge>
+                          )}
                         </div>
                       </TableCell>
                       <TableCell className="text-right align-middle">

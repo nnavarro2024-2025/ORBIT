@@ -4,7 +4,7 @@ import { Suspense, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/data";
 import { AdminLayout, AdminContent, Countdown } from "../index";
-import { BanUserModal } from "@/components/modals";
+import { BanUserModal, ScheduleReportModal, DeleteScheduleConfirmModal } from "@/components/modals";
 import { UnbanUserModal } from "@/components/modals/UnbanUserModal";
 import { UnbanSuccessModal } from "@/components/modals/UnbanSuccessModal";
 import { formatDateTime, formatDate, formatTime, WEEKDAY_LABELS, safeJsonParse, formatScheduleFrequencyText, extractRecipientList } from "@admin";
@@ -207,6 +207,23 @@ function AdminDashboardContent() {
         isOpen={!!state.isUnbanSuccessModalOpen}
         onClose={() => state.setIsUnbanSuccessModalOpen?.(false)}
         userEmail={state.unbannedUserEmail || ""}
+      />
+
+      {/* Schedule Report Modal */}
+      <ScheduleReportModal
+        isOpen={!!state.isScheduleReportModalOpen}
+        onClose={() => {
+          state.setIsScheduleReportModalOpen?.(false);
+          state.setScheduleToEdit?.(null);
+        }}
+        scheduleToEdit={state.scheduleToEdit || null}
+      />
+
+      {/* Delete Schedule Confirmation Modal */}
+      <DeleteScheduleConfirmModal
+        isOpen={!!state.deleteScheduleTarget}
+        onClose={() => state.setDeleteScheduleTarget?.(null)}
+        schedule={state.deleteScheduleTarget || null}
       />
     </AdminLayout>
   );
