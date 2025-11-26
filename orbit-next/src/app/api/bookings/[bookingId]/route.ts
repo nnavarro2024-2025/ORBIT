@@ -231,6 +231,10 @@ export async function PUT(
       }
     }
 
+    if (payload.adminResponse !== undefined) {
+      updatePayload.adminResponse = String(payload.adminResponse);
+    }
+
     try {
       const incomingEquipment = payload?.equipment;
       if (incomingEquipment) {

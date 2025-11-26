@@ -1426,17 +1426,6 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
                       <button
                         onClick={() => {
                           try {
-                            const currentPath = window.location.pathname;
-                            const isOnBookingDashboard = currentPath.includes('/booking');
-                            
-                            // If admin is on booking dashboard, navigate to booking activity logs
-                            if (isAdmin && isOnBookingDashboard) {
-                              const newHash = '#activity-logs:notifications';
-                              window.location.hash = newHash;
-                              window.dispatchEvent(new HashChangeEvent('hashchange'));
-                              return;
-                            }
-                            
                             if (isAdmin) {
                               // Navigate to System Alerts section, User Management tab
                               setLocation('/admin');
@@ -1449,11 +1438,19 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
                               return;
                             }
 
-                            // Mirror admin flow: navigate to the canonical /notifications route
-                            // and let App.tsx perform the base-preserving rewrite and set the
-                            // one-time flag. This avoids duplicating rewrite logic here.
-                            try { setLocation('/notifications'); return; } catch (_) { }
-                            try { window.location.href = '/notifications'; return; } catch (_) { }
+                            // Navigate to Activity Logs → Notification Logs tab in booking dashboard
+                            const newHash = '#activity-logs:notifications';
+                            const currentPath = window.location.pathname;
+                            
+                            if (currentPath.includes('/booking')) {
+                              // Already on booking page - update hash and dispatch event
+                              window.location.hash = newHash;
+                              window.dispatchEvent(new HashChangeEvent('hashchange'));
+                            } else {
+                              // Navigate to booking page with hash
+                              try { setLocation('/booking' + newHash); return; } catch (_) { }
+                              try { window.location.href = '/booking' + newHash; return; } catch (_) { }
+                            }
                           } catch (e) {
                             // Fallbacks
                             if (isAdmin) {

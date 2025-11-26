@@ -31,6 +31,7 @@ interface MyBookingsSectionProps {
 
 function Countdown({ expiry, onExpire }: { expiry: string | Date | undefined; onExpire?: () => void }) {
   const [now, setNow] = useState(Date.now());
+  const [hasExpired, setHasExpired] = useState(false);
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
@@ -38,10 +39,13 @@ function Countdown({ expiry, onExpire }: { expiry: string | Date | undefined; on
   }, []);
 
   useEffect(() => {
-    if (!expiry) return;
+    if (!expiry || hasExpired) return;
     const ms = new Date(expiry).getTime() - now;
-    if (ms <= 0) onExpire?.();
-  }, [expiry, now, onExpire]);
+    if (ms <= 0) {
+      setHasExpired(true);
+      onExpire?.();
+    }
+  }, [expiry, now, onExpire, hasExpired]);
 
   if (!expiry) return <span />;
 
@@ -115,7 +119,7 @@ export function MyBookingsSection({
     </div>
   );
 
-  if (isUserBookingsLoading || isUserBookingsFetching) {
+  if (isUserBookingsLoading && userBookings.length === 0) {
     return (
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
         {renderHeader()}
@@ -358,11 +362,17 @@ export function MyBookingsSection({
                             if (jsonMatch) {
                               const parsed = JSON.parse(jsonMatch[0]);
                               if (parsed.items && typeof parsed.items === "object") {
-                                const otherText = String(eq.others).trim().toLowerCase();
-                                for (const [key, value] of Object.entries(parsed.items)) {
-                                  if (String(key).toLowerCase() === otherText || String(key).toLowerCase().includes('other')) {
-                                    otherStatusValue = String(value);
-                                    break;
+                                // Check for "others" key first
+                                if (parsed.items.others !== undefined) {
+                                  otherStatusValue = String(parsed.items.others);
+                                } else {
+                                  // Fallback: try to match by text content
+                                  const otherText = String(eq.others).trim().toLowerCase();
+                                  for (const [key, value] of Object.entries(parsed.items)) {
+                                    if (String(key).toLowerCase() === otherText || String(key).toLowerCase().includes('other')) {
+                                      otherStatusValue = String(value);
+                                      break;
+                                    }
                                   }
                                 }
                               }

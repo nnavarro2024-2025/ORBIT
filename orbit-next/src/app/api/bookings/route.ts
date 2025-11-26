@@ -25,6 +25,93 @@ export async function GET(request: NextRequest) {
 
   try {
     const bookings = await storage.getFacilityBookingsByUser(authResult.user.id);
+    
+    // Auto-mark equipment as not_available for active bookings that haven't been checked
+    // Also mark equipment for cancelled bookings that were active (arrival timeout)
+    const now = new Date();
+    for (const booking of bookings) {
+      const startTime = new Date(booking.startTime);
+      const endTime = new Date(booking.endTime);
+      const wasOrIsActive = startTime <= now;
+      
+      // Check active bookings OR cancelled bookings that had started
+      const shouldCheckEquipment = (
+        (booking.status === 'approved' && startTime <= now && endTime >= now) ||
+        (booking.status === 'cancelled' && wasOrIsActive)
+      );
+      
+      if (shouldCheckEquipment && booking.equipment) {
+        const equipment = booking.equipment as any;
+        const items = Array.isArray(equipment.items) ? equipment.items : [];
+        const hasOthers = equipment.others && String(equipment.others).trim().length > 0;
+        
+        if (items.length > 0 || hasOthers) {
+          // Check if equipment has already been reviewed by admin
+          const hasAdminResponse = booking.adminResponse && booking.adminResponse.includes('"items":{');
+          
+          if (!hasAdminResponse) {
+            // Build adminResponse marking all equipment as not_available
+            const equipmentStatuses: Record<string, string> = {};
+            
+            // Mark predefined items
+            items.forEach((item: string) => {
+              const key = String(item).toLowerCase().replace(/\s+/g, '_');
+              equipmentStatuses[key] = 'not_available';
+            });
+            
+            // Mark "others" field if it exists
+            if (hasOthers) {
+              equipmentStatuses['others'] = 'not_available';
+            }
+            
+            const adminResponse = JSON.stringify({ items: equipmentStatuses });
+            
+            // Update the booking
+            await storage.updateFacilityBooking(booking.id, {
+              adminResponse,
+              updatedAt: new Date(),
+            } as any);
+            
+            // Update the in-memory booking object
+            booking.adminResponse = adminResponse;
+            
+            // Create notification for user about auto-marked equipment
+            try {
+              const { randomUUID } = await import('crypto');
+              const facility = await storage.getFacility(booking.facilityId).catch(() => null);
+              const facilityName = facility?.name || `Facility ${booking.facilityId}`;
+              
+              // Build equipment status message
+              const equipmentLines = items.map((item: string) => {
+                const key = String(item).toLowerCase().replace(/\s+/g, '_');
+                return `${item}: not available`;
+              });
+              
+              if (hasOthers) {
+                equipmentLines.push(`Others (${equipment.others}): not available`);
+              }
+              
+              const equipmentMessage = equipmentLines.join(', ');
+              
+              await storage.createSystemAlert({
+                id: randomUUID(),
+                type: 'booking',
+                severity: 'low',
+                title: 'Equipment or Needs Request',
+                message: `Your equipment request for ${facilityName} has been automatically marked as not available because your booking started without admin review. [Equipment: ${adminResponse}] ${equipmentMessage}`,
+                userId: booking.userId,
+                isRead: false,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+              });
+            } catch (error) {
+              console.warn('[bookings] Failed to create equipment auto-mark notification', error);
+            }
+          }
+        }
+      }
+    }
+    
     return NextResponse.json(bookings ?? [], { status: 200 });
   } catch (error) {
     console.error("[bookings] Failed to fetch user bookings:", error);

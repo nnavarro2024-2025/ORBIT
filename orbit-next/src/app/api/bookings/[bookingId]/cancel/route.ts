@@ -68,6 +68,7 @@ export async function POST(
     try {
       const user = await storage.getUser(booking.userId).catch(() => null);
       const facility = await storage.getFacility(booking.facilityId).catch(() => null);
+      const facilityName = facility?.name || `Facility ${booking.facilityId}`;
 
       if (booking.status === "approved" && (isActiveApproved || isUpcomingApproved)) {
         const alertTitle = isActiveApproved ? "Booking Ended" : "Booking Cancelled";
@@ -77,10 +78,23 @@ export async function POST(
           type: "booking",
           severity: "low",
           title: alertTitle,
-          message: `${user?.email || `User ${booking.userId}`} ${verb} their booking for ${
-            facility?.name || `Facility ${booking.facilityId}`
-          } (${start.toLocaleString()} - ${end.toLocaleString()}).`,
+          message: `${user?.email || `User ${booking.userId}`} ${verb} their booking for ${facilityName} (${start.toLocaleString()} - ${end.toLocaleString()}).`,
           userId: null,
+          isRead: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+      }
+      
+      // Add user notification for auto-cancellation due to arrival timeout
+      if (isArrivalTimeout) {
+        await storage.createSystemAlert({
+          id: randomUUID(),
+          type: "booking",
+          severity: "medium",
+          title: "Booking Auto-Cancelled",
+          message: `Your booking for ${facilityName} was automatically cancelled because you did not confirm your arrival within the required time (${start.toLocaleString()} - ${end.toLocaleString()}).`,
+          userId: booking.userId,
           isRead: false,
           createdAt: new Date(),
           updatedAt: new Date(),

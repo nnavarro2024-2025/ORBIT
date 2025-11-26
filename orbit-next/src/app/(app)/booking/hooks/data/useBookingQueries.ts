@@ -45,9 +45,7 @@ export function useUserBookings(user: any, authLoading: boolean) {
       return response.json();
     },
     enabled: !!user && !authLoading,
-    refetchInterval: false,
-    refetchOnWindowFocus: false,
-    refetchOnMount: false,
+    staleTime: 0,
   });
 }
 

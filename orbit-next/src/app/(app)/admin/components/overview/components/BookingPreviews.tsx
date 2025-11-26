@@ -82,8 +82,8 @@ export function BookingPreviews({ upcomingBookings, recentBookings, scheduledCou
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 md:gap-6">
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 flex flex-col justify-between">
-        <div className="mb-4 sm:mb-6">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 flex flex-col">
+        <div className="mb-4">
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-3">
             <div className="flex-1 min-w-0">
               <h3 className="text-base sm:text-lg font-bold text-gray-900">Scheduled Bookings</h3>
@@ -109,9 +109,10 @@ export function BookingPreviews({ upcomingBookings, recentBookings, scheduledCou
         </div>
 
         {upcomingBookings && upcomingBookings.length > 0 ? (
-          <div className="space-y-3">
-            {upcomingBookings.slice(0, 5).map((booking) => (
-              <div key={booking.id} onClick={() => handleBookingClick(booking)} className="bg-gray-50 rounded-lg p-3 hover:bg-gray-100 hover:shadow-sm transition-all duration-200 cursor-pointer">
+          <>
+            <div className="space-y-3 flex-1">
+              {upcomingBookings.slice(0, 5).map((booking) => (
+                <div key={booking.id} onClick={() => handleBookingClick(booking)} className="bg-gray-50 rounded-lg p-3 hover:bg-gray-100 hover:shadow-sm transition-all duration-200 cursor-pointer">
                 {/* Mobile layout */}
                 <div className="flex flex-col gap-3 md:hidden">
                   <div className="flex items-center gap-2">
@@ -169,11 +170,12 @@ export function BookingPreviews({ upcomingBookings, recentBookings, scheduledCou
                   </div>
                 </div>
               </div>
-            ))}
+              ))}
+            </div>
             <div className="pt-4 border-t border-gray-200 flex justify-end">
               <button onClick={() => onNavigateToBookingManagement('pendingList')} className="inline-flex items-center gap-2 px-4 py-2 bg-pink-600 text-white rounded-lg text-sm hover:bg-pink-700 transition-colors duration-150">View All</button>
             </div>
-          </div>
+          </>
         ) : (
           <EmptyState Icon={Calendar} message="No scheduled bookings" />
         )}
@@ -189,8 +191,9 @@ export function BookingPreviews({ upcomingBookings, recentBookings, scheduledCou
         </div>
 
         {recentBookings && recentBookings.length > 0 ? (
-          <div className="space-y-3">
-            {recentBookings.slice(0, 5).map((booking: FacilityBooking) => {
+          <>
+            <div className="space-y-3">
+              {recentBookings.slice(0, 5).map((booking: FacilityBooking) => {
               const actionTime = booking.createdAt || booking.startTime;
               let statusLabel = String(booking.status || '').toLowerCase();
               if (statusLabel === 'approved') {
@@ -271,10 +274,11 @@ export function BookingPreviews({ upcomingBookings, recentBookings, scheduledCou
                 </div>
               );
             })}
+            </div>
             <div className="pt-4 border-t border-gray-200 flex justify-end">
               <button onClick={() => onNavigateToActivityLogs('history')} className="inline-flex items-center gap-2 px-4 py-2 bg-pink-600 text-white rounded-lg text-sm hover:bg-pink-700 transition-colors duration-150">View All</button>
             </div>
-          </div>
+          </>
         ) : (
           <EmptyState Icon={Calendar} message="No recent booking activity" />
         )}

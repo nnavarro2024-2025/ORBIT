@@ -1,4 +1,5 @@
 import { format } from 'date-fns';
+import { apiRequest } from '@/lib/api';
 import { SCROLL_HIGHLIGHT_DURATION, SCROLL_RESET_DELAY } from '../../config/constants';
 
 /**
@@ -168,12 +169,30 @@ export function createArrivalCountdownExpireHandler(
   getFacilityDisplay: (id: number) => string,
   toast: any
 ) {
-  return (booking: any) => {
-    queryClient.invalidateQueries({ queryKey: ['/api/bookings'] });
-    toast({
-      title: 'Arrival Confirmation Expired',
-      description: `Your booking for ${getFacilityDisplay(booking.facilityId)} was not confirmed and may be cancelled.`
-    });
+  return async (booking: any) => {
+    try {
+      // Auto-cancel the booking due to arrival timeout
+      const response = await apiRequest('POST', `/api/bookings/${booking.id}/cancel?reason=arrival_timeout`);
+
+      if (!response.ok) {
+        throw new Error('Failed to auto-cancel booking');
+      }
+
+      await queryClient.refetchQueries({ queryKey: ['/api/bookings'] });
+      
+      toast({
+        title: 'Booking Cancelled',
+        description: `Your booking for ${getFacilityDisplay(booking.facilityId)} was automatically cancelled due to no arrival confirmation.`,
+        variant: 'destructive',
+      });
+    } catch (error) {
+      console.error('Failed to auto-cancel booking:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to process booking cancellation.',
+        variant: 'destructive',
+      });
+    }
   };
 }
 
@@ -185,8 +204,8 @@ export function createActiveCountdownExpireHandler(
   getFacilityDisplay: (id: number) => string,
   toast: any
 ) {
-  return (booking: any) => {
-    queryClient.invalidateQueries({ queryKey: ['/api/bookings'] });
+  return async (booking: any) => {
+    await queryClient.refetchQueries({ queryKey: ['/api/bookings'] });
     toast({
       title: 'Booking Ended',
       description: `Your booking for ${getFacilityDisplay(booking.facilityId)} has ended.`
