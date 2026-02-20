@@ -8,6 +8,7 @@ import React from 'react';
 import { format } from 'date-fns';
 import { calculateDuration } from '../utils/validationUtils';
 import { formatDate, formatTime } from '../utils/dateTimeUtils';
+import { EQUIPMENT_OPTIONS } from '../schemas/bookingSchema';
 import type { EquipmentStateValue } from '../schemas/bookingSchema';
 
 interface BookingSummaryProps {
@@ -42,6 +43,12 @@ export function BookingSummary({
     ? equipmentItems 
     : (equipment ? Object.keys(equipment).filter(k => k !== 'others' && equipment[k]) : []);
   const others = equipmentOthers || equipmentOtherText || '';
+
+  // Convert equipment keys to labels
+  const equipmentLabels = items.map(key => {
+    const option = EQUIPMENT_OPTIONS.find(opt => opt.key === key);
+    return option ? option.label : key;
+  });
 
   if (!facility && !startTime && !endTime && !purpose) {
     return null;
@@ -84,28 +91,28 @@ export function BookingSummary({
           </div>
         )}
 
-        {purpose && (
-          <div className="flex flex-col space-y-1 pt-2 border-t border-gray-200">
-            <span className="text-sm font-medium">Purpose:</span>
-            <span className="text-sm text-muted-foreground break-words whitespace-pre-wrap">
-              {purpose}
-            </span>
-          </div>
-        )}
-
         {courseYearDept && (
-          <div className="flex flex-col space-y-1 pt-2 border-t border-gray-200">
-            <span className="text-sm font-medium">Course & Year/Department:</span>
-            <span className="text-sm text-muted-foreground">{courseYearDept}</span>
+          <div className="flex justify-between">
+            <span className="text-sm">Course & Year/Department:</span>
+            <span className="text-sm font-medium">{courseYearDept}</span>
           </div>
         )}
 
-        {(items.length > 0 || others) && (
-          <div className="flex flex-col space-y-1 pt-2 border-t border-gray-200">
+        {purpose && (
+          <div className="pt-2 border-t border-gray-200">
+            <span className="text-sm font-medium">Purpose:</span>
+            <p className="text-sm mt-1 break-words whitespace-pre-wrap">
+              {purpose}
+            </p>
+          </div>
+        )}
+
+        {(equipmentLabels.length > 0 || others) && (
+          <div className="pt-2 border-t border-gray-200">
             <span className="text-sm font-medium">Equipment:</span>
-            <ul className="text-sm text-muted-foreground list-disc list-inside">
-              {items.map((item) => (
-                <li key={item}>{item}</li>
+            <ul className="text-sm mt-1 list-disc list-inside">
+              {equipmentLabels.map((label, idx) => (
+                <li key={idx}>{label}</li>
               ))}
               {others && <li>{others}</li>}
             </ul>

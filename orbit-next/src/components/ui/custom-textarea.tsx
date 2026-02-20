@@ -8,6 +8,7 @@ interface CustomTextareaProps {
   isInvalid?: boolean;
   className?: string;
   rows?: number;
+  required?: boolean;
 }
 
 export const CustomTextarea: React.FC<CustomTextareaProps> = ({
@@ -17,7 +18,8 @@ export const CustomTextarea: React.FC<CustomTextareaProps> = ({
   maxLength,
   isInvalid = false,
   className = "",
-  rows = 4
+  rows = 4,
+  required = false
 }) => {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
@@ -59,6 +61,7 @@ export const CustomTextarea: React.FC<CustomTextareaProps> = ({
         onChange={handleChange}
         placeholder={placeholder}
         maxLength={maxLength}
+        required={required}
         data-testid="purpose-textarea"
         className={`block w-full min-h-24 p-3 border rounded-md resize-none focus:outline-none ${isInvalid ? 'border-red-500 focus:ring-2 focus:ring-red-200' : 'border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500'} ${className}`}
         style={{

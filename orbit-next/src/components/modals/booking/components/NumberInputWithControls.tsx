@@ -53,7 +53,7 @@ export function NumberInputWithControls({
         size="icon"
         onClick={handleDecrement}
         disabled={value <= min}
-        className="h-8 w-8 shrink-0"
+        className="h-9 w-9 shrink-0"
         aria-label={`Decrease ${label || 'value'}`}
       >
         <Minus className="h-4 w-4" />
@@ -71,7 +71,7 @@ export function NumberInputWithControls({
         size="icon"
         onClick={handleIncrement}
         disabled={value >= max}
-        className="h-8 w-8 shrink-0"
+        className="h-9 w-9 shrink-0"
         aria-label={`Increase ${label || 'value'}`}
       >
         <Plus className="h-4 w-4" />

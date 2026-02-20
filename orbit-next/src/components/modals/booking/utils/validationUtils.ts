@@ -23,7 +23,10 @@ export interface BookingValidationData {
   endTime?: Date;
   facilityId?: string;
   purpose?: string;
+  courseYearDept?: string;
   participants?: number;
+  allBookings?: any[];
+  existingBookingId?: number;
 }
 
 /**
@@ -150,6 +153,92 @@ export function validateBookingForm(
       title: 'Purpose Required',
       description: 'Please provide a purpose for your booking.',
     });
+  }
+
+  // Validate course & year/department field
+  if (data.courseYearDept !== undefined && data.courseYearDept.trim().length === 0) {
+    validationErrors.push({
+      title: 'Course & Year/Department Required',
+      description: 'Please provide your course and year or department.',
+    });
+  }
+
+  // Validate no booking conflicts (same facility, overlapping time)
+  console.log('[Validation] Before conflict check:', {
+    hasAllBookings: !!data.allBookings,
+    allBookingsLength: data.allBookings?.length,
+    hasFacilityId: !!data.facilityId,
+    facilityId: data.facilityId,
+    hasStartTime: !!data.startTime,
+    hasEndTime: !!data.endTime,
+  });
+  
+  if (data.allBookings && data.facilityId && data.startTime && data.endTime) {
+    const facilityIdNum = parseInt(data.facilityId, 10);
+    console.log('[Validation] Checking conflicts:', {
+      facilityId: facilityIdNum,
+      startTime: data.startTime,
+      endTime: data.endTime,
+      totalBookings: data.allBookings.length,
+    });
+    const conflictingBookings = data.allBookings.filter((booking: any) => {
+      // Skip the current booking if editing
+      if (data.existingBookingId && booking.id === data.existingBookingId) {
+        return false;
+      }
+
+      // Extract facilityId - handle both object and number formats
+      const bookingFacilityId = typeof booking.facilityId === 'object' 
+        ? booking.facilityId?.id 
+        : booking.facilityId;
+
+      // Only check bookings for the same facility
+      if (bookingFacilityId !== facilityIdNum) {
+        return false;
+      }
+
+      // Only check approved bookings
+      if (booking.status !== 'approved') {
+        return false;
+      }
+
+      // Check for time overlap
+      const bookingStart = new Date(booking.startTime);
+      const bookingEnd = new Date(booking.endTime);
+      
+      const overlaps = data.startTime! < bookingEnd && data.endTime! > bookingStart;
+      console.log('[Validation] Checking booking:', {
+        bookingId: booking.id,
+        bookingFacilityId: typeof booking.facilityId === 'object' ? booking.facilityId?.id : booking.facilityId,
+        requestedFacilityId: facilityIdNum,
+        status: booking.status,
+        bookingTime: `${bookingStart.toLocaleTimeString()} - ${bookingEnd.toLocaleTimeString()}`,
+        requestedTime: `${data.startTime!.toLocaleTimeString()} - ${data.endTime!.toLocaleTimeString()}`,
+        overlaps,
+      });
+      
+      // Two bookings overlap if:
+      // new start < existing end AND new end > existing start
+      return overlaps;
+    });
+
+    console.log('[Validation] Conflicts found:', conflictingBookings.length);
+    
+    if (conflictingBookings.length > 0) {
+      const conflictBooking = conflictingBookings[0];
+      const conflictStart = new Date(conflictBooking.startTime);
+      const conflictEnd = new Date(conflictBooking.endTime);
+      
+      console.log('[Validation] Adding conflict error:', {
+        conflictBooking: conflictBooking.id,
+        time: `${format(conflictStart, 'h:mm a')} to ${format(conflictEnd, 'h:mm a')}`,
+      });
+      
+      validationErrors.push({
+        title: 'Booking Conflict',
+        description: `You already have a booking for this facility from ${format(conflictStart, 'h:mm a')} to ${format(conflictEnd, 'h:mm a')}. Please cancel your existing booking or choose a different time slot.`,
+      });
+    }
   }
 
   return validationErrors;

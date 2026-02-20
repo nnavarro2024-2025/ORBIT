@@ -70,6 +70,19 @@ export function getSelectedEquipmentLabels(
  * Derive initial booking state from existing booking data
  */
 export function deriveInitialBookingState(booking: any) {
+  if (!booking) {
+    return {
+      facilityId: '',
+      startTime: undefined,
+      endTime: undefined,
+      purpose: '',
+      courseYearDept: '',
+      participants: 1,
+      equipmentState: createEmptyEquipmentState(),
+      equipmentOtherText: '',
+    };
+  }
+  
   const equipmentItems = booking?.equipment?.items || [];
   const equipmentOthers = booking?.equipment?.others || '';
   

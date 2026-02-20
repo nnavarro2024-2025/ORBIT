@@ -26,6 +26,7 @@ import {
 import { useFacilities, useSlotManagement, useFormValidation } from '../hooks';
 import BookingForm from './BookingForm';
 import { FORM_LIMITS } from '../schemas/bookingSchema';
+import { useQuery } from '@tanstack/react-query';
 
 interface BookingModalContentProps {
   isOpen: boolean;
@@ -94,17 +95,41 @@ export function BookingModalContent({
 
   const slotManagement = useSlotManagement(isOpen, selectedFacility?.name);
 
+  // Fetch user's bookings for conflict detection
+  const { data: userBookingsData } = useQuery({
+    queryKey: ['/api/bookings'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', '/api/bookings');
+      return res.json();
+    },
+    enabled: isOpen,
+  });
+
+  const allBookings = userBookingsData || [];
+
+  console.log('[BookingModal] User bookings loaded:', allBookings.length, 'bookings');
+  console.log('[BookingModal] All bookings data:', allBookings);
+  console.log('[BookingModal] Validation data:', {
+    facilityId: facilityIdValue,
+    startTime: startTimeValue,
+    endTime: endTimeValue,
+    allBookingsCount: allBookings.length,
+  });
+
   // Form validation
   const { formValidationWarnings } = useFormValidation({
     facilityId: facilityIdValue,
     startTime: startTimeValue,
     endTime: endTimeValue,
     purpose: form.watch("purpose"),
+    courseYearDept: form.watch("courseYearDept"),
     participants: form.watch("participants"),
     facilities,
-    allBookings: [],
+    allBookings,
     userEmail: user?.email,
   });
+
+  console.log('[BookingModal] Validation warnings:', formValidationWarnings);
 
   // Booking mutation
   const [isSubmitting, setIsSubmitting] = useState(false);

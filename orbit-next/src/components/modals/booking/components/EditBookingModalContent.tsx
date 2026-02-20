@@ -14,6 +14,7 @@ import { useToast } from '@/hooks/ui';
 import { CustomTextarea } from '@/components/ui/custom-textarea';
 import { NumberInputWithControls } from './NumberInputWithControls';
 import { BookingSummary } from './BookingSummary';
+import { SimpleTimeSlotPicker } from './SimpleTimeSlotPicker';
 import { EQUIPMENT_OPTIONS, FORM_LIMITS, type EquipmentStateValue } from '../schemas/bookingSchema';
 import {
   deriveInitialBookingState,
@@ -27,6 +28,8 @@ import {
 } from '../utils/validationUtils';
 import { useSlotManagement, useFormValidation } from '../hooks';
 import { getNow, SUBMISSION_COOLDOWN } from '../utils/editBookingUtils';
+import { useQuery } from '@tanstack/react-query';
+import { apiRequest } from '@/lib/api';
 
 interface EditBookingModalContentProps {
   isOpen: boolean;
@@ -47,7 +50,13 @@ export function EditBookingModalContent({
   const { PURPOSE_MAX, COURSE_MAX, OTHERS_MAX } = FORM_LIMITS;
 
   // Derive initial state
-  const initialState = useMemo(() => deriveInitialBookingState(booking), [booking]);
+  const initialState = useMemo(() => {
+    const state = deriveInitialBookingState(booking);
+    console.log('EditBookingModal - Initial state:', state);
+    console.log('EditBookingModal - startTime:', state.startTime);
+    console.log('EditBookingModal - endTime:', state.endTime);
+    return state;
+  }, [booking]);
 
   // Form state
   const [purpose, setPurpose] = useState(initialState.purpose);
@@ -69,14 +78,28 @@ export function EditBookingModalContent({
 
   // Hooks
   const slotManagement = useSlotManagement(isOpen, selectedFacility?.name);
+
+  // Fetch user's bookings for conflict detection
+  const { data: userBookingsData } = useQuery({
+    queryKey: ['/api/bookings'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', '/api/bookings');
+      return res.json();
+    },
+    enabled: isOpen,
+  });
+
+  const allBookings = userBookingsData || [];
+
   const { formValidationWarnings } = useFormValidation({
     facilityId,
     startTime,
     endTime,
     purpose,
+    courseYearDept,
     participants,
     facilities,
-    allBookings: [],
+    allBookings,
     userEmail: booking?.userId,
     existingBookingId: booking?.id,
   });
@@ -151,81 +174,137 @@ export function EditBookingModalContent({
         </DialogHeader>
 
         <div className="space-y-6">
-          {/* Validation Warnings */}
-          {formValidationWarnings.length > 0 && (
-            <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4">
-              {formValidationWarnings.map((warning, idx) => (
-                <div key={idx} className="flex items-start gap-3 mb-2 last:mb-0">
-                  <span className="text-yellow-600">⚠️</span>
-                  <div>
-                    <p className="font-medium text-yellow-800">{warning.title}</p>
-                    <p className="text-sm text-yellow-700">{warning.description}</p>
-                  </div>
-                </div>
-              ))}
+          {/* Facility, Course/Department, and Participants */}
+          <div className="grid md:grid-cols-3 gap-4">
+            {/* Facility (Read-only) */}
+            <div>
+              <Label>Facility</Label>
+              <div className="py-2 px-3 bg-gray-50 border rounded text-sm h-10 flex items-center">
+                {selectedFacility?.name || ""}
+              </div>
             </div>
-          )}
 
-          {/* Facility (Read-only) */}
-          <div>
-            <Label>Facility</Label>
-            <div className="py-2 px-3 bg-gray-50 border rounded text-sm">
-              {selectedFacility?.name || ""}
+            {/* Course/Department */}
+            <div>
+              <Label>
+                Course & Year/Department <span className="text-red-500">*</span>
+              </Label>
+              <div className="relative">
+                <Input
+                  value={courseYearDept}
+                  onChange={(e) => setCourseYearDept(e.target.value)}
+                  placeholder="e.g. BSIT 3rd Year"
+                  maxLength={COURSE_MAX}
+                  required
+                  className={courseYearDept.length >= COURSE_MAX ? 'border-red-500 focus:ring-red-500' : ''}
+                />
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">
+                  {courseYearDept.length}/{COURSE_MAX}
+                </div>
+              </div>
+            </div>
+
+            {/* Participants */}
+            <div>
+              <Label>Number of Participants</Label>
+              <NumberInputWithControls
+                value={participants}
+                onChange={setParticipants}
+                min={1}
+                max={maxCapacity}
+              />
             </div>
           </div>
+
+          {/* Time Slot Picker */}
+          {selectedFacility && startTime && (
+            <div className="border rounded-lg p-4 bg-gray-50">
+              <Label className="block mb-3">Quick Select Time Slot</Label>
+              <SimpleTimeSlotPicker
+                facilityId={selectedFacility.id}
+                date={startTime || new Date()}
+                onSelectSlot={(start, end) => {
+                  setStartTime(start);
+                  setEndTime(end);
+                }}
+              />
+            </div>
+          )}
 
           {/* Date and Time */}
           <div className="grid md:grid-cols-2 gap-4">
             <div>
               <Label>Start Date & Time</Label>
-              <Input
-                type="datetime-local"
-                value={startTime ? new Date(startTime.getTime() - startTime.getTimezoneOffset() * 60000).toISOString().slice(0, 16) : ''}
-                onChange={(e) => setStartTime(new Date(e.target.value))}
-              />
+              <div className="grid grid-cols-2 gap-3">
+                <Input
+                  type="date"
+                  min={new Date().toISOString().slice(0, 10)}
+                  value={startTime ? new Date(startTime.getTime() - startTime.getTimezoneOffset() * 60000).toISOString().slice(0, 10) : ''}
+                  onChange={(e) => {
+                    if (!e.target.value) return;
+                    const currentTime = startTime || new Date();
+                    const newDate = new Date(e.target.value);
+                    newDate.setHours(currentTime.getHours(), currentTime.getMinutes());
+                    setStartTime(newDate);
+                  }}
+                />
+                <Input
+                  type="time"
+                  value={startTime ? new Date(startTime.getTime() - startTime.getTimezoneOffset() * 60000).toISOString().slice(11, 16) : ''}
+                  onChange={(e) => {
+                    if (!e.target.value) return;
+                    const currentDate = startTime || new Date();
+                    const [hours, minutes] = e.target.value.split(':');
+                    const newDate = new Date(currentDate);
+                    newDate.setHours(parseInt(hours), parseInt(minutes));
+                    setStartTime(newDate);
+                  }}
+                />
+              </div>
             </div>
             <div>
               <Label>End Date & Time</Label>
-              <Input
-                type="datetime-local"
-                value={endTime ? new Date(endTime.getTime() - endTime.getTimezoneOffset() * 60000).toISOString().slice(0, 16) : ''}
-                onChange={(e) => setEndTime(new Date(e.target.value))}
-              />
+              <div className="grid grid-cols-2 gap-3">
+                <Input
+                  type="date"
+                  min={new Date().toISOString().slice(0, 10)}
+                  value={endTime ? new Date(endTime.getTime() - endTime.getTimezoneOffset() * 60000).toISOString().slice(0, 10) : ''}
+                  onChange={(e) => {
+                    if (!e.target.value) return;
+                    const currentTime = endTime || new Date();
+                    const newDate = new Date(e.target.value);
+                    newDate.setHours(currentTime.getHours(), currentTime.getMinutes());
+                    setEndTime(newDate);
+                  }}
+                />
+                <Input
+                  type="time"
+                  value={endTime ? new Date(endTime.getTime() - endTime.getTimezoneOffset() * 60000).toISOString().slice(11, 16) : ''}
+                  onChange={(e) => {
+                    if (!e.target.value) return;
+                    const currentDate = endTime || new Date();
+                    const [hours, minutes] = e.target.value.split(':');
+                    const newDate = new Date(currentDate);
+                    newDate.setHours(parseInt(hours), parseInt(minutes));
+                    setEndTime(newDate);
+                  }}
+                />
+              </div>
             </div>
-          </div>
-
-          {/* Participants */}
-          <div>
-            <Label>Participants</Label>
-            <NumberInputWithControls
-              value={participants}
-              onChange={setParticipants}
-              min={1}
-              max={maxCapacity}
-            />
           </div>
 
           {/* Purpose */}
           <div>
-            <Label>Purpose</Label>
+            <Label>
+              Purpose <span className="text-red-500">*</span>
+            </Label>
             <CustomTextarea
               value={purpose}
               onChange={setPurpose}
               placeholder="Describe your purpose for booking this facility"
               maxLength={PURPOSE_MAX}
               isInvalid={purpose.length >= PURPOSE_MAX}
-            />
-          </div>
-
-          {/* Course/Department */}
-          <div>
-            <Label>Course & Year/Department</Label>
-            <CustomTextarea
-              value={courseYearDept}
-              onChange={setCourseYearDept}
-              placeholder="e.g. BSIT 3rd Year, Faculty of Engineering"
-              maxLength={COURSE_MAX}
-              rows={1}
+              required
             />
           </div>
 
@@ -266,9 +345,25 @@ export function EditBookingModalContent({
             endTime={endTime}
             participants={participants}
             purpose={purpose}
+            courseYearDept={courseYearDept}
             equipment={equipmentState}
             equipmentOtherText={equipmentOtherText}
           />
+
+          {/* Validation Warnings */}
+          {formValidationWarnings.length > 0 && (
+            <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4">
+              {formValidationWarnings.map((warning, idx) => (
+                <div key={idx} className="flex items-start gap-3 mb-2 last:mb-0">
+                  <span className="text-yellow-600 text-xl">⚠️</span>
+                  <div>
+                    <p className="font-medium text-yellow-800">{warning.title}</p>
+                    <p className="text-sm text-yellow-700">{warning.description}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <DialogFooter>

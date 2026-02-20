@@ -4,7 +4,7 @@
  * Custom hook for real-time form validation with booking-specific rules.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { validateBookingForm, type ValidationError } from '../utils/validationUtils';
 import type { Facility } from '../utils/roleFilterUtils';
 
@@ -13,6 +13,7 @@ export interface FormValidationParams {
   startTime?: Date;
   endTime?: Date;
   purpose?: string;
+  courseYearDept?: string;
   participants?: number;
   facilities: Facility[];
   allBookings: any[];
@@ -22,6 +23,10 @@ export interface FormValidationParams {
 
 export function useFormValidation(params: FormValidationParams) {
   const [formValidationWarnings, setFormValidationWarnings] = useState<ValidationError[]>([]);
+  const paramsRef = useRef(params);
+  
+  // Update ref on every render
+  paramsRef.current = params;
 
   const validateForm = useCallback(() => {
     const {
@@ -29,10 +34,13 @@ export function useFormValidation(params: FormValidationParams) {
       startTime,
       endTime,
       purpose,
+      courseYearDept,
       participants,
       facilities,
+      allBookings,
       userEmail,
-    } = params;
+      existingBookingId,
+    } = paramsRef.current;
 
     if (!facilityId || !startTime || !endTime) {
       setFormValidationWarnings([]);
@@ -45,7 +53,10 @@ export function useFormValidation(params: FormValidationParams) {
         startTime,
         endTime,
         purpose: purpose || '',
+        courseYearDept: courseYearDept || '',
         participants: participants || 1,
+        allBookings: allBookings || [],
+        existingBookingId,
       },
       facilities,
       userEmail
@@ -53,26 +64,33 @@ export function useFormValidation(params: FormValidationParams) {
 
     setFormValidationWarnings(errors);
     return errors;
-  }, [
-    params.facilityId,
-    params.startTime,
-    params.endTime,
-    params.purpose,
-    params.participants,
-    params.facilities,
-    params.allBookings,
-    params.userEmail,
-    params.existingBookingId,
-  ]);
+  }, []);
 
   const clearWarnings = useCallback(() => {
     setFormValidationWarnings([]);
   }, []);
 
-  // Auto-validate when dependencies change
+  // Auto-validate when key dependencies change
   useEffect(() => {
+    console.log('[useFormValidation] Running validation with:', {
+      facilityId: params.facilityId,
+      startTime: params.startTime,
+      endTime: params.endTime,
+      allBookingsCount: params.allBookings?.length || 0,
+    });
     validateForm();
-  }, [validateForm]);
+  }, [
+    params.facilityId,
+    params.startTime?.getTime(),
+    params.endTime?.getTime(),
+    params.purpose,
+    params.courseYearDept,
+    params.participants,
+    params.userEmail,
+    params.existingBookingId,
+    params.allBookings?.length,
+    validateForm,
+  ]);
 
   return {
     formValidationWarnings,
