@@ -1,10 +1,25 @@
 import { Dispatch, SetStateAction, useState } from "react";
 import { format } from "date-fns";
-import { Calendar, Eye } from "lucide-react";
+import { Calendar, Eye, CheckCircle2, Clock } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SkeletonListItem } from "@/components/ui/skeleton-presets";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
+
+// Helper function to get approval status
+function getApprovalStatus(booking: any) {
+  if (booking.status === "denied") {
+    return { label: "Denied", color: "bg-red-100 text-red-800", icon: "✕" };
+  }
+  if (booking.status === "cancelled") {
+    return { label: "Cancelled", color: "bg-gray-100 text-gray-800", icon: "—" };
+  }
+  if (booking.status === "approved") {
+    return { label: "Approved", color: "bg-green-100 text-green-800", icon: "✓" };
+  }
+  return { label: "Waiting for Approval", color: "bg-yellow-100 text-yellow-800", icon: "⏳" };
+}
 
 interface BookingHistoryTabProps {
   userBookings: any[];
@@ -95,6 +110,18 @@ export function BookingHistoryTab({
             >
               {/* Mobile layout */}
               <div className="lg:hidden">
+                {/* Approval Status Badge */}
+                <div className="mb-3">
+                  {(() => {
+                    const approvalStatus = getApprovalStatus(booking);
+                    return (
+                      <Badge className={`${approvalStatus.color} border-0`}>
+                        {approvalStatus.label}
+                      </Badge>
+                    );
+                  })()}
+                </div>
+
                 <div className="flex items-center gap-2 mb-3">
                   <div className={`${
                     status.label === "Active" ? "bg-green-100" : 
@@ -126,17 +153,10 @@ export function BookingHistoryTab({
                 </div>
                 
                 <div className="flex items-center justify-between gap-3 mb-2">
-                  <div className="flex items-center gap-3">
-                    <div className="text-left">
-                      <p className="text-xs font-medium text-gray-500">Started</p>
-                      <p className="text-sm font-semibold text-gray-900 whitespace-nowrap">{format(new Date(booking.startTime), "h:mm a")}</p>
-                      <p className="text-xs text-gray-500">{format(new Date(booking.startTime), "M/d/yyyy")}</p>
-                    </div>
-                    <div className="text-left">
-                      <p className="text-xs font-medium text-gray-500">Ends</p>
-                      <p className="text-sm font-semibold text-gray-900 whitespace-nowrap">{format(new Date(booking.endTime), "h:mm a")}</p>
-                      <p className="text-xs text-gray-500">{format(new Date(booking.endTime), "M/d/yyyy")}</p>
-                    </div>
+                  <div className="text-left">
+                    <p className="text-xs font-medium text-gray-500">Booking Date & Time</p>
+                    <p className="text-sm font-semibold text-gray-900">{format(new Date(booking.startTime), "eee, MMM d, yyyy")}</p>
+                    <p className="text-xs text-gray-600">{format(new Date(booking.startTime), "h:mm a")} to {format(new Date(booking.endTime), "h:mm a")}</p>
                   </div>
                   <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800 whitespace-nowrap">{booking.participants || 0} ppl</span>
                 </div>
@@ -299,6 +319,15 @@ export function BookingHistoryTab({
                     }`}>
                       {status.label}
                     </span>
+                    {/* Approval Status Badge */}
+                    {(() => {
+                      const approvalStatus = getApprovalStatus(booking);
+                      return (
+                        <Badge className={`${approvalStatus.color} border-0 justify-center`}>
+                          {approvalStatus.label}
+                        </Badge>
+                      );
+                    })()}
                   </div>
                   {/* Equipment List */}
                   {items.length > 0 && (
@@ -455,9 +484,14 @@ export function BookingHistoryTab({
               {/* Status */}
               <div>
                 <h3 className="text-sm font-semibold text-gray-700 mb-1">Status</h3>
-                <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${getBookingStatus(selectedBooking).badgeClass}`}>
-                  {getBookingStatus(selectedBooking).label}
-                </span>
+                <div className="flex gap-2">
+                  <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${getBookingStatus(selectedBooking).badgeClass}`}>
+                    {getBookingStatus(selectedBooking).label}
+                  </span>
+                  <Badge className={`${getApprovalStatus(selectedBooking).color} border-0`}>
+                    {getApprovalStatus(selectedBooking).label}
+                  </Badge>
+                </div>
               </div>
 
               {/* Purpose */}

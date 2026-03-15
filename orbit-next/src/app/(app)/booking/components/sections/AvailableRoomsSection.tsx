@@ -189,7 +189,7 @@ export function AvailableRoomsSection({
           )}
 
           {(() => {
-            const image = facility.image ? `/images/${facility.image}` : facility.imageUrl || getFacilityImageByName(facility.name);
+            const image = facility.image || facility.imageUrl || getFacilityImageByName(facility.name);
 
             if (!image) {
               return (

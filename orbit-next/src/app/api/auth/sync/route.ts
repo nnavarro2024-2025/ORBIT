@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireActiveUser } from "@/server/core";
 import { storage } from "@/server/core";
 import { isBuildTime } from "@/server/utils";
+import { getDefaultRoleForEmail } from "@/server/utils/roleDetection";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -73,8 +74,16 @@ export async function POST(request: NextRequest) {
       firstName: supabaseUser.user_metadata?.first_name ?? "",
       lastName: supabaseUser.user_metadata?.last_name ?? "",
       profileImageUrl: supabaseUser.user_metadata?.avatar_url ?? "",
-      role: existingUser?.role ?? "student",
+      // Auto-detect role on first sign-up, preserve existing role on subsequent sign-ins
+      role: existingUser?.role ?? getDefaultRoleForEmail(supabaseUser.email ?? ""),
       status: existingUser?.status ?? "active",
+      // ALL first-time users (both email/password and OAuth) must set a password
+      // Also require password setup for existing users who don't have one yet
+      // If a user's password_hash is NULL, always show password setup modal
+      passwordSetupRequiredAt: 
+        !existingUser || !existingUser?.passwordHash
+          ? new Date()
+          : existingUser?.passwordSetupRequiredAt ?? null,
       createdAt: existingUser?.createdAt ?? new Date(supabaseUser.created_at ?? Date.now()),
       updatedAt: new Date(),
     };

@@ -178,6 +178,83 @@ export function ContentRenderer(props: ContentRendererProps) {
         />
       );
 
+    // Faculty-only views
+    case "add-facility":
+      return (
+        <div className="bg-white/0">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
+            <div className="mb-6">
+              <h3 className="text-lg sm:text-xl font-semibold text-gray-900">
+                Add New Facility
+              </h3>
+              <p className="text-xs sm:text-sm text-gray-600 mt-1">
+                Create and manage study facilities with images and details.
+              </p>
+            </div>
+            <div className="text-center py-12">
+              <p className="text-gray-500">Facility management interface coming soon</p>
+            </div>
+          </div>
+        </div>
+      );
+
+    case "manage-reservations":
+      return (
+        <div className="bg-white/0">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
+            <div className="mb-6">
+              <h3 className="text-lg sm:text-xl font-semibold text-gray-900">
+                Manage Reservations
+              </h3>
+              <p className="text-xs sm:text-sm text-gray-600 mt-1">
+                Track and manage facility reservation progress and current bookings.
+              </p>
+            </div>
+            <div className="text-center py-12">
+              <p className="text-gray-500">Reservation management interface coming soon</p>
+            </div>
+          </div>
+        </div>
+      );
+
+    case "scheduled-bookings":
+      return (
+        <div className="bg-white/0">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
+            <div className="mb-6">
+              <h3 className="text-lg sm:text-xl font-semibold text-gray-900">
+                Scheduled Bookings
+              </h3>
+              <p className="text-xs sm:text-sm text-gray-600 mt-1">
+                View upcoming facility bookings and schedules.
+              </p>
+            </div>
+            <div className="text-center py-12">
+              <p className="text-gray-500">Scheduled bookings view coming soon</p>
+            </div>
+          </div>
+        </div>
+      );
+
+    case "approve-bookings":
+      return (
+        <div className="bg-white/0">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
+            <div className="mb-6">
+              <h3 className="text-lg sm:text-xl font-semibold text-gray-900">
+                Approve Bookings
+              </h3>
+              <p className="text-xs sm:text-sm text-gray-600 mt-1">
+                Review and approve pending facility booking requests.
+              </p>
+            </div>
+            <div className="text-center py-12">
+              <p className="text-gray-500">Booking approval interface coming soon</p>
+            </div>
+          </div>
+        </div>
+      );
+
     default:
       return (
         <>

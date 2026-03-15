@@ -12,17 +12,41 @@ export function generateSidebarItems(user: any) {
     const lastItem = (user && user.role === 'admin') 
       ? { id: 'admin-dashboard', label: 'Admin Dashboard', icon: BarChart3 } 
       : undefined;
-    sidebarItems = makeSidebar(!!(user && user.role === 'admin'), lastItem, 'booking');
+    sidebarItems = makeSidebar(!!(user && user.role === 'admin'), lastItem, 'booking', user?.role);
   } catch (e) {
-    // Fallback sidebar items
-    sidebarItems = [
-      { id: 'dashboard', label: 'Dashboard', icon: Home },
-      { id: 'new-booking', label: 'New Booking', icon: Plus },
-      { id: 'my-bookings', label: 'My Bookings', icon: Calendar },
-      { id: 'available-rooms', label: 'Available Rooms', icon: Home },
-      { id: 'activity-logs', label: 'Activity Logs', icon: BarChart3 },
-      { id: 'faqs', label: 'FAQs', icon: HelpCircle },
-    ];
+    // Fallback sidebar items based on role
+    const role = user?.role || 'student';
+    
+    if (role === 'student') {
+      sidebarItems = [
+        { id: 'dashboard', label: 'Dashboard', icon: Home },
+        { id: 'available-rooms', label: 'Available Study Rooms', icon: Home },
+        { id: 'my-bookings', label: 'My Bookings', icon: Calendar },
+        { id: 'faqs', label: 'FAQs', icon: HelpCircle },
+      ];
+    } else if (role === 'faculty') {
+      sidebarItems = [
+        { id: 'dashboard', label: 'Dashboard', icon: Home },
+        { id: 'available-rooms', label: 'Available Study Rooms', icon: Home },
+        { id: 'my-bookings', label: 'My Bookings', icon: Calendar },
+        { id: 'divider-faculty-1', type: 'divider' },
+        { id: 'add-facility', label: 'Add Facilities', icon: Plus },
+        { id: 'manage-reservations', label: 'Manage Reservations', icon: BarChart3 },
+        { id: 'scheduled-bookings', label: 'Scheduled Bookings', icon: Calendar },
+        { id: 'approve-bookings', label: 'Approve Bookings', icon: BarChart3 },
+        { id: 'faqs', label: 'FAQs', icon: HelpCircle },
+      ];
+    } else {
+      // Admin fallback
+      sidebarItems = [
+        { id: 'dashboard', label: 'Dashboard', icon: Home },
+        { id: 'new-booking', label: 'New Booking', icon: Plus },
+        { id: 'my-bookings', label: 'My Bookings', icon: Calendar },
+        { id: 'available-rooms', label: 'Available Rooms', icon: Home },
+        { id: 'activity-logs', label: 'Activity Logs', icon: BarChart3 },
+        { id: 'faqs', label: 'FAQs', icon: HelpCircle },
+      ];
+    }
     
     if (user && user.role === 'admin') {
       sidebarItems.push({ id: 'divider-1', type: 'divider' });

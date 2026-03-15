@@ -29,10 +29,11 @@ export async function apiRequest(
   });
 
   if (res.status === 401) {
-    console.error("🚨 401 Unauthorized received in apiRequest. Session expired. NOT redirecting to login for debugging.");
-    await supabase.auth.signOut();
-    // window.location.href = "/login"; // Temporarily commented out for debugging
-    throw new Error("Session expired or unauthorized. Redirecting to login.");
+    console.warn("[apiRequest] 401 Unauthorized - token may be expired or invalid");
+    // Don't automatically sign out - let the calling code handle this
+    const err: any = new Error("Unauthorized");
+    err.status = 401;
+    throw err;
   }
 
   if (!res.ok) {

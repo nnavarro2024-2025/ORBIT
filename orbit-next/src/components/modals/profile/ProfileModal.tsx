@@ -3,7 +3,7 @@ import { useAuth } from "@/hooks/data";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/api";
 import { useToast } from "@/hooks/ui";
-import { Settings, User as UserIcon, ArrowLeft } from "lucide-react";
+import { Settings, User as UserIcon, ArrowLeft, Eye, EyeOff, CheckCircle2, AlertCircle, Check, X } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   AlertDialog,
@@ -23,7 +23,9 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { PasswordRequirements, checkPasswordStrength } from "@/components/common";
 // Removed accordion import - settings UI simplified and handled inline
 
 interface ProfileModalProps {
@@ -39,10 +41,24 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
 
   const [firstName, setFirstName] = useState(user?.firstName || "");
   const [lastName, setLastName] = useState(user?.lastName || "");
+  const [showing, setShowSettings] = useState(false); // State to toggle between profile info and settings
   const [profileImageUrlInput, setProfileImageUrlInput] = useState(user?.profileImageUrl || "");
-  const [previewUrl, setPreviewUrl] = useState<string | null>(user?.profileImageUrl || null);
-  // removed emailNotifications state; settings simplified per user request
-  const [showSettings, setShowSettings] = useState(false); // State to toggle between profile info and settings
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  
+  // Password change state
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [passwordSuccess, setPasswordSuccess] = useState(false);
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  // Password validation checks for new password
+  const passwordStrengthInfo = checkPasswordStrength(newPassword);
+  const newPasswordMeetsAllRequirements = passwordStrengthInfo.meetsAllRequirements;
+  const newPasswordsMatch = confirmPassword.length > 0 && newPassword === confirmPassword;
 
   const updateProfileMutation = useMutation({
     mutationFn: (data: { firstName: string; lastName: string; profileImageUrl?: string }) => apiRequest("PUT", "/api/user/profile", data),
@@ -67,16 +83,62 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
 
   // Removed updateUserSettingsMutation as it was only for theme/emailNotifications
 
+  // Password change mutation
+  const changePasswordMutation = useMutation({
+    mutationFn: (data: { currentPassword: string; newPassword: string; confirmPassword: string }) =>
+      apiRequest("PUT", "/api/auth/change-password", data),
+    onSuccess: () => {
+      setPasswordSuccess(true);
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setPasswordError(null);
+      setTimeout(() => {
+        setPasswordSuccess(false);
+      }, 3000);
+    },
+    onError: (error: any) => {
+      setPasswordError(error.message || "Failed to change password");
+    },
+  });
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError(null);
+    
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      setPasswordError("Please fill in all fields");
+      return;
+    }
+
+    if (!newPasswordMeetsAllRequirements) {
+      setPasswordError("New password does not meet all requirements");
+      return;
+    }
+    
+    if (newPassword !== confirmPassword) {
+      setPasswordError("New passwords don't match");
+      return;
+    }
+    
+    if (currentPassword === newPassword) {
+      setPasswordError("New password must be different from current password");
+      return;
+    }
+    
+    await changePasswordMutation.mutateAsync({ currentPassword, newPassword, confirmPassword });
+  };
+
   // Update logic uses the provided profile image URL
 
-  const handleToggleSettings = () => setShowSettings(!showSettings);
+  const handleToggleSettings = () => setShowSettings(!showing);
 
   return (
     <Sheet open={isOpen} onOpenChange={onClose}>
       <SheetContent className="flex flex-col">
         <SheetHeader className="flex flex-row justify-between items-center">
           <SheetTitle className="flex items-center gap-2">
-            {showSettings ? (
+            {showing ? (
               <button 
                 onClick={handleToggleSettings} 
                 className="p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200"
@@ -86,9 +148,9 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
             ) : (
               <UserIcon className="h-5 w-5" />
             )}
-            {showSettings ? "User Settings" : "User Profile"}
+            {showing ? "User Settings" : "User Profile"}
           </SheetTitle>
-          {!showSettings && (
+          {!showing && (
             <button 
               onClick={handleToggleSettings} 
               className="p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200"
@@ -98,12 +160,12 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
           )}
         </SheetHeader>
         <SheetDescription>
-          {showSettings ? "Manage your preferences and account settings." : "View your personal information."}
+          {showing ? "Manage your preferences and account settings." : "View your personal information."}
         </SheetDescription>
         <div className="py-4 flex-1 overflow-y-auto">
           {user ? (
             <>
-              {!showSettings ? (
+              {!showing ? (
                 <div className="flex flex-col items-center space-y-6 p-6 bg-gray-50 rounded-xl border border-gray-200">
                   <Avatar className="h-24 w-24 border-4 border-blue-200 shadow-lg">
                     <AvatarImage src={previewUrl || user.profileImageUrl || DEFAULT_PROFILE_IMAGE} alt="User Avatar" />
@@ -214,6 +276,101 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
                         </AlertDialogContent>
                       </AlertDialog>
                     </div>
+                  </div>
+
+                  {/* Password Change Section */}
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 mt-6">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Change Password</h3>
+                    <form onSubmit={handleChangePassword} className="space-y-4">
+                      {passwordError && (
+                        <Alert variant="destructive">
+                          <AlertCircle className="h-4 w-4" />
+                          <AlertDescription>{passwordError}</AlertDescription>
+                        </Alert>
+                      )}
+                      
+                      {passwordSuccess && (
+                        <Alert className="border-green-200 bg-green-50">
+                          <CheckCircle2 className="h-4 w-4 text-green-600" />
+                          <AlertDescription className="text-green-800">Password changed successfully!</AlertDescription>
+                        </Alert>
+                      )}
+
+                      {/* Current Password */}
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">Current Password</label>
+                        <div className="relative">
+                          <input
+                            type={showCurrentPassword ? "text" : "password"}
+                            value={currentPassword}
+                            onChange={(e) => setCurrentPassword(e.target.value)}
+                            placeholder="Enter your current password"
+                            disabled={changePasswordMutation.isPending}
+                            className="w-full px-4 py-3 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 disabled:opacity-50"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                          >
+                            {showCurrentPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* New Password */}
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">New Password</label>
+                        <div className="relative">
+                          <input
+                            type={showNewPassword ? "text" : "password"}
+                            value={newPassword}
+                            onChange={(e) => setNewPassword(e.target.value)}
+                            placeholder="Enter new password"
+                            disabled={changePasswordMutation.isPending}
+                            className="w-full px-4 py-3 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 disabled:opacity-50"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowNewPassword(!showNewPassword)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                          >
+                            {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </button>
+                        </div>
+                        {newPassword && <PasswordRequirements password={newPassword} className="mt-3" />}
+                      </div>
+
+                      {/* Confirm Password */}
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">Confirm Password</label>
+                        <div className="relative">
+                          <input
+                            type={showConfirmPassword ? "text" : "password"}
+                            value={confirmPassword}
+                            onChange={(e) => setConfirmPassword(e.target.value)}
+                            placeholder="Confirm new password"
+                            disabled={changePasswordMutation.isPending}
+                            className="w-full px-4 py-3 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 disabled:opacity-50"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                          >
+                            {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </button>
+                        </div>
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={changePasswordMutation.isPending || passwordSuccess}
+                        className="w-full px-6 py-3 bg-pink-600 hover:bg-pink-700 text-white font-semibold rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {changePasswordMutation.isPending ? "Changing..." : "Change Password"}
+                      </button>
+                    </form>
                   </div>
                 </div>
               )}

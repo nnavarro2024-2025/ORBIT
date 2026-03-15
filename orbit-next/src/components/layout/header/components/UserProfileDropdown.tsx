@@ -17,6 +17,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { getInitials } from '../utils';
 import { ProfileModal } from '@/components/modals';
+import { RoleToggle } from './RoleToggle';
 
 interface UserProfileDropdownProps {
   user: any;
@@ -56,6 +57,10 @@ export function UserProfileDropdown({ user, onLogout }: UserProfileDropdownProps
               </div>
             )}
           </DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <div className="px-2 py-1">
+            <RoleToggle currentRole={user.role} />
+          </div>
           <DropdownMenuSeparator />
           <DropdownMenuItem
             onClick={() => setIsProfileSidebarOpen(true)}

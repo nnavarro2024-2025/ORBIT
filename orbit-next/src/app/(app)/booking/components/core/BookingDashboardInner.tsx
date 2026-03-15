@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/data";
+import { usePasswordStatus } from "@/hooks/data/usePasswordStatus";
 import { useToast } from "@/hooks/ui";
 import { Header, Sidebar } from "@/components/layout";
 import BookingModal from "@/components/modals/booking/BookingModal";
@@ -89,10 +91,15 @@ import { CancellationModal } from '../modals/CancellationModal';
 
 export function BookingDashboardInner() {
   // Core hooks
+  const router = useRouter();
   const { user, isLoading: authLoading } = useAuth();
+  const { data: passwordStatus } = usePasswordStatus();
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [location, setLocation] = useLegacyLocation();
+  
+  // Prevent multiple redirects to password setup (optimization flag)
+  const [redirectedToPasswordSetup, setRedirectedToPasswordSetup] = useState(false);
   
   // State management
   const bookingModalState = useBookingModalState();
@@ -101,16 +108,35 @@ export function BookingDashboardInner() {
   const viewState = useViewState();
   const activityState = useActivityState();
   
+  // Early redirect to password setup (ONE TIME ONLY to prevent multiple reloads)
+  // This happens BEFORE other data is fetched, so no unnecessary API calls
+  useEffect(() => {
+    if (passwordStatus?.passwordSetupRequired && !redirectedToPasswordSetup) {
+      console.log("[BookingDashboard] Password setup required - redirecting once");
+      setRedirectedToPasswordSetup(true);
+      router.push("/password-setup");
+    }
+  }, [passwordStatus?.passwordSetupRequired, redirectedToPasswordSetup, router]);
+  
+  // Only fetch data if we're not redirecting to password setup
+  const shouldSkipDataFetch = passwordStatus?.passwordSetupRequired || redirectedToPasswordSetup;
+  
   // Keyboard handling
   useEscapeKey(viewState.isMobileSidebarOpen, viewState.setIsMobileSidebarOpen);
   
-  // Data fetching
+  // Data fetching (skipped during password setup redirect)
   const todayDateStr = format(new Date(), 'yyyy-MM-dd');
-  const { data: facilities = [], isLoading: isFacilitiesLoading, isFetching: isFacilitiesFetching } = useFacilities();
-  const { data: availabilityDataRaw } = useAvailability(todayDateStr, user, authLoading);
-  const { data: userBookingsData = [], isLoading: isUserBookingsLoading, isFetching: isUserBookingsFetching } = useUserBookings(user, authLoading);
-  const { data: allBookingsData = [] } = useAllBookings(user, authLoading);
-  const { data: notificationsData = [], isLoading: isNotificationsLoading, isFetching: isNotificationsFetching } = useNotifications(user, authLoading);
+  const { data: facilities = [], isLoading: isFacilitiesLoading, isFetching: isFacilitiesFetching } = useFacilities(!shouldSkipDataFetch);
+  
+  // Pass null/undefined for dependent params when skipping to disable their queries
+  const activeUser = shouldSkipDataFetch ? null : user;
+  const activeTodayDateStr = shouldSkipDataFetch ? '' : todayDateStr;
+  const activeAuthLoading = shouldSkipDataFetch ? false : authLoading;
+  
+  const { data: availabilityDataRaw } = useAvailability(activeTodayDateStr, activeUser, activeAuthLoading);
+  const { data: userBookingsData = [], isLoading: isUserBookingsLoading, isFetching: isUserBookingsFetching } = useUserBookings(activeUser, activeAuthLoading);
+  const { data: allBookingsData = [] } = useAllBookings(activeUser, activeAuthLoading);
+  const { data: notificationsData = [], isLoading: isNotificationsLoading, isFetching: isNotificationsFetching } = useNotifications(activeUser, activeAuthLoading);
   
   // Mutations
   const updateBookingMutation = useUpdateBooking(toast, editBookingModalState.setEditingBooking);

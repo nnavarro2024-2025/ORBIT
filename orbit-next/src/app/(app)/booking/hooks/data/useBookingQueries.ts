@@ -4,14 +4,16 @@ import { AVAILABILITY_STALE_TIME, NOTIFICATIONS_STALE_TIME } from '../../config/
 
 /**
  * Hook to fetch facilities
+ * @param enabled - Whether to enable the query (defaults to true)
  */
-export function useFacilities() {
+export function useFacilities(enabled: boolean = true) {
   return useQuery<any[]>({
     queryKey: ["/api/facilities"],
     queryFn: async () => {
       const response = await apiRequest("GET", "/api/facilities");
       return response.json();
     },
+    enabled: enabled, // Skip during password setup
     refetchOnWindowFocus: false,
     refetchOnMount: false,
   });

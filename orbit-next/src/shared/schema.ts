@@ -43,6 +43,7 @@ export const users = pgTable("users", {
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
   profileImageUrl: varchar("profile_image_url"),
+  passwordHash: varchar("password_hash"), // Nullable for Google OAuth users (required for email/password login)
   role: userRoleEnum("role").default("student").notNull(),
   status: userStatusEnum("status").default("active").notNull(),
   banReason: text("ban_reason"),
@@ -50,6 +51,7 @@ export const users = pgTable("users", {
   bannedAt: timestamp("banned_at"),
   twoFactorEnabled: boolean("two_factor_enabled").default(false),
   twoFactorSecret: varchar("two_factor_secret"),
+  passwordSetupRequiredAt: timestamp("password_setup_required_at"), // Tracks when user was forced to set password
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -79,6 +81,18 @@ export const facilities = pgTable("facilities", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// Equipment table for tracking available inventory
+export const equipment = pgTable("equipment", {
+  id: serial("id").primaryKey(),
+  facilityId: integer("facility_id").references(() => facilities.id).notNull(),
+  name: varchar("name").notNull(),
+  description: text("description"),
+  totalQuantity: integer("total_quantity").notNull(),
+  availableQuantity: integer("available_quantity").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // Facility bookings
 export const facilityBookings = pgTable("facility_bookings", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -89,7 +103,7 @@ export const facilityBookings = pgTable("facility_bookings", {
   purpose: text("purpose").notNull(),
   courseYearDept: text("course_year_dept"),
   participants: integer("participants").notNull(),
-  equipment: jsonb("equipment"),
+  equipment: jsonb("equipment"), // Stores: { items: [{ id, name, quantity, returned: bool }] }
   // Arrival confirmation: when an approved booking requires admin confirmation after start
   arrivalConfirmationDeadline: timestamp("arrival_confirmation_deadline"),
   arrivalConfirmed: boolean("arrival_confirmed").default(false),
@@ -178,6 +192,11 @@ export const computerStationsRelations = relations(computerStations, () => ({
 
 export const facilitiesRelations = relations(facilities, (helpers) => ({
   bookings: helpers.many(facilityBookings),
+  equipment: helpers.many(equipment),
+}));
+
+export const equipmentRelations = relations(equipment, (helpers) => ({
+  facility: helpers.one(facilities, { fields: [equipment.facilityId], references: [facilities.id] }),
 }));
 
 export const facilityBookingsRelations = relations(facilityBookings, (helpers) => ({
