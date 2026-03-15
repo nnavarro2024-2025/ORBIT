@@ -4,7 +4,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { eq } from "drizzle-orm";
 
-import "../src/server/json-parse-patch";
+import "../src/server/utils/json-parse-patch";
 import * as schema from "../../shared/schema";
 
 const { faqs } = schema;
