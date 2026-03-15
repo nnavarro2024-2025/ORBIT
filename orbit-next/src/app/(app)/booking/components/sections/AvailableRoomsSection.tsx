@@ -163,14 +163,21 @@ export function AvailableRoomsSection({
       }
     })();
 
+    // Check if it's within library hours
+    const isLibraryClosed = isLibraryClosedNow();
+
     return (
       <div
         key={facility.id}
         className={`group bg-white border rounded-xl overflow-hidden transition-all duration-300 flex flex-col h-full ${
-          isAvailableForBooking ? "border-gray-200 hover:shadow-lg cursor-pointer hover:border-pink-200" : "border-gray-100 bg-gray-50 opacity-80"
+          isAvailableForBooking 
+            ? "border-gray-200 hover:shadow-lg cursor-pointer hover:border-pink-200" 
+            : isLibraryClosed 
+              ? "border-amber-200 hover:shadow-md cursor-pointer hover:border-amber-300 bg-amber-50/30"
+              : "border-gray-200 hover:shadow-lg cursor-pointer hover:border-pink-200"
         }`}
         onClick={() => {
-          if (!isAvailableForBooking) return;
+          if (!isAvailableForBooking && !isLibraryClosed) return;
           handleOpenBooking(facility);
         }}
       >
@@ -200,7 +207,7 @@ export function AvailableRoomsSection({
                 <img
                   src={image}
                   alt={facility.name}
-                  className={`w-full h-full object-cover transition-transform duration-300 ${isAvailableForBooking ? "group-hover:scale-105" : "grayscale"}`}
+                  className={`w-full h-full object-cover transition-transform duration-300 ${isAvailableForBooking ? "group-hover:scale-105" : "group-hover:scale-105 opacity-85"}`}
                   style={{ objectPosition: "center", width: "100%", height: "100%", aspectRatio: "16/9", minHeight: "180px", maxHeight: "320px" }}
                   onError={(event) => {
                     event.currentTarget.style.display = "none";
@@ -229,7 +236,7 @@ export function AvailableRoomsSection({
                 <div className="text-xs text-green-800 font-medium">Next available booking</div>
                 <div className="text-sm font-semibold text-gray-900">{nextAvailableInfo.label}</div>
               </div>
-              <div>
+              {/* <div>
                 <button
                   onClick={(event) => {
                     event.stopPropagation();
@@ -239,7 +246,7 @@ export function AvailableRoomsSection({
                 >
                   Book Now
                 </button>
-              </div>
+              </div> */}
             </div>
           )}
 
@@ -274,6 +281,15 @@ export function AvailableRoomsSection({
           )}
 
           <div className="mt-auto">
+            {isLibraryClosed && facility.isActive && (
+              <div className="mb-3 p-2 bg-amber-50 rounded-lg border border-amber-200 flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0" />
+                <div className="text-xs text-amber-700 font-medium">
+                  Request outside hours • Library: 7:30 AM - 7:00 PM
+                </div>
+              </div>
+            )}
+            
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-2">
                 <div className={`w-2 h-2 rounded-full ${isAvailableForBooking ? "bg-green-500" : "bg-gray-400"}`} />
@@ -295,11 +311,13 @@ export function AvailableRoomsSection({
                     !facility.isActive
                       ? "bg-gray-300 text-gray-500 cursor-not-allowed"
                       : isAvailableForBooking
-                        ? "bg-pink-600 hover:bg-pink-700 text-white"
-                        : "bg-pink-50 hover:bg-pink-100 text-pink-700 border border-pink-200"
+                        ? "bg-pink-600 hover:bg-pink-700 text-white shadow-md"
+                        : isLibraryClosed
+                          ? "bg-amber-500 hover:bg-amber-600 text-white shadow-md"
+                          : "bg-pink-50 hover:bg-pink-100 text-pink-700 border border-pink-200"
                   }`}
                 >
-                  {!facility.isActive ? "Unavailable" : isAvailableForBooking ? "Book Now" : "Request Booking"}
+                  {!facility.isActive ? "Unavailable" : isAvailableForBooking ? "Book Now" : isLibraryClosed ? "Request Booking" : "Book Now"}
                 </button>
 
                 {!isAvailableForBooking && facility.isActive && (
