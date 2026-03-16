@@ -72,7 +72,6 @@ export function BookingModalContent({
       startTime: defaultStartTime,
       endTime: defaultEndTime,
       purpose: "",
-      courseYearDept: "",
       participants: 1,
       reminderOptIn: true,
       reminderLeadMinutes: 60,
@@ -122,7 +121,6 @@ export function BookingModalContent({
     startTime: startTimeValue,
     endTime: endTimeValue,
     purpose: form.watch("purpose"),
-    courseYearDept: form.watch("courseYearDept"),
     participants: form.watch("participants"),
     facilities,
     allBookings,
@@ -172,10 +170,20 @@ export function BookingModalContent({
     },
     onError: (error: any) => {
       setIsSubmitting(false);
+
+      const rawMessage = typeof error?.message === 'string' ? error.message : '';
+      const parsedMessage = rawMessage.replace(/^\d{3}:\s*/, '').trim();
+      const details = error?.payload || {};
+      const conflictHint =
+        details?.error === 'UserHasOverlappingBooking' || details?.error === 'UserHasActiveBooking'
+          ? ' You still have an overlapping or active booking. Please adjust the time slot or cancel the existing booking first.'
+          : '';
+      const description =
+        details?.message || parsedMessage || 'Failed to create booking. Please try again.';
       
       toast({
         title: "Booking Error",
-        description: error?.message || "Failed to create booking. Please try again.",
+        description: `${description}${conflictHint}`,
         variant: "destructive",
       });
     },

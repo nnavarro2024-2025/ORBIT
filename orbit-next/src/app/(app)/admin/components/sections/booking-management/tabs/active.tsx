@@ -201,11 +201,6 @@ export function ActiveBookingsTab(props: ActiveBookingsTabProps) {
                       <div>
                         <h4 className="font-semibold text-gray-900 text-base leading-tight">{getUserEmail(booking.userId)}</h4>
                         <p className="text-sm text-gray-600 mt-0.5 leading-tight">{getFacilityName(booking.facilityId)}</p>
-                        {booking.courseYearDept && (
-                          <p className="text-xs text-gray-500 mt-1 leading-tight">
-                            <span className="font-medium">Course/Year/Dept:</span> <span className="text-blue-700 font-semibold">{booking.courseYearDept}</span>
-                          </p>
-                        )}
                         <div className="flex items-center gap-2 mt-1.5">
                           <span className="text-xs text-gray-500">Participants:</span>
                           <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">{booking.participants || 0}</span>
@@ -337,15 +332,6 @@ export function ActiveBookingsTab(props: ActiveBookingsTabProps) {
                 <h4 className="text-sm font-medium text-gray-500 mb-1">Participants</h4>
                 <p className="text-sm text-gray-900">{selectedBooking.participants || 0}</p>
               </div>
-              {selectedBooking.courseYearDept && (
-                <>
-                  <Separator />
-                  <div>
-                    <h4 className="text-sm font-medium text-gray-500 mb-1">Course/Year/Dept</h4>
-                    <p className="text-sm text-gray-900">{selectedBooking.courseYearDept}</p>
-                  </div>
-                </>
-              )}
               {selectedBooking.purpose && (
                 <>
                   <Separator />

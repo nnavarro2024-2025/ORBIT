@@ -1,4 +1,4 @@
-import { Dispatch, SetStateAction, useMemo } from "react";
+import { Dispatch, SetStateAction, useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
 import { Calendar } from "lucide-react";
 
@@ -83,7 +83,9 @@ export function AvailableRoomsSection({
   className,
   showAvailabilityGrid = true,
 }: AvailableRoomsSectionProps) {
-  const filteredFacilities = useMemo(() => {
+  const [selectedCampus, setSelectedCampus] = useState<"selga" | "bonifacio">("selga");
+
+  const roleFilteredFacilities = useMemo(() => {
     const userRole = user?.role || "student";
 
     return facilities.filter((facility) => {
@@ -95,6 +97,39 @@ export function AvailableRoomsSection({
       return !restricted;
     });
   }, [facilities, isRestrictedFacility, user?.role]);
+
+  const filteredFacilities = useMemo(() => {
+    return roleFilteredFacilities.filter((facility) => String(facility?.campus || "") === selectedCampus);
+  }, [roleFilteredFacilities, selectedCampus]);
+
+  const campusCounts = useMemo(() => {
+    return roleFilteredFacilities.reduce(
+      (acc, facility) => {
+        const campus = String(facility?.campus || "");
+        if (campus === "selga") acc.selga += 1;
+        if (campus === "bonifacio") acc.bonifacio += 1;
+        return acc;
+      },
+      { selga: 0, bonifacio: 0 },
+    );
+  }, [roleFilteredFacilities]);
+
+  useEffect(() => {
+    const hasSelga = campusCounts.selga > 0;
+    const hasBonifacio = campusCounts.bonifacio > 0;
+
+    if (selectedCampus === "selga" && hasSelga) return;
+    if (selectedCampus === "bonifacio" && hasBonifacio) return;
+
+    if (hasSelga) {
+      setSelectedCampus("selga");
+      return;
+    }
+
+    if (hasBonifacio) {
+      setSelectedCampus("bonifacio");
+    }
+  }, [campusCounts.bonifacio, campusCounts.selga, selectedCampus]);
 
   const handleOpenBooking = (facility: any, start?: Date, end?: Date) => {
     const restricted = isRestrictedFacility(facility);
@@ -336,8 +371,8 @@ export function AvailableRoomsSection({
   };
 
   const availableRooms = useMemo(() => {
-    return facilities.filter((facility) => facility.isActive && getFacilityBookingStatus(facility.id).status === "available");
-  }, [facilities, getFacilityBookingStatus]);
+    return filteredFacilities.filter((facility) => facility.isActive && getFacilityBookingStatus(facility.id).status === "available");
+  }, [filteredFacilities, getFacilityBookingStatus]);
 
   return (
     <section className={className}>
@@ -347,27 +382,52 @@ export function AvailableRoomsSection({
             <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Available Study Rooms</h2>
             <p className="text-sm sm:text-base text-gray-600 mt-1">Browse and book available facilities</p>
 
-            {(isLibraryClosedNow() || facilities.some((facility) => getFacilityBookingStatus(facility.id).status === "closed")) && (
+            {(isLibraryClosedNow() || filteredFacilities.some((facility) => getFacilityBookingStatus(facility.id).status === "closed")) && (
               <div className="mt-3 text-sm text-gray-500 bg-gray-50 rounded p-2 border border-gray-100">
                 If you request a booking outside school hours, the system will schedule it automatically and notify you of any changes.
               </div>
             )}
+
+            <div className="mt-3 inline-flex flex-wrap p-1 rounded-lg bg-gray-100 border border-gray-200">
+              <button
+                type="button"
+                onClick={() => setSelectedCampus("selga")}
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                  selectedCampus === "selga" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"
+                }`}
+              >
+                Main Campus ({campusCounts.selga})
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedCampus("bonifacio")}
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                  selectedCampus === "bonifacio" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"
+                }`}
+              >
+                Annex Campus ({campusCounts.bonifacio})
+              </button>
+            </div>
           </div>
 
-          {variant === "full" && process.env.NODE_ENV !== "production" && (
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-gray-600">Dev: Force Open</label>
-              <button
-                onClick={() => setDevForceOpen((previous) => !previous)}
-                className={`px-2 py-1 rounded text-sm ${devForceOpen ? "bg-green-600 text-white" : "bg-gray-100 text-gray-700"}`}
-              >
-                {devForceOpen ? "ON" : "OFF"}
-              </button>
+          {variant === "full" && (
+            <div className="flex flex-col items-start sm:items-end gap-2 w-full sm:w-auto">
+              {process.env.NODE_ENV !== "production" && (
+                <div className="flex flex-wrap items-center gap-2 w-full sm:justify-end">
+                  <label className="text-xs text-gray-600">Dev: Force Open</label>
+                  <button
+                    onClick={() => setDevForceOpen((previous) => !previous)}
+                    className={`px-2 py-1 rounded text-sm ${devForceOpen ? "bg-green-600 text-white" : "bg-gray-100 text-gray-700"}`}
+                  >
+                    {devForceOpen ? "ON" : "OFF"}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-4 sm:gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-4 sm:gap-6 transition-all duration-300">
           {(isFacilitiesLoading || isFacilitiesFetching)
             ? Array.from({ length: 6 }).map((_, index) => <SkeletonFacilityCard key={index} />)
             : filteredFacilities.map(renderFacilityCard)}
@@ -379,7 +439,9 @@ export function AvailableRoomsSection({
               <Calendar className="h-8 w-8 text-gray-400" />
             </div>
             <h4 className="text-lg font-medium text-gray-900 mb-2">No facilities available</h4>
-            <p className="text-gray-600">There are currently no facilities available for booking.</p>
+            <p className="text-gray-600">
+              {`No facilities found for the ${selectedCampus === "selga" ? "Main Campus" : "Annex Campus"}.`}
+            </p>
           </div>
         )}
 

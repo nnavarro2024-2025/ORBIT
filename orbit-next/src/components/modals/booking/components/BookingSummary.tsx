@@ -17,7 +17,6 @@ interface BookingSummaryProps {
   endTime?: Date;
   participants?: number;
   purpose?: string;
-  courseYearDept?: string;
   equipmentItems?: string[];
   equipmentOthers?: string;
   equipment?: Record<string, EquipmentStateValue>;
@@ -31,7 +30,6 @@ export function BookingSummary({
   endTime,
   participants,
   purpose,
-  courseYearDept,
   equipmentItems = [],
   equipmentOthers,
   equipment,
@@ -88,13 +86,6 @@ export function BookingSummary({
           <div className="flex justify-between">
             <span className="text-sm">Participants:</span>
             <span className="text-sm font-medium">{participants}</span>
-          </div>
-        )}
-
-        {courseYearDept && (
-          <div className="flex justify-between">
-            <span className="text-sm">Course & Year/Department:</span>
-            <span className="text-sm font-medium">{courseYearDept}</span>
           </div>
         )}
 

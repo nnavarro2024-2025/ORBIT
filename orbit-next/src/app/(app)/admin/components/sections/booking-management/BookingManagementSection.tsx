@@ -95,7 +95,6 @@ export function BookingManagementSection({
         getFacilityName(booking.facilityId),
         booking.purpose,
         booking.status,
-        booking.courseYearDept,
         String(booking.participants ?? ""),
       ]
         .filter(Boolean)
@@ -113,7 +112,6 @@ export function BookingManagementSection({
         getFacilityName(booking.facilityId),
         booking.purpose,
         booking.status,
-        booking.courseYearDept,
         String(booking.participants ?? ""),
       ]
         .filter(Boolean)

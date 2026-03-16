@@ -23,7 +23,6 @@ export interface BookingValidationData {
   endTime?: Date;
   facilityId?: string;
   purpose?: string;
-  courseYearDept?: string;
   participants?: number;
   allBookings?: any[];
   existingBookingId?: number;
@@ -152,14 +151,6 @@ export function validateBookingForm(
     validationErrors.push({
       title: 'Purpose Required',
       description: 'Please provide a purpose for your booking.',
-    });
-  }
-
-  // Validate course & year/department field
-  if (data.courseYearDept !== undefined && data.courseYearDept.trim().length === 0) {
-    validationErrors.push({
-      title: 'Course & Year/Department Required',
-      description: 'Please provide your course and year or department.',
     });
   }
 

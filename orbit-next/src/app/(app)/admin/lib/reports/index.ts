@@ -24,7 +24,7 @@ export function generateBookingWeeklyReport(
   wsData.push([`Total Bookings: ${bk.length}`]);
   wsData.push([]);
 
-  wsData.push(['Week', 'Date', 'Day', 'Time', 'Facility', 'User Email', 'Status', 'Participants', 'Course & Year', 'Purpose', 'Booking ID']);
+  wsData.push(['Week', 'Date', 'Day', 'Time', 'Facility', 'User Email', 'Status', 'Participants', 'Purpose', 'Booking ID']);
 
   const getWeekKey = (isoDateStr: string) => {
     const d = new Date(isoDateStr);
@@ -83,11 +83,10 @@ export function generateBookingWeeklyReport(
       }
 
       const participants = booking.participants || 0;
-      const courseYearDept = booking.courseYearDept || 'N/A';
       const purpose = (booking.purpose || 'N/A').substring(0, 200);
       const bookingId = booking.id || 'N/A';
 
-      wsData.push(['', dateStr, dayName, timeStr, facilityName, userEmail, status, participants, courseYearDept, purpose, bookingId]);
+      wsData.push(['', dateStr, dayName, timeStr, facilityName, userEmail, status, participants, purpose, bookingId]);
     }
   }
 

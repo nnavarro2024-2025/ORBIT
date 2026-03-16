@@ -85,11 +85,6 @@ export function HistoryTab({
                   </div>
                   <div className="flex-1 min-w-0">
                     <h4 className="font-semibold text-gray-900 text-sm break-words">{getFacilityName(b.facilityId)}</h4>
-                    {b.courseYearDept && (
-                      <p className="text-xs text-gray-500 mt-0.5">
-                        <span className="font-medium">Course/Year/Dept:</span> <span className="text-blue-700 font-semibold">{b.courseYearDept}</span>
-                      </p>
-                    )}
                   </div>
                 </div>
                 
@@ -133,11 +128,6 @@ export function HistoryTab({
                     </div>
                     <div>
                       <h4 className="font-semibold text-gray-900 text-sm">{getFacilityName(b.facilityId)}</h4>
-                      {b.courseYearDept && (
-                        <p className="text-xs text-gray-500 mt-0.5">
-                          <span className="font-medium">Course/Year/Dept:</span> <span className="text-blue-700 font-semibold">{b.courseYearDept}</span>
-                        </p>
-                      )}
                       <div className="flex items-center gap-2 mt-1.5">
                         <span className="text-xs text-gray-500">User:</span>
                         <span className="text-xs text-gray-700 font-medium">{getUserEmail(b.userId)}</span>
@@ -421,17 +411,6 @@ export function HistoryTab({
                 <h3 className="font-semibold text-sm text-muted-foreground mb-2">Participants</h3>
                 <p className="text-base">{selectedBooking.participants || 0}</p>
               </div>
-
-              {/* Course/Year/Dept */}
-              {selectedBooking.courseYearDept && (
-                <>
-                  <Separator />
-                  <div>
-                    <h3 className="font-semibold text-sm text-muted-foreground mb-2">Course/Year/Department</h3>
-                    <p className="text-base">{selectedBooking.courseYearDept}</p>
-                  </div>
-                </>
-              )}
 
               {/* Equipment Status */}
               {(() => {

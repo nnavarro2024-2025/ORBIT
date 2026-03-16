@@ -330,12 +330,6 @@ export function BookingPreviews({ upcomingBookings, recentBookings, scheduledCou
                 <h3 className="text-sm font-semibold text-gray-700 mb-1">Participants</h3>
                 <p className="text-base text-gray-900">{selectedBooking.participants || 0}</p>
               </div>
-              {selectedBooking.courseYearDept && (
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-1">Course/Year/Dept</h3>
-                  <p className="text-base text-gray-900">{selectedBooking.courseYearDept}</p>
-                </div>
-              )}
               {renderEquipmentSection(selectedBooking)}
             </div>
           )}

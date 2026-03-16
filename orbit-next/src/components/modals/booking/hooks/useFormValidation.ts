@@ -13,7 +13,6 @@ export interface FormValidationParams {
   startTime?: Date;
   endTime?: Date;
   purpose?: string;
-  courseYearDept?: string;
   participants?: number;
   facilities: Facility[];
   allBookings: any[];
@@ -34,7 +33,6 @@ export function useFormValidation(params: FormValidationParams) {
       startTime,
       endTime,
       purpose,
-      courseYearDept,
       participants,
       facilities,
       allBookings,
@@ -53,7 +51,6 @@ export function useFormValidation(params: FormValidationParams) {
         startTime,
         endTime,
         purpose: purpose || '',
-        courseYearDept: courseYearDept || '',
         participants: participants || 1,
         allBookings: allBookings || [],
         existingBookingId,
@@ -84,7 +81,6 @@ export function useFormValidation(params: FormValidationParams) {
     params.startTime?.getTime(),
     params.endTime?.getTime(),
     params.purpose,
-    params.courseYearDept,
     params.participants,
     params.userEmail,
     params.existingBookingId,

@@ -181,10 +181,11 @@ export async function enforceUserBookingConflicts(
     const allUserBookings = await storage.getFacilityBookingsByUser(userId);
     const nowMs = Date.now();
 
+    // "Active" means a booking currently in progress, not just any future booking.
     const activeBookings = (allUserBookings || []).filter((b: any) => {
       const st = b.startTime ? new Date(b.startTime).getTime() : 0;
       const et = b.endTime ? new Date(b.endTime).getTime() : 0;
-      return (b.status === "approved" || b.status === "pending") && et > nowMs;
+      return b.status === "approved" && st <= nowMs && et > nowMs;
     });
 
     if (activeBookings.length > 0 && !forceCancelConflicts) {

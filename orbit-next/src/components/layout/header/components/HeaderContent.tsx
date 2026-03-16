@@ -4,7 +4,10 @@
  * Main header content with logo, branding, and actions
  */
 
+import { useEffect, useState } from 'react';
 import { NotificationDropdown, UserProfileDropdown } from './';
+import { authenticatedFetch } from '@/lib/api';
+import { useToast } from '@/hooks/ui';
 
 interface HeaderContentProps {
   user: any;
@@ -37,6 +40,40 @@ export function HeaderContent({
   onHideAlert,
   onLogout,
 }: HeaderContentProps) {
+  const { toast } = useToast();
+  const [devRole, setDevRole] = useState<string>("student");
+  const [isDevRoleSaving, setIsDevRoleSaving] = useState(false);
+
+  useEffect(() => {
+    setDevRole(String(user?.role || "student"));
+  }, [user?.role]);
+
+  const handleDevRoleChange = async () => {
+    if (isDevRoleSaving || !devRole || devRole === String(user?.role || "")) return;
+
+    setIsDevRoleSaving(true);
+    try {
+      await authenticatedFetch("/dev/role", {
+        method: "PATCH",
+        body: JSON.stringify({ role: devRole }),
+      });
+
+      toast({
+        title: "Dev role updated",
+        description: `Role changed to ${devRole}. Refreshing...`,
+      });
+
+      window.location.reload();
+    } catch (error: any) {
+      toast({
+        title: "Failed to change role",
+        description: error?.message || "Unable to update role.",
+        variant: "destructive",
+      });
+      setIsDevRoleSaving(false);
+    }
+  };
+
   return (
     <div className="w-full px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
       {/* Logo and branding */}
@@ -80,6 +117,31 @@ export function HeaderContent({
               onMarkAsRead={onMarkAsRead}
               onHideAlert={onHideAlert}
             />
+            {process.env.NODE_ENV !== "production" && (
+              <div className="hidden md:flex items-center gap-2 border border-gray-200 rounded-lg px-2 py-1 bg-gray-50">
+                <label className="text-xs text-gray-600 whitespace-nowrap">Dev: Change Role</label>
+                <select
+                  className="px-2 py-1 rounded border border-gray-300 text-xs bg-white"
+                  value={devRole}
+                  onChange={(event) => setDevRole(event.target.value)}
+                  disabled={isDevRoleSaving}
+                >
+                  <option value="student">student</option>
+                  <option value="faculty">faculty</option>
+                  <option value="admin">admin</option>
+                  <option value="authorize_selga">authorize_selga</option>
+                  <option value="authorize_bonifacio">authorize_bonifacio</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={() => void handleDevRoleChange()}
+                  disabled={isDevRoleSaving || devRole === String(user?.role || "")}
+                  className="px-2 py-1 rounded text-xs bg-gray-900 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isDevRoleSaving ? "Saving..." : "Apply"}
+                </button>
+              </div>
+            )}
             <UserProfileDropdown
               user={user}
               onLogout={onLogout}

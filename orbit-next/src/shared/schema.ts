@@ -28,7 +28,10 @@ export const sessions = pgTable(
 export const sessionsExpireIdx = index("IDX_session_expire").on(sessions.expire);
 
 // User roles enum
-export const userRoleEnum = pgEnum("user_role", ["student", "faculty", "admin"]);
+export const userRoleEnum = pgEnum("user_role", ["student", "faculty", "admin", "authorize_selga", "authorize_bonifacio"]);
+
+// Campus enum
+export const campusEnum = pgEnum("campus", ["selga", "bonifacio"]);
 
 // User status enum
 export const userStatusEnum = pgEnum("user_status", ["active", "banned", "suspended"]);
@@ -76,6 +79,7 @@ export const facilities = pgTable("facilities", {
   isActive: boolean("is_active").default(true).notNull(),
   unavailableReason: text("unavailable_reason"),
   unavailableDates: jsonb("unavailable_dates").$type<Array<{ startDate: string; endDate: string; reason?: string }>>(),
+  campus: campusEnum("campus"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -87,7 +91,6 @@ export const facilityBookings = pgTable("facility_bookings", {
   startTime: timestamp("start_time").notNull(),
   endTime: timestamp("end_time").notNull(),
   purpose: text("purpose").notNull(),
-  courseYearDept: text("course_year_dept"),
   participants: integer("participants").notNull(),
   equipment: jsonb("equipment"),
   // Arrival confirmation: when an approved booking requires admin confirmation after start
@@ -235,7 +238,6 @@ export const insertFacilityBookingSchema = z.object({
   startTime: z.date(),
   endTime: z.date(),
   purpose: z.string(),
-  courseYearDept: z.string().optional(),
   participants: z.number().positive(),
   equipment: z.any().optional(),
   status: z.enum(["pending", "approved", "denied", "cancelled"]).default("pending"),

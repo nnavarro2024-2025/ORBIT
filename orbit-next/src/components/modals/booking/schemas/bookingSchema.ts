@@ -42,7 +42,6 @@ export function createEmptyEquipmentState(): Record<string, EquipmentStateValue>
  */
 export const FORM_LIMITS = {
   PURPOSE_MAX: 200,
-  COURSE_MAX: 100,
   OTHERS_MAX: 50,
   REMINDER_LEAD_MINUTES: 60,
 } as const;
@@ -61,7 +60,6 @@ export function createBookingSchema() {
         message: "An end date and time is required.",
       }),
       purpose: z.string().min(1, "Purpose is required"),
-      courseYearDept: z.string().min(1, "Course & Year/Department is required"),
       participants: z.number().min(1, "Number of participants is required"),
       reminderOptIn: z.boolean().optional(),
       reminderLeadMinutes: z.number().optional(),

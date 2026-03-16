@@ -88,12 +88,6 @@ export function CancellationModal({
                   hour12: true
                 })}
               </p>
-              {bookingToCancel.courseYearDept && (
-                <p>
-                  <span className="font-medium">Course & Year/Department:</span>{' '}
-                  {bookingToCancel.courseYearDept}
-                </p>
-              )}
             </div>
           </div>
 

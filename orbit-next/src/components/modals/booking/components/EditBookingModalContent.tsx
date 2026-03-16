@@ -47,7 +47,7 @@ export function EditBookingModalContent({
   onSave,
 }: EditBookingModalContentProps) {
   const { toast } = useToast();
-  const { PURPOSE_MAX, COURSE_MAX, OTHERS_MAX } = FORM_LIMITS;
+  const { PURPOSE_MAX, OTHERS_MAX } = FORM_LIMITS;
 
   // Derive initial state
   const initialState = useMemo(() => {
@@ -60,7 +60,6 @@ export function EditBookingModalContent({
 
   // Form state
   const [purpose, setPurpose] = useState(initialState.purpose);
-  const [courseYearDept, setCourseYearDept] = useState(initialState.courseYearDept);
   const [startTime, setStartTime] = useState<Date | undefined>(initialState.startTime);
   const [endTime, setEndTime] = useState<Date | undefined>(initialState.endTime);
   const [participants, setParticipants] = useState(initialState.participants);
@@ -96,7 +95,6 @@ export function EditBookingModalContent({
     startTime,
     endTime,
     purpose,
-    courseYearDept,
     participants,
     facilities,
     allBookings,
@@ -139,7 +137,6 @@ export function EditBookingModalContent({
       const payload = {
         ...booking,
         purpose,
-        courseYearDept,
         facilityId: parseInt(facilityId, 10),
         startTime: startTime!.toISOString(),
         endTime: endTime!.toISOString(),
@@ -174,33 +171,13 @@ export function EditBookingModalContent({
         </DialogHeader>
 
         <div className="space-y-6">
-          {/* Facility, Course/Department, and Participants */}
-          <div className="grid md:grid-cols-3 gap-4">
+          {/* Facility and Participants */}
+          <div className="grid md:grid-cols-2 gap-4">
             {/* Facility (Read-only) */}
             <div>
               <Label>Facility</Label>
               <div className="py-2 px-3 bg-gray-50 border rounded text-sm h-10 flex items-center">
                 {selectedFacility?.name || ""}
-              </div>
-            </div>
-
-            {/* Course/Department */}
-            <div>
-              <Label>
-                Course & Year/Department <span className="text-red-500">*</span>
-              </Label>
-              <div className="relative">
-                <Input
-                  value={courseYearDept}
-                  onChange={(e) => setCourseYearDept(e.target.value)}
-                  placeholder="e.g. BSIT 3rd Year"
-                  maxLength={COURSE_MAX}
-                  required
-                  className={courseYearDept.length >= COURSE_MAX ? 'border-red-500 focus:ring-red-500' : ''}
-                />
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">
-                  {courseYearDept.length}/{COURSE_MAX}
-                </div>
               </div>
             </div>
 
@@ -345,7 +322,6 @@ export function EditBookingModalContent({
             endTime={endTime}
             participants={participants}
             purpose={purpose}
-            courseYearDept={courseYearDept}
             equipment={equipmentState}
             equipmentOtherText={equipmentOtherText}
           />

@@ -46,7 +46,7 @@ export function BookingForm({
   validationWarnings,
   selectedFacility,
 }: BookingFormProps) {
-  const { PURPOSE_MAX, COURSE_MAX, OTHERS_MAX } = FORM_LIMITS;
+  const { PURPOSE_MAX, OTHERS_MAX } = FORM_LIMITS;
   const maxCapacity = selectedFacility ? getFacilityMaxCapacity(selectedFacility) : 8;
 
   // Get current date in YYYY-MM-DD format for min date
@@ -62,7 +62,7 @@ export function BookingForm({
         </DialogHeader>
 
         {/* Facility Selection */}
-        <div className="grid md:grid-cols-3 gap-4">
+        <div className="grid md:grid-cols-2 gap-4">
           <FormField
             control={form.control}
             name="facilityId"
@@ -83,34 +83,6 @@ export function BookingForm({
                     ))}
                   </SelectContent>
                 </Select>
-              </FormItem>
-            )}
-          />
-
-          {/* Course/Department */}
-          <FormField
-            control={form.control}
-            name="courseYearDept"
-            render={({ field }) => (
-              <FormItem>
-                <Label>
-                  Course & Year/Department <span className="text-red-500">*</span>
-                </Label>
-                <FormControl>
-                  <div className="relative">
-                    <Input
-                      value={field.value}
-                      onChange={field.onChange}
-                      placeholder="e.g. BSIT 3rd Year"
-                      maxLength={COURSE_MAX}
-                      required
-                      className={field.value?.length >= COURSE_MAX ? 'border-red-500 focus:ring-red-500' : ''}
-                    />
-                    <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">
-                      {field.value?.length || 0}/{COURSE_MAX}
-                    </div>
-                  </div>
-                </FormControl>
               </FormItem>
             )}
           />

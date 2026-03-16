@@ -1,6 +1,6 @@
 import { Dispatch, SetStateAction, useState } from "react";
 import { format } from "date-fns";
-import { Calendar, Eye } from "lucide-react";
+import { Calendar } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SkeletonListItem } from "@/components/ui/skeleton-presets";
@@ -83,6 +83,9 @@ export function BookingHistoryTab({
           const items = Array.isArray(eq.items) ? eq.items : [];
           const hasOthers = eq.others && String(eq.others).trim().length > 0;
           const status = getBookingStatus(booking);
+          const createdAtLabel = booking.createdAt
+            ? format(new Date(booking.createdAt), "MMM d, yyyy • h:mm a")
+            : null;
 
           return (
             <div
@@ -109,10 +112,8 @@ export function BookingHistoryTab({
                   </div>
                   <div className="flex-1 min-w-0">
                     <h4 className="font-semibold text-gray-900 text-sm leading-tight break-words">{getFacilityDisplay(booking.facilityId)}</h4>
-                    {booking.courseYearDept && (
-                      <p className="text-xs text-gray-500 mt-0.5 leading-tight break-words">
-                        <span className="font-medium">Course/Year/Dept:</span> <span className="text-blue-700 font-semibold">{booking.courseYearDept}</span>
-                      </p>
+                    {createdAtLabel && (
+                      <p className="text-xs text-gray-400 mt-1">Reserved on {createdAtLabel}</p>
                     )}
                   </div>
                   <span className={`px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0 ${
@@ -140,6 +141,13 @@ export function BookingHistoryTab({
                   </div>
                   <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800 whitespace-nowrap">{booking.participants || 0} ppl</span>
                 </div>
+
+                {booking.purpose && (
+                  <div className="mb-2 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Purpose</p>
+                    <p className="text-sm text-gray-700 whitespace-pre-wrap break-words">{booking.purpose}</p>
+                  </div>
+                )}
 
                 {items.length > 0 && (
                   <div className="bg-gradient-to-br from-gray-50 to-gray-100 border border-gray-200 rounded-lg p-2 mt-2">
@@ -204,14 +212,13 @@ export function BookingHistoryTab({
                     </div>
                     <div>
                       <h4 className="font-semibold text-gray-900 text-sm leading-tight">{getFacilityDisplay(booking.facilityId)}</h4>
-                      {booking.courseYearDept && (
-                        <p className="text-xs text-gray-500 mt-0.5 leading-tight">
-                          <span className="font-medium">Course/Year/Dept:</span> <span className="text-blue-700 font-semibold">{booking.courseYearDept}</span>
-                        </p>
-                      )}
                       <div className="flex items-center gap-2 mt-1">
+                        {createdAtLabel && (
+                          <span className="text-xs text-gray-400">Reserved on {createdAtLabel}</span>
+                        )}
                         {booking.userEmail && (
                           <>
+                            {createdAtLabel && <span className="text-gray-300">•</span>}
                             <span className="text-xs text-gray-500">User:</span>
                             <span className="text-xs font-semibold text-blue-700">{booking.userEmail}</span>
                             <span className="text-gray-300">•</span>
@@ -219,58 +226,13 @@ export function BookingHistoryTab({
                         )}
                         <span className="text-xs text-gray-500">Participants:</span>
                         <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">{booking.participants || 0}</span>
-                        {booking.purpose && (
-                          <>
-                            <span className="text-gray-300">•</span>
-                            <TooltipProvider>
-                              <Tooltip>
-                                <Popover>
-                                  <TooltipTrigger asChild>
-                                    <PopoverTrigger asChild>
-                                      <button
-                                        className="inline-flex items-center gap-1 text-xs text-pink-600 hover:text-pink-700 transition-colors"
-                                        aria-expanded={false}
-                                        onClick={(e) => e.stopPropagation()}
-                                      >
-                                        <Eye className="h-3.5 w-3.5" />
-                                        <span className="text-xs">Purpose</span>
-                                      </button>
-                                    </PopoverTrigger>
-                                  </TooltipTrigger>
-                                  <TooltipContent
-                                    side="top"
-                                    align="end"
-                                    className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden"
-                                  >
-                                    <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                                      <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
-                                    </div>
-                                    <div className="p-3">
-                                      <p className="text-sm text-gray-900 leading-5 break-words text-left">
-                                        {booking.purpose || "No purpose specified"}
-                                      </p>
-                                    </div>
-                                  </TooltipContent>
-                                  <PopoverContent
-                                    side="top"
-                                    align="end"
-                                    className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50"
-                                  >
-                                    <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                                      <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
-                                    </div>
-                                    <div className="p-3">
-                                      <p className="text-sm text-gray-900 leading-5 break-words text-left">
-                                        {booking.purpose || "No purpose specified"}
-                                      </p>
-                                    </div>
-                                  </PopoverContent>
-                                </Popover>
-                              </Tooltip>
-                            </TooltipProvider>
-                          </>
-                        )}
                       </div>
+                      {booking.purpose && (
+                        <div className="mt-3 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2 max-w-md">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Purpose</p>
+                          <p className="text-sm text-gray-700 whitespace-pre-wrap break-words">{booking.purpose}</p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -452,6 +414,13 @@ export function BookingHistoryTab({
                 </div>
               </div>
 
+              {selectedBooking.createdAt && (
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-700 mb-1">Reservation Created</h3>
+                  <p className="text-base text-gray-500">{format(new Date(selectedBooking.createdAt), "PPpp")}</p>
+                </div>
+              )}
+
               {/* Status */}
               <div>
                 <h3 className="text-sm font-semibold text-gray-700 mb-1">Status</h3>
@@ -473,14 +442,6 @@ export function BookingHistoryTab({
                 <h3 className="text-sm font-semibold text-gray-700 mb-1">Participants</h3>
                 <p className="text-base text-gray-900">{selectedBooking.participants || 0}</p>
               </div>
-
-              {/* Course/Year/Dept */}
-              {selectedBooking.courseYearDept && (
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-1">Course/Year/Dept</h3>
-                  <p className="text-base text-gray-900">{selectedBooking.courseYearDept}</p>
-                </div>
-              )}
 
               {/* Equipment */}
               {selectedBooking.equipment && (

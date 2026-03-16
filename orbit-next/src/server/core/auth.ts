@@ -29,6 +29,18 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
+const ADMIN_ROLES = ["admin", "authorize_selga", "authorize_bonifacio"] as const;
+
+export function isAdminRole(role: string | null | undefined): boolean {
+  return ADMIN_ROLES.includes(role as any);
+}
+
+export function getCampusForRole(role: string | null | undefined): "selga" | "bonifacio" | null {
+  if (role === "authorize_selga") return "selga";
+  if (role === "authorize_bonifacio") return "bonifacio";
+  return null;
+}
+
 export async function requireAdminUser(headers: Headers): Promise<AdminAuthSuccess | AuthFailure> {
   const base = await requireActiveUser(headers);
   if (!base.ok) {
@@ -36,7 +48,7 @@ export async function requireAdminUser(headers: Headers): Promise<AdminAuthSucce
   }
 
   const role = base.userRecord?.role;
-  if (role !== "admin") {
+  if (!isAdminRole(role)) {
     return {
       ok: false,
       response: NextResponse.json({ message: "Admin access required." }, { status: 403 }),

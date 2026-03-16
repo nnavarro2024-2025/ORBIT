@@ -107,11 +107,6 @@ export function DashboardRecentActivitySection({
                     </div>
                     <div className="flex-1 min-w-0">
                       <h4 className="font-semibold text-gray-900 text-sm leading-tight break-words">{getFacilityDisplay(booking.facilityId)}</h4>
-                      {booking.courseYearDept && (
-                        <p className="text-xs text-gray-500 mt-0.5 leading-tight break-words">
-                          <span className="font-medium">Course/Year/Dept:</span> <span className="text-blue-700 font-semibold">{booking.courseYearDept}</span>
-                        </p>
-                      )}
                       <div className="flex flex-wrap items-center gap-2 mt-1">
                         {booking.userEmail && (
                           <>
@@ -469,8 +464,8 @@ export function DashboardRecentActivitySection({
       <div className="flex flex-col gap-4 mb-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h3 className="text-xl font-semibold text-gray-900">My Booking</h3>
-            <p className="text-sm text-gray-600 mt-1">Your facility reservations history</p>
+            <h3 className="text-xl font-semibold text-gray-900">Activity Logs</h3>
+            <p className="text-sm text-gray-600 mt-1">Your latest facility reservations and notifications</p>
           </div>
           <button
             onClick={() => {
@@ -494,13 +489,13 @@ export function DashboardRecentActivitySection({
             onClick={() => onChangeTab("booking")}
             className={`flex-1 sm:flex-none px-3 py-2 rounded whitespace-nowrap text-sm transition-colors ${activityTab === "booking" ? "bg-pink-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}
           >
-            Booking History
+            Booking Logs
           </button>
           <button
             onClick={() => onChangeTab("notifications")}
             className={`flex-1 sm:flex-none px-3 py-2 rounded whitespace-nowrap text-sm transition-colors ${activityTab === "notifications" ? "bg-pink-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}
           >
-            Notification Logs
+            Notifications
           </button>
         </div>
       </div>

@@ -76,7 +76,6 @@ export function deriveInitialBookingState(booking: any) {
       startTime: undefined,
       endTime: undefined,
       purpose: '',
-      courseYearDept: '',
       participants: 1,
       equipmentState: createEmptyEquipmentState(),
       equipmentOtherText: '',
@@ -101,9 +100,9 @@ export function deriveInitialBookingState(booking: any) {
     startTime: booking.startTime ? new Date(booking.startTime) : undefined,
     endTime: booking.endTime ? new Date(booking.endTime) : undefined,
     purpose: booking.purpose || '',
-    courseYearDept: booking.courseYearDept || '',
     participants: booking.participants || 1,
     equipmentState,
     equipmentOtherText: equipmentOthers,
   };
 }
+

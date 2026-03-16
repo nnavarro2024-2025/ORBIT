@@ -450,7 +450,6 @@ export class DatabaseStorage implements IStorage {
         startTime: facilityBookings.startTime,
         endTime: facilityBookings.endTime,
         purpose: facilityBookings.purpose,
-        courseYearDept: facilityBookings.courseYearDept,
         participants: facilityBookings.participants,
         equipment: facilityBookings.equipment,
         arrivalConfirmationDeadline: facilityBookings.arrivalConfirmationDeadline,

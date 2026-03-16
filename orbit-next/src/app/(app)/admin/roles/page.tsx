@@ -10,11 +10,17 @@ import { useLegacyLocation } from "@/lib/utils";
 type UserRow = {
   id: string;
   email: string;
-  role: "student" | "faculty" | "admin";
+  role: "student" | "faculty" | "admin" | "authorize_selga" | "authorize_bonifacio";
   status: string;
 };
 
-const ROLE_OPTIONS: Array<UserRow["role"]> = ["student", "faculty", "admin"];
+const ROLE_OPTIONS: Array<UserRow["role"]> = [
+  "student",
+  "faculty",
+  "admin",
+  "authorize_selga",
+  "authorize_bonifacio",
+];
 
 export const dynamic = "force-dynamic";
 

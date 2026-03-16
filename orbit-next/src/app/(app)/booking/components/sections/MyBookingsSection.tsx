@@ -270,46 +270,6 @@ export function MyBookingsSection({
                   )}
                 </div>
 
-                <div className="bg-gray-50 rounded-lg p-3 sm:p-4 mt-2">
-                  <p className="text-xs sm:text-sm font-medium text-gray-600 mb-1">Course/Year/Department</p>
-                  {booking.courseYearDept ? (
-                    <TooltipProvider>
-                      <Tooltip>
-                        <Popover>
-                          <TooltipTrigger asChild>
-                            <PopoverTrigger asChild>
-                              <div className="flex items-center gap-2 cursor-help">
-                                <Eye className="h-3 w-3 sm:h-4 sm:w-4 text-pink-600 flex-shrink-0" />
-                                <p className="text-gray-900 text-xs sm:text-sm">
-                                  <span className="font-medium">View details</span>
-                                </p>
-                              </div>
-                            </PopoverTrigger>
-                          </TooltipTrigger>
-                          <TooltipContent side="top" className="max-w-[90vw] sm:max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
-                            <div className="bg-gray-50 px-3 sm:px-4 py-2 border-b border-gray-200">
-                              <p className="font-medium text-xs sm:text-sm text-gray-800">Course/Year/Department</p>
-                            </div>
-                            <div className="p-3 max-h-48 overflow-y-auto">
-                              <p className="text-xs sm:text-sm text-gray-900 leading-5 break-words font-normal">{booking.courseYearDept}</p>
-                            </div>
-                          </TooltipContent>
-                          <PopoverContent side="top" className="max-w-[90vw] sm:max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50 origin-top-left">
-                            <div className="bg-gray-50 px-3 sm:px-4 py-2 border-b border-gray-200">
-                              <p className="font-medium text-xs sm:text-sm text-gray-800">Course/Year/Department</p>
-                            </div>
-                            <div className="p-3 max-h-48 overflow-y-auto">
-                              <p className="text-xs sm:text-sm text-gray-900 leading-5 break-words font-normal">{booking.courseYearDept}</p>
-                            </div>
-                          </PopoverContent>
-                        </Popover>
-                      </Tooltip>
-                    </TooltipProvider>
-                  ) : (
-                    <p className="text-gray-900 text-xs sm:text-sm break-words">No course/year/department specified</p>
-                  )}
-                </div>
-
                 <div className="bg-gray-50 rounded-lg p-3 sm:p-4">
                   {booking.equipment && (hasOthers || items.length > 0) ? (
                     <div className="bg-white rounded-lg p-2.5 border border-gray-200 h-[120px] flex flex-col">

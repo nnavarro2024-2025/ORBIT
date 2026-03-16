@@ -38,7 +38,7 @@ export async function PUT(
 
     const requesterId = authResult.user.id;
     const requesterRecord = authResult.userRecord ?? (await storage.getUser(requesterId));
-    const isAdmin = requesterRecord?.role === "admin";
+    const isAdmin = ["admin", "authorize_selga", "authorize_bonifacio"].includes(requesterRecord?.role ?? "");
 
     if (!isAdmin && String(existingBooking.userId) !== String(requesterId)) {
       return NextResponse.json({ message: "You are not allowed to update this booking." }, { status: 403 });
