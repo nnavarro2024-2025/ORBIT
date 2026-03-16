@@ -9,7 +9,7 @@ import { useAuth } from "@/hooks/data";
 import { useLegacyLocation } from "@/lib/utils";
 
 function HomeContent() {
-  const { isAuthenticated, user, isLoading: authLoading } = useAuth();
+  const { isAuthenticated, user, isLoading: authLoading, requiresPasswordSetup } = useAuth();
   const [, setLocation] = useLegacyLocation();
   const processedOAuthRef = useRef(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
@@ -41,13 +41,13 @@ function HomeContent() {
       return;
     }
     try {
-      const target = user.role === 'admin' ? '/admin' : '/booking';
+      const target = requiresPasswordSetup ? '/create-password' : user.role === 'admin' ? '/admin' : '/booking';
       setLocation(target);
     } catch (error) {
       console.error('Redirect after auth check failed:', error);
       setIsRedirecting(false);
     }
-  }, [isAuthenticated, user, authLoading, setLocation, isRedirecting]);
+  }, [isAuthenticated, user, authLoading, requiresPasswordSetup, setLocation, isRedirecting]);
 
   return (
     <>

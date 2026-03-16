@@ -29,7 +29,7 @@ function AdminDashboardContent() {
     isExportingPdf, setIsExportingPdf, setUnavailableDatesByFacility,
   } = state as any;
 
-  const { user: authUser } = useAuth();
+  const { user: authUser, isLoading: authLoading, requiresPasswordSetup } = useAuth();
   const [location, setLocation] = useLegacyLocation();
 
   useAdminNavigation({ location, setSelectedView, setSecurityTab });
@@ -44,10 +44,24 @@ function AdminDashboardContent() {
   });
 
   const queryClient = useQueryClient();
-  const { user: authUserFull, isLoading: authLoading } = useAuth();
-  const effectiveUser = authUserFull || authUser;
+  const effectiveUser = authUser;
   const authReady = !!effectiveUser && !authLoading;
   const isAdmin = authReady && effectiveUser.role === 'admin';
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!effectiveUser) {
+      setLocation('/login');
+      return;
+    }
+    if (requiresPasswordSetup) {
+      setLocation('/create-password');
+      return;
+    }
+    if (effectiveUser.role !== 'admin') {
+      setLocation('/booking');
+    }
+  }, [authLoading, effectiveUser, requiresPasswordSetup, setLocation]);
 
   const queries = useAdminQueries({ isAdmin });
   const { usersData: usersDataQ, activitiesData, facilitiesData, adminBookingsData, currentUserData, reportSchedulesData } = queries as any;

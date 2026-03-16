@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { requireActiveUser } from "@/server/core";
 import { storage } from "@/server/core";
+import { hasPasswordProvider, inferRoleFromUicEmail } from "@/server/core";
 import { isBuildTime } from "@/server/utils";
 
 export const runtime = "nodejs";
@@ -67,13 +68,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const inferredRole = inferRoleFromUicEmail(email);
     const userRecord = {
       id: userId,
       email: supabaseUser.email ?? "",
       firstName: supabaseUser.user_metadata?.first_name ?? "",
       lastName: supabaseUser.user_metadata?.last_name ?? "",
       profileImageUrl: supabaseUser.user_metadata?.avatar_url ?? "",
-      role: existingUser?.role ?? "student",
+      role: existingUser?.role ?? inferredRole,
       status: existingUser?.status ?? "active",
       createdAt: existingUser?.createdAt ?? new Date(supabaseUser.created_at ?? Date.now()),
       updatedAt: new Date(),
@@ -90,7 +92,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ user: syncedUser }, { status: 200 });
+    return NextResponse.json(
+      {
+        user: syncedUser,
+        requiresPasswordSetup: !hasPasswordProvider(supabaseUser),
+      },
+      { status: 200 },
+    );
   } catch (error: any) {
     console.error("[auth/sync] Unexpected error syncing user:", error?.message || error);
     return NextResponse.json({ 

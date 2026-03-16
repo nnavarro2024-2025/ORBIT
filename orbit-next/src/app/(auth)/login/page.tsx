@@ -1,9 +1,7 @@
 "use client";
 
-export const dynamic = 'force-dynamic';
-
 import { useState, useEffect, useRef, Suspense } from "react";
-import { Check, Mail, Loader2 } from "lucide-react";
+import { Check, CheckCircle2, Eye, EyeOff, Mail, Loader2 } from "lucide-react";
 import { supabase } from "@/lib/config";
 import { useAuth } from "@/hooks/data";
 import { useLegacyLocation } from "@/lib/utils";
@@ -14,12 +12,33 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 
 function LoginInner() {
-  const { isAuthenticated, user, isLoading: authLoading } = useAuth();
+  const { isAuthenticated, user, isLoading: authLoading, requiresPasswordSetup } = useAuth();
   const [, setLocation] = useLegacyLocation();
+  const hasNavigatedRef = useRef(false);
+
+  const hasRecentPasswordSetupCompletion = () => {
+    try {
+      const raw = sessionStorage.getItem("orbit:password_setup_completed_until");
+      if (!raw) return false;
+      const until = Number(raw);
+      if (!Number.isFinite(until)) {
+        sessionStorage.removeItem("orbit:password_setup_completed_until");
+        return false;
+      }
+      if (Date.now() > until) {
+        sessionStorage.removeItem("orbit:password_setup_completed_until");
+        return false;
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  };
 
   // Remove username, use email only
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [redirecting, setRedirecting] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -31,8 +50,19 @@ function LoginInner() {
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [isOAuthCallback, setIsOAuthCallback] = useState(false);
+  const [passwordCreatedMsg, setPasswordCreatedMsg] = useState("");
 
-  // When the confirm modal opens, focus the Confirm button so Enter will activate it immediately
+  // One-time success toast after password setup redirect
+  useEffect(() => {
+    try {
+      const msg = sessionStorage.getItem('orbit:password_created_msg');
+      if (msg) {
+        sessionStorage.removeItem('orbit:password_created_msg');
+        setPasswordCreatedMsg(msg);
+        setTimeout(() => setPasswordCreatedMsg(""), 5000);
+      }
+    } catch (_) {}
+  }, []);
 
   useEffect(() => {
     try {
@@ -91,6 +121,7 @@ function LoginInner() {
     // If we previously detected a domain block, do not redirect even if the
     // user becomes authenticated (we want the user to explicitly dismiss the modal).
     if (domainBlockedRef.current) return;
+    if (hasNavigatedRef.current) return;
 
     // Wait for auth to finish loading, then redirect authenticated users
     if (authLoading) return;
@@ -98,9 +129,16 @@ function LoginInner() {
     if (isAuthenticated && user) {
       setRedirecting(true);
       try {
-        if (user.role === "admin") {
+        const canBypassPasswordSetup = hasRecentPasswordSetupCompletion();
+
+        if (requiresPasswordSetup && !canBypassPasswordSetup) {
+          hasNavigatedRef.current = true;
+          setLocation("/create-password");
+        } else if (user.role === "admin") {
+          hasNavigatedRef.current = true;
           setLocation("/admin");
         } else {
+          hasNavigatedRef.current = true;
           setLocation("/booking");
         }
       } catch (e) {
@@ -109,7 +147,7 @@ function LoginInner() {
         setRedirecting(false);
       }
     }
-  }, [isAuthenticated, user, authLoading, setLocation]);
+  }, [isAuthenticated, user, authLoading, requiresPasswordSetup, setLocation]);
 
   const signInWithGoogle = async () => {
     setLoading(true);
@@ -160,6 +198,26 @@ function LoginInner() {
 
   return (
     <>
+      {passwordCreatedMsg && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center pointer-events-none">
+          <div
+            className="mt-6 flex items-start gap-3 bg-white border border-green-200 shadow-2xl rounded-2xl px-5 py-4 max-w-sm w-full mx-4 pointer-events-auto"
+            style={{ animation: "slideDownFadeIn 0.35s cubic-bezier(0.16,1,0.3,1) both" }}
+          >
+            <CheckCircle2 className="h-5 w-5 text-green-500 mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-gray-900">Password Created</p>
+              <p className="text-sm text-gray-600 mt-0.5">{passwordCreatedMsg}</p>
+            </div>
+          </div>
+          <style>{`
+            @keyframes slideDownFadeIn {
+              from { opacity: 0; transform: translateY(-18px); }
+              to   { opacity: 1; transform: translateY(0); }
+            }
+          `}</style>
+        </div>
+      )}
       {(redirecting || (isOAuthCallback && authLoading)) && (
         <div className="fixed inset-0 bg-white z-50 flex items-center justify-center">
           <div className="w-full max-w-md p-6">
@@ -266,16 +324,26 @@ function LoginInner() {
 
                 <div className="space-y-2">
                   <label className="block text-sm font-medium text-gray-700">Password</label>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-white border border-gray-200 rounded-lg text-gray-900 placeholder-gray-400 focus:border-pink-600 focus:outline-none transition-all duration-200 shadow-sm"
-                    placeholder="Enter your password"
-                    required
-                    disabled={loading || redirecting}
-                    autoComplete="new-password"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full px-4 py-2.5 pr-11 bg-white border border-gray-200 rounded-lg text-gray-900 placeholder-gray-400 focus:border-pink-600 focus:outline-none transition-all duration-200 shadow-sm"
+                      placeholder="Enter your password"
+                      required
+                      disabled={loading || redirecting}
+                      autoComplete="new-password"
+                    />
+                    <button
+                      type="button"
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      className="absolute inset-y-0 right-0 px-3 text-gray-500 hover:text-gray-700"
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
                 </div>
                 <button
                   type="submit"

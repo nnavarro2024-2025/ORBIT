@@ -41,6 +41,7 @@ export function makeSidebar(isAdmin: boolean, lastItem?: RawItem, forPage: 'admi
       { id: 'booking-management', label: 'Facility Booking Management', icon: Calendar },
       { id: 'report-schedules', label: 'Report Schedules', icon: CalendarClock },
       { id: 'user-management', label: 'User Management', icon: Users },
+      { id: 'role-management', label: 'Role Management', icon: Shield },
       { id: 'security', label: 'Admin System Alerts', icon: Shield },
       { id: 'faq-management', label: 'FAQ Management', icon: HelpCircle },
       { id: 'admin-activity-logs', label: 'Admin Activity Logs', icon: BarChart3 },

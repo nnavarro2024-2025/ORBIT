@@ -106,7 +106,8 @@ export function useAdminQueries({ isAdmin }: UseAdminQueriesProps): UseAdminQuer
     queryKey: ['/api/auth/user'],
     queryFn: async () => {
       const res = await apiRequest('GET', '/api/auth/user');
-      return res.json();
+      const payload = await res.json();
+      return payload?.user ?? payload;
     },
     enabled: isAdmin,
     ...commonQueryOpts,

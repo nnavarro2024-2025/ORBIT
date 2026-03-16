@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireUser } from "@/server/core";
 import { storage } from "@/server/core";
 import { supabaseAdmin } from "@/server/config";
+import { hasPasswordProvider, inferRoleFromUicEmail } from "@/server/core";
 
 export async function GET(request: NextRequest) {
   const authResult = await requireUser(request.headers);
@@ -25,13 +26,14 @@ export async function GET(request: NextRequest) {
     const supabaseUser = adminUser.user;
 
     const existingUser = await storage.getUser(supabaseUser.id);
+    const inferredRole = inferRoleFromUicEmail(supabaseUser.email ?? "");
     const userRecord = {
       id: supabaseUser.id,
       email: supabaseUser.email ?? "",
       firstName: supabaseUser.user_metadata?.first_name ?? "",
       lastName: supabaseUser.user_metadata?.last_name ?? "",
       profileImageUrl: supabaseUser.user_metadata?.avatar_url ?? "",
-      role: existingUser?.role ?? "student",
+      role: existingUser?.role ?? inferredRole,
       status: existingUser?.status ?? "active",
       createdAt: existingUser?.createdAt ?? new Date(supabaseUser.created_at ?? Date.now()),
       updatedAt: new Date(),
@@ -39,7 +41,13 @@ export async function GET(request: NextRequest) {
 
     const syncedUser = await storage.upsertUser(userRecord);
 
-    return NextResponse.json(syncedUser, { status: 200 });
+    return NextResponse.json(
+      {
+        user: syncedUser,
+        requiresPasswordSetup: !hasPasswordProvider(supabaseUser),
+      },
+      { status: 200 },
+    );
   } catch (error) {
     console.error("[auth/user] Error fetching or syncing user data:", error);
     return NextResponse.json({ message: "Failed to fetch user" }, { status: 500 });

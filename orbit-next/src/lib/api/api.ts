@@ -29,6 +29,101 @@ export function resolveApiUrl(path: string) {
   return relativePath;
 }
 
+function shouldSetJsonContentType(body: RequestInit["body"]): boolean {
+  if (body == null) {
+    return false;
+  }
+
+  if (typeof FormData !== "undefined" && body instanceof FormData) {
+    return false;
+  }
+
+  if (typeof URLSearchParams !== "undefined" && body instanceof URLSearchParams) {
+    return false;
+  }
+
+  if (typeof Blob !== "undefined" && body instanceof Blob) {
+    return false;
+  }
+
+  return true;
+}
+
+export async function getAuthenticatedSession(forceRefresh = false) {
+  if (!forceRefresh) {
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
+
+    if (sessionError) {
+      throw new Error(`Authentication error: ${sessionError.message}`);
+    }
+
+    if (session) {
+      return session;
+    }
+  }
+
+  try {
+    const {
+      data: { session: refreshedSession },
+      error: refreshError,
+    } = await supabase.auth.refreshSession();
+
+    if (refreshError) {
+      throw refreshError;
+    }
+
+    return refreshedSession ?? null;
+  } catch (refreshErr) {
+    console.warn("[AUTH] Session refresh failed", refreshErr);
+    return null;
+  }
+}
+
+export async function fetchWithAuthenticatedSession(url: string, options: RequestInit = {}) {
+  const apiUrl = resolveApiUrl(url);
+  const activeSession = await getAuthenticatedSession();
+
+  if (!activeSession) {
+    await supabase.auth.signOut();
+    throw new Error("Session expired. Please log in to continue.");
+  }
+
+  const sendRequest = async (accessToken: string) => {
+    const headers = new Headers(options.headers);
+    headers.set("Authorization", `Bearer ${accessToken}`);
+
+    if (!headers.has("Content-Type") && shouldSetJsonContentType(options.body)) {
+      headers.set("Content-Type", "application/json");
+    }
+
+    return fetch(apiUrl, {
+      ...options,
+      headers,
+      credentials: options.credentials ?? "include",
+    });
+  };
+
+  let response = await sendRequest(activeSession.access_token);
+
+  if (response.status === 401) {
+    console.warn("[AUTH] Request returned 401. Refreshing session and retrying once.");
+    const refreshedSession = await getAuthenticatedSession(true);
+
+    if (refreshedSession?.access_token) {
+      response = await sendRequest(refreshedSession.access_token);
+    }
+
+    if (response.status === 401) {
+      await supabase.auth.signOut();
+    }
+  }
+
+  return response;
+}
+
 /**
  * A wrapper for the native `fetch` function that automatically adds the
  * Supabase authentication token to the request headers.
@@ -39,55 +134,8 @@ export function resolveApiUrl(path: string) {
  * @throws An error if the network response is not ok.
  */
 export async function authenticatedFetch(url: string, options: RequestInit = {}) {
-  const {
-    data: { session },
-    error: sessionError,
-  } = await supabase.auth.getSession();
-
-  if (sessionError) {
-    // This handles potential errors from Supabase itself during the session fetch.
-    throw new Error(`Authentication error: ${sessionError.message}`);
-  }
-
-  let activeSession = session;
-
-  if (!activeSession) {
-    // Attempt a silent refresh if the session is unexpectedly missing. This covers cases where
-    // Supabase has a valid refresh token but has not yet materialized an access token in memory.
-    try {
-      const {
-        data: { session: refreshedSession },
-        error: refreshError,
-      } = await supabase.auth.refreshSession();
-
-      if (refreshError) {
-        throw refreshError;
-      }
-
-      activeSession = refreshedSession ?? null;
-    } catch (refreshErr) {
-      console.warn("[AUTH] Silent session refresh failed", refreshErr);
-    }
-  }
-
-  if (!activeSession) {
-    // Fallback to signing out so application state stays consistent instead of throwing immediately.
-    await supabase.auth.signOut();
-    throw new Error("Session expired. Please log in to continue.");
-  }
-
-  // It's good practice to merge headers rather than overwrite them
-  const headers = new Headers(options.headers);
-  // We know the session exists here, so we can confidently set the header.
-  headers.set("Authorization", `Bearer ${activeSession.access_token}`);
-  headers.set("Content-Type", "application/json");
-
   const apiUrl = resolveApiUrl(url);
-
-  const response = await fetch(apiUrl, {
-    ...options,
-    headers,
-  });
+  const response = await fetchWithAuthenticatedSession(url, options);
 
   if (!response.ok) {
     // Helpful diagnostics for 404/502 when backend or proxy isn't available
@@ -98,40 +146,7 @@ export async function authenticatedFetch(url: string, options: RequestInit = {})
       console.error(`API 502 Bad Gateway at ${apiUrl} - proxy failed to reach backend.`);
     }
     if (response.status === 401) {
-      console.error("🚨 401 Unauthorized received. Attempting silent session refresh...");
-      console.error("401 Response:", response);
-
-      // Try to get a refreshed session from Supabase client and retry once if token changed
-      try {
-        const {
-          data: { session: refreshedSession },
-        } = await supabase.auth.getSession();
-
-        const refreshedToken = refreshedSession?.access_token;
-        const originalToken = activeSession.access_token;
-
-        if (refreshedToken && refreshedToken !== originalToken) {
-          console.log('[AUTH] Token refreshed locally, retrying request once');
-          // Retry the original request with the refreshed token
-          const retryHeaders = new Headers(options.headers);
-          retryHeaders.set('Authorization', `Bearer ${refreshedToken}`);
-          retryHeaders.set('Content-Type', 'application/json');
-
-          const retryResp = await fetch(apiUrl, {
-            ...options,
-            headers: retryHeaders,
-          });
-
-          if (retryResp.ok) return retryResp.json().catch(() => undefined);
-          // If retry failed, fall through to sign-out below
-        }
-      } catch (e) {
-        console.warn('[AUTH] Silent refresh attempt failed', e);
-      }
-
-      // Final fallback: sign out the client to force a fresh login
-      await supabase.auth.signOut();
-      // window.location.href = "/login"; // Optionally redirect to login
+      console.warn(`[AUTH] Unauthorized response from ${apiUrl} after retry — session may have expired or user logged out.`);
     }
     
     if (response.status === 403) {

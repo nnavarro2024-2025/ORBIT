@@ -59,6 +59,11 @@ export function useSidebarClickHandler({
       }
       return;
     }
+
+    if (id === 'role-management') {
+      setLocation('/admin/roles');
+      return;
+    }
     
     // Handle admin activity logs
     if (id === 'admin-activity-logs') {

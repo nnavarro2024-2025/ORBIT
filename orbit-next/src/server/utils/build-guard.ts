@@ -37,7 +37,6 @@ export const isBuildTime = (): boolean => {
     return true;
   }
   
-  console.log('[BUILD-GUARD] Not in build phase');
   return false;
 };
 

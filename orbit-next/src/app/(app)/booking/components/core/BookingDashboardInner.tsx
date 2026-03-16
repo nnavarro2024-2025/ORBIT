@@ -89,10 +89,21 @@ import { CancellationModal } from '../modals/CancellationModal';
 
 export function BookingDashboardInner() {
   // Core hooks
-  const { user, isLoading: authLoading } = useAuth();
+  const { user, isLoading: authLoading, requiresPasswordSetup } = useAuth();
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [location, setLocation] = useLegacyLocation();
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!user) {
+      setLocation("/login");
+      return;
+    }
+    if (requiresPasswordSetup) {
+      setLocation("/create-password");
+    }
+  }, [authLoading, user, requiresPasswordSetup, setLocation]);
   
   // State management
   const bookingModalState = useBookingModalState();
@@ -272,6 +283,14 @@ export function BookingDashboardInner() {
   // Check if initial loading
   const isInitialLoading = (isFacilitiesLoading && facilities.length === 0) || 
                           (isUserBookingsLoading && userBookings.length === 0);
+
+  if (!user || requiresPasswordSetup) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center text-sm text-muted-foreground">
+        Redirecting...
+      </div>
+    );
+  }
 
   if (isInitialLoading) {
     return (

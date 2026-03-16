@@ -26,6 +26,7 @@ export function useSidebarItems(authUser: User, isNavigatingToBooking: boolean) 
         { id: 'overview', label: 'Dashboard', icon: BarChart3 },
         { id: 'booking-management', label: 'Facility Booking Management', icon: Calendar },
         { id: 'user-management', label: 'User Management', icon: Users },
+        { id: 'role-management', label: 'Role Management', icon: Users },
         { id: 'security', label: 'System Alerts', icon: Shield },
         { id: 'faq-management', label: 'FAQ Management', icon: HelpCircle },
         { id: 'admin-activity-logs', label: 'Activity Logs', icon: BarChart3 },

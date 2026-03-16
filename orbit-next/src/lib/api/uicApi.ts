@@ -9,21 +9,26 @@ const BASE_URL = process.env.NEXT_PUBLIC_UIC_API_BASE_URL ?? "";
 const API_CLIENT_ID = process.env.NEXT_PUBLIC_UIC_API_CLIENT_ID ?? "";
 const API_CLIENT_SECRET = process.env.NEXT_PUBLIC_UIC_API_CLIENT_SECRET ?? "";
 
-// Informative warnings and safety: the client must not send a secret.
-if (!BASE_URL || !API_CLIENT_ID) {
-  console.warn(
-    "UIC API env vars (NEXT_PUBLIC_UIC_API_BASE_URL, NEXT_PUBLIC_UIC_API_CLIENT_ID) are not defined in the environment. " +
-      "Define them in your .env file and restart the dev server."
-  );
-}
+let hasWarnedMissingUicConfig = false;
+let hasWarnedExposedClientSecret = false;
 
-if (API_CLIENT_SECRET) {
-  // Do not use the secret in browser requests — log stronger guidance.
-  console.warn(
-    "WARNING: NEXT_PUBLIC_UIC_API_CLIENT_SECRET is set. Client secrets MUST NOT be exposed to browsers.\n" +
-      "Move that value to a server env variable (e.g. UIC_API_CLIENT_SECRET) and create a server-side proxy endpoint.\n" +
-      "The client will ignore the secret header to avoid accidental leakage."
-  );
+function warnIfExternalUicConfigIsIncomplete() {
+  if (BASE_URL && !API_CLIENT_ID && !hasWarnedMissingUicConfig) {
+    console.warn(
+      "UIC API base URL is configured, but NEXT_PUBLIC_UIC_API_CLIENT_ID is missing. " +
+        "Define it in your .env file and restart the dev server if you intend to call the external UIC API directly."
+    );
+    hasWarnedMissingUicConfig = true;
+  }
+
+  if (API_CLIENT_SECRET && !hasWarnedExposedClientSecret) {
+    console.warn(
+      "WARNING: NEXT_PUBLIC_UIC_API_CLIENT_SECRET is set. Client secrets MUST NOT be exposed to browsers.\n" +
+        "Move that value to a server env variable (e.g. UIC_API_CLIENT_SECRET) and create a server-side proxy endpoint.\n" +
+        "The client will ignore the secret header to avoid accidental leakage."
+    );
+    hasWarnedExposedClientSecret = true;
+  }
 }
 
 // --- API Response Types ---
@@ -81,6 +86,8 @@ async function uicApiFetch<T = any>(
   endpoint: string,
   options: FetchOptions = {}
 ): Promise<T> {
+  warnIfExternalUicConfigIsIncomplete();
+
   // Construct the full URL. Preserve BASE_URL path segments.
   const base = BASE_URL ? BASE_URL.replace(/\/$/, "") : window.location.origin.replace(/\/$/, "");
   const path = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;

@@ -1,37 +1,20 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 import { supabase } from "../config";
-import { resolveApiUrl } from "./api";
+import { fetchWithAuthenticatedSession, resolveApiUrl } from "./api";
 
 export async function apiRequest(
   method: string,
   url: string,
   data?: unknown
 ): Promise<Response> {
-  const { data: { session } } = await supabase.auth.getSession();
-  const token = session?.access_token;
-  const headers: Record<string, string> = {};
-
-  if (data) {
-    headers["Content-Type"] = "application/json";
-  }
-
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-
   const requestUrl = resolveApiUrl(url);
-
-  const res = await fetch(requestUrl, {
+  const res = await fetchWithAuthenticatedSession(url, {
     method,
-    headers,
     body: data ? JSON.stringify(data) : undefined,
-    credentials: "include",
   });
 
   if (res.status === 401) {
-    console.error("🚨 401 Unauthorized received in apiRequest. Session expired. NOT redirecting to login for debugging.");
-    await supabase.auth.signOut();
-    // window.location.href = "/login"; // Temporarily commented out for debugging
+    console.warn(`[AUTH] Unauthorized response from ${requestUrl} after retry — session may have expired or user logged out.`);
     throw new Error("Session expired or unauthorized. Redirecting to login.");
   }
 
@@ -66,26 +49,13 @@ export async function apiRequest(
 
 export function getQueryFn<T>(): QueryFunction<T> {
   return async ({ queryKey }) => {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-    const headers: Record<string, string> = {};
-
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-
     const path = queryKey.join("/");
     const normalizedPath = path.startsWith("/") ? path : `/${path}`;
     const url = resolveApiUrl(normalizedPath);
 
-    const res = await fetch(url, {
-      headers,
-      credentials: "include",
-    });
+    const res = await fetchWithAuthenticatedSession(normalizedPath);
 
     if (res.status === 401) {
-      await supabase.auth.signOut();
-      // window.location.href = "/login"; // Temporarily commented out for debugging
       throw new Error("Session expired or unauthorized. Redirecting to login.");
     }
 

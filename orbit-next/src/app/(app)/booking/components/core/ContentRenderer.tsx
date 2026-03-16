@@ -5,6 +5,7 @@ import { ActivityLogsSection } from '../sections/activity-logs/ActivityLogsSecti
 import { AvailableRoomsSection } from '../sections/AvailableRoomsSection';
 import { DashboardStatsSection } from '../dashboard/DashboardStatsSection';
 import { DashboardRecentActivitySection } from '../dashboard/DashboardRecentActivitySection';
+import { PhilippineTimeCard } from '../dashboard/PhilippineTimeCard';
 
 interface ContentRendererProps {
   selectedView: string;
@@ -181,6 +182,8 @@ export function ContentRenderer(props: ContentRendererProps) {
     default:
       return (
         <>
+          <PhilippineTimeCard />
+
           <DashboardStatsSection
             stats={props.stats}
             isLoading={props.isUserBookingsLoading || props.isUserBookingsFetching}
