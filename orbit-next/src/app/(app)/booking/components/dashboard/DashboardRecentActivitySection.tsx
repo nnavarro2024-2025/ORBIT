@@ -469,8 +469,8 @@ export function DashboardRecentActivitySection({
       <div className="flex flex-col gap-4 mb-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h3 className="text-xl font-semibold text-gray-900">Recent Booking</h3>
-            <p className="text-sm text-gray-600 mt-1">Your latest facility reservations</p>
+            <h3 className="text-xl font-semibold text-gray-900">My Booking</h3>
+            <p className="text-sm text-gray-600 mt-1">Your facility reservations history</p>
           </div>
           <button
             onClick={() => {
