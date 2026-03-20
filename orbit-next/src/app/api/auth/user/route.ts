@@ -5,6 +5,30 @@ import { storage } from "@/server/core";
 import { supabaseAdmin } from "@/server/config";
 import { hasPasswordProvider, inferRoleFromUicEmail } from "@/server/core";
 
+function extractNamesFromMetadata(metadata: any): { firstName?: string; lastName?: string } {
+  const first = String(metadata?.first_name ?? metadata?.firstName ?? "").trim();
+  const last = String(metadata?.last_name ?? metadata?.lastName ?? "").trim();
+
+  if (first || last) {
+    return { firstName: first || undefined, lastName: last || undefined };
+  }
+
+  const fullName = String(metadata?.full_name ?? metadata?.name ?? "").trim();
+  if (!fullName) {
+    return {};
+  }
+
+  const parts = fullName.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) {
+    return { firstName: parts[0] };
+  }
+
+  return {
+    firstName: parts.slice(0, -1).join(" "),
+    lastName: parts.slice(-1).join(""),
+  };
+}
+
 export async function GET(request: NextRequest) {
   const authResult = await requireUser(request.headers);
   if (!authResult.ok) {
@@ -27,12 +51,13 @@ export async function GET(request: NextRequest) {
 
     const existingUser = await storage.getUser(supabaseUser.id);
     const inferredRole = inferRoleFromUicEmail(supabaseUser.email ?? "");
+    const extractedNames = extractNamesFromMetadata(supabaseUser.user_metadata || {});
     const userRecord = {
       id: supabaseUser.id,
       email: supabaseUser.email ?? "",
-      firstName: supabaseUser.user_metadata?.first_name ?? "",
-      lastName: supabaseUser.user_metadata?.last_name ?? "",
-      profileImageUrl: supabaseUser.user_metadata?.avatar_url ?? "",
+      firstName: extractedNames.firstName ?? existingUser?.firstName ?? "",
+      lastName: extractedNames.lastName ?? existingUser?.lastName ?? "",
+      profileImageUrl: supabaseUser.user_metadata?.avatar_url ?? existingUser?.profileImageUrl ?? "",
       role: existingUser?.role ?? inferredRole,
       status: existingUser?.status ?? "active",
       createdAt: existingUser?.createdAt ?? new Date(supabaseUser.created_at ?? Date.now()),

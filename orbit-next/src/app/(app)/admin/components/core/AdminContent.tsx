@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/ui";
 import { LoadingState, ErrorState, Overview, Sections } from "../index";
 import AdminFaqManager from "@/components/faq/AdminFaqManager";
-import { CheckEquipmentModal, BanUserModal } from "@/components/modals";
+import { BanUserModal } from "@/components/modals";
 import { formatDateTime } from "@admin";
 import { apiRequest } from "@/lib/api";
 
@@ -124,42 +124,6 @@ export function AdminContent(props: AdminContentProps) {
             {...props as any}
             onArrivalExpire={handleArrivalExpire}
             onBookingEndExpire={handleBookingEndExpire}
-          />
-          <CheckEquipmentModal
-            isOpen={props.showEquipmentModal}
-            onClose={() => {
-              props.setShowEquipmentModal(false);
-              props.setEquipmentModalBooking(null);
-            }}
-            booking={props.equipmentModalBooking}
-            onSaveEquipmentStatuses={async (booking, statuses) => {
-              console.log('Saving equipment statuses:', { bookingId: booking.id, statuses });
-              
-              // Determine overall status from individual items
-              const preparedCount = Object.values(statuses).filter(s => s === 'prepared').length;
-              const notAvailableCount = Object.values(statuses).filter(s => s === 'not_available').length;
-              const totalCount = Object.values(statuses).length;
-              
-              // If all items are prepared, mark as prepared; otherwise not available
-              const overallStatus = preparedCount === totalCount ? 'prepared' : 'not_available';
-              
-              // Create note with individual item statuses
-              const note = JSON.stringify({ items: statuses });
-              
-              console.log('Calling markBookingNeeds with:', {
-                bookingId: booking.id,
-                status: overallStatus,
-                note
-              });
-              
-              // Call the existing mutation and wait for it
-              if (typeof props.markBookingNeeds === 'function') {
-                await props.markBookingNeeds(booking.id, overallStatus, note);
-              } else {
-                console.error('markBookingNeeds is not a function!', typeof props.markBookingNeeds);
-                throw new Error('markBookingNeeds function not available');
-              }
-            }}
           />
         </div>
       );

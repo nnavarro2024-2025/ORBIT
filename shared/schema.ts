@@ -178,6 +178,16 @@ export const faqs = pgTable("faqs", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+// Equipment inventory - stores how many of each equipment type is available
+export const equipmentInventory = pgTable("equipment_inventory", {
+  id: serial("id").primaryKey(),
+  key: varchar("key").notNull().unique(), // e.g. 'whiteboard', 'projector'
+  label: varchar("label").notNull(),       // e.g. 'Whiteboard & Markers'
+  totalCount: integer("total_count").notNull().default(1),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // Relations
 export const usersRelations = relations(users, (helpers) => ({
   facilityBookings: helpers.many(facilityBookings),

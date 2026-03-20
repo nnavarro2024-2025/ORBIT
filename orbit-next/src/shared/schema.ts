@@ -299,6 +299,16 @@ export const faqs = pgTable("faqs", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+// Equipment inventory - stores how many of each equipment type is available
+export const equipmentInventory = pgTable("equipment_inventory", {
+  id: serial("id").primaryKey(),
+  key: varchar("key").notNull().unique(), // e.g. 'whiteboard', 'projector'
+  label: varchar("label").notNull(),       // e.g. 'Whiteboard & Markers'
+  totalCount: integer("total_count").notNull().default(1),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 export const insertFaqSchema = z.object({
   category: z.custom<FaqCategory>((value) => typeof value === "string" && FAQ_CATEGORIES.includes(value as FaqCategory), {
     message: "Invalid FAQ category",
@@ -338,3 +348,4 @@ export type InsertReportSchedule = typeof reportSchedules.$inferInsert;
 export type UpdateReportSchedule = Partial<Omit<ReportSchedule, "id" | "createdAt">>;
 export type NormalizedInsertReportSchedule = Omit<InsertReportSchedule, "format"> & { format: string };
 export type Faq = typeof faqs.$inferSelect;
+export type EquipmentInventory = typeof equipmentInventory.$inferSelect;

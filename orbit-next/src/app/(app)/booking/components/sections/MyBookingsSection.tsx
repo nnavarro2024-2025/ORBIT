@@ -272,75 +272,18 @@ export function MyBookingsSection({
 
                 <div className="bg-gray-50 rounded-lg p-3 sm:p-4">
                   {booking.equipment && (hasOthers || items.length > 0) ? (
-                    <div className="bg-white rounded-lg p-2.5 border border-gray-200 h-[120px] flex flex-col">
-                      <div className="flex items-center justify-between mb-1.5 flex-shrink-0">
-                        <span className="text-xs font-medium text-gray-500">Equipment or Needs</span>
+                    <div className="bg-white rounded-lg p-2.5 border border-gray-200">
+                      <div className="mb-1.5">
+                        <span className="text-xs font-medium text-gray-500">Booked Equipment</span>
                       </div>
-                      <div className="space-y-1 overflow-y-auto flex-1">
-                        {items.map((item: string, idx: number) => {
-                          let statusValue = "pending";
-                          try {
-                            const resp = String(booking?.adminResponse || "");
-                            const jsonMatch = resp.match(/\{"items":\{[^}]*\}\}/);
-                            if (jsonMatch) {
-                              const parsed = JSON.parse(jsonMatch[0]);
-                              if (parsed.items && typeof parsed.items === "object") {
-                                const itemKey = String(item).toLowerCase().replace(/\s+/g, "_");
-                                for (const [key, value] of Object.entries(parsed.items)) {
-                                  const normalizedKey = String(key).toLowerCase().replace(/\s+/g, "_");
-                                  if (normalizedKey === itemKey || String(key).toLowerCase() === String(item).toLowerCase()) {
-                                    statusValue = String(value);
-                                    break;
-                                  }
-                                }
-                              }
-                            }
-                          } catch {}
-
-                          return (
-                            <div key={`eq-${id}-${idx}`} className="flex items-center justify-between py-1">
-                              <span className="text-xs text-gray-700 font-medium">{item}</span>
-                              <span
-                                className={`text-xs font-semibold px-2 py-0.5 rounded ${
-                                  statusValue === "prepared"
-                                    ? "bg-green-100 text-green-700"
-                                    : statusValue === "not_available" || statusValue === "not available"
-                                      ? "bg-red-100 text-red-700"
-                                      : "bg-gray-100 text-gray-600"
-                                }`}
-                              >
-                                {statusValue === "not_available" ? "not available" : statusValue}
-                              </span>
-                            </div>
-                          );
-                        })}
-                        {hasOthers && (() => {
-                          let otherStatusValue = "pending";
-                          try {
-                            const resp = String(booking?.adminResponse || "");
-                            const jsonMatch = resp.match(/\{"items":\{[^}]*\}\}/);
-                            if (jsonMatch) {
-                              const parsed = JSON.parse(jsonMatch[0]);
-                              if (parsed.items && typeof parsed.items === "object") {
-                                // Check for "others" key first
-                                if (parsed.items.others !== undefined) {
-                                  otherStatusValue = String(parsed.items.others);
-                                } else {
-                                  // Fallback: try to match by text content
-                                  const otherText = String(eq.others).trim().toLowerCase();
-                                  for (const [key, value] of Object.entries(parsed.items)) {
-                                    if (String(key).toLowerCase() === otherText || String(key).toLowerCase().includes('other')) {
-                                      otherStatusValue = String(value);
-                                      break;
-                                    }
-                                  }
-                                }
-                              }
-                            }
-                          } catch {}
-                          
-                          return (
-                            <div className="flex items-center justify-between py-1">
+                      <div className="space-y-1">
+                        {items.map((item: string, idx: number) => (
+                          <div key={`eq-${id}-${idx}`} className="py-1">
+                            <span className="text-xs text-gray-700 font-medium">{item}</span>
+                          </div>
+                        ))}
+                        {hasOthers && (
+                          <div className="py-1">
                               <Popover open={!!openOthers[id]} onOpenChange={(v) => setOpenOthers((prev) => ({ ...prev, [id]: v }))}>
                                 <TooltipProvider>
                                   <Tooltip>
@@ -377,20 +320,8 @@ export function MyBookingsSection({
                                   </div>
                                 </PopoverContent>
                               </Popover>
-                              <span
-                                className={`text-xs font-semibold px-2 py-0.5 rounded ${
-                                  otherStatusValue === "prepared"
-                                    ? "bg-green-100 text-green-700"
-                                    : otherStatusValue === "not_available" || otherStatusValue === "not available"
-                                      ? "bg-red-100 text-red-700"
-                                      : "bg-gray-100 text-gray-600"
-                                }`}
-                              >
-                                {otherStatusValue === "not_available" ? "not available" : otherStatusValue}
-                              </span>
-                            </div>
-                          );
-                        })()}
+                          </div>
+                        )}
                       </div>
                     </div>
                   ) : (

@@ -12,7 +12,6 @@ interface NotificationsTabProps {
   setActivityNotificationsPage: Dispatch<SetStateAction<number>>;
   notificationsPerPage: number;
   parseEquipmentFromMessage: (message: string) => { baseMessage: string; equipment: any };
-  getEquipmentStatusColor: (status: string) => string;
   onMarkNotificationRead: (notificationId: string) => Promise<void>;
   markNotificationReadPending: boolean;
 }
@@ -26,7 +25,6 @@ export function NotificationsTab({
   setActivityNotificationsPage,
   notificationsPerPage,
   parseEquipmentFromMessage,
-  getEquipmentStatusColor,
   onMarkNotificationRead,
   markNotificationReadPending,
 }: NotificationsTabProps) {
@@ -100,21 +98,24 @@ export function NotificationsTab({
                   <span key={idx} className="block">
                     {(() => {
                       const { baseMessage, equipment } = parseEquipmentFromMessage(line);
+                      const equipmentItems = equipment && typeof equipment === "object"
+                        ? Array.isArray(equipment.items)
+                          ? equipment.items
+                          : Object.keys(equipment).filter((key) => key !== "others")
+                        : [];
                       return (
                         <>
                           {baseMessage}
-                          {equipment && equipment.items && Array.isArray(equipment.items) && equipment.items.length > 0 ? (
+                          {equipmentItems.length > 0 ? (
                             <div className="mt-2">
                               <span className="block text-[11px] font-semibold text-gray-700">
-                                Equipment status:
+                                Equipment requested:
                               </span>
                               <div className="mt-1 flex flex-wrap gap-1.5">
-                                {Object.entries(equipment.items).map(([itemKey, itemStatus]) => (
+                                {equipmentItems.map((itemKey: string) => (
                                   <span
                                     key={itemKey}
-                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border ${getEquipmentStatusColor(
-                                      String(itemStatus)
-                                    )}`}
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border bg-blue-50 text-blue-700 border-blue-200"
                                   >
                                     <span className="w-1.5 h-1.5 rounded-full bg-current" />
                                     {itemKey.replace(/_/g, " ")}

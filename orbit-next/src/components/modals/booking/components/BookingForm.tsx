@@ -4,6 +4,7 @@
  * Complete booking form UI component with all form fields and submission logic.
  */
 
+import { useQuery } from '@tanstack/react-query';
 import { DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -17,6 +18,7 @@ import { SimpleTimeSlotPicker } from './SimpleTimeSlotPicker';
 import { EQUIPMENT_OPTIONS, FORM_LIMITS, type EquipmentStateValue } from '../schemas/bookingSchema';
 import { getFacilityMaxCapacity } from '../utils';
 import type { ValidationError } from '../utils/validationUtils';
+import { apiRequest } from '@/lib/api';
 
 interface BookingFormProps {
   form: any;
@@ -48,6 +50,26 @@ export function BookingForm({
 }: BookingFormProps) {
   const { PURPOSE_MAX, OTHERS_MAX } = FORM_LIMITS;
   const maxCapacity = selectedFacility ? getFacilityMaxCapacity(selectedFacility) : 8;
+
+  // Watch time fields to query equipment availability
+  const startTime: Date | undefined = form.watch('startTime');
+  const endTime: Date | undefined = form.watch('endTime');
+
+  const { data: equipmentAvailability } = useQuery<Array<{ key: string; label: string; totalCount: number; bookedCount: number; available: number }>>({
+    queryKey: ['/api/equipment/availability', startTime?.toISOString(), endTime?.toISOString()],
+    queryFn: async () => {
+      const res = await apiRequest('GET', `/api/equipment/availability?startTime=${encodeURIComponent(startTime!.toISOString())}&endTime=${encodeURIComponent(endTime!.toISOString())}`);
+      return res.json();
+    },
+    enabled: !!(startTime && endTime && startTime < endTime),
+    staleTime: 30_000,
+  });
+
+  // Build a lookup: key → available count
+  const equipAvailMap = (equipmentAvailability ?? []).reduce<Record<string, number>>((acc, item) => {
+    acc[item.key] = item.available;
+    return acc;
+  }, {});
 
   // Get current date in YYYY-MM-DD format for min date
   const today = new Date();
@@ -224,17 +246,31 @@ export function BookingForm({
         <div>
           <Label className="block mb-3">Additional Equipment</Label>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {EQUIPMENT_OPTIONS.map((option) => (
-              <div key={option.key} className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={!!equipmentState[option.key]}
-                  onChange={(e) => setEquipmentState({ ...equipmentState, [option.key]: e.target.checked ? 'prepared' : false })}
-                  className="h-4 w-4 rounded border-gray-300"
-                />
-                <span className="text-sm">{option.label}</span>
-              </div>
-            ))}
+            {EQUIPMENT_OPTIONS.map((option) => {
+              // If we have availability data and available count is 0, disable the option
+              const availableCount = equipAvailMap[option.key];
+              const isUnavailable = equipmentAvailability !== undefined && availableCount === 0;
+              return (
+                <div key={option.key} className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={!!equipmentState[option.key]}
+                    disabled={isUnavailable}
+                    onChange={(e) => {
+                      if (isUnavailable) return;
+                      setEquipmentState({ ...equipmentState, [option.key]: e.target.checked ? 'prepared' : false });
+                    }}
+                    className="h-4 w-4 rounded border-gray-300 disabled:cursor-not-allowed"
+                  />
+                  <span className={`text-sm ${isUnavailable ? 'text-gray-400' : ''}`}>{option.label}</span>
+                  {isUnavailable && (
+                    <span className="ml-1 inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700">
+                      Not Available
+                    </span>
+                  )}
+                </div>
+              );
+            })}
             <div>
               <Input
                 value={equipmentOtherText}

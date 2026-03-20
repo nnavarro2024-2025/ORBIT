@@ -25,7 +25,6 @@ interface ActivityLogsSectionProps {
   getBookingStatus: (booking: any) => { label: string; badgeClass: string };
   getFacilityDisplay: (facilityId: number) => string;
   parseEquipmentFromMessage: (message: string) => { baseMessage: string; equipment: any };
-  getEquipmentStatusColor: (status: string) => string;
   onNavigateToBookingDetails: (bookingId: string) => void;
   onMarkNotificationRead: (notificationId: string) => Promise<void>;
   markNotificationReadPending: boolean;
@@ -53,7 +52,6 @@ export function ActivityLogsSection({
   getBookingStatus,
   getFacilityDisplay,
   parseEquipmentFromMessage,
-  getEquipmentStatusColor,
   onNavigateToBookingDetails,
   onMarkNotificationRead,
   markNotificationReadPending,
@@ -176,7 +174,6 @@ export function ActivityLogsSection({
             setActivityNotificationsPage={setActivityNotificationsPage}
             notificationsPerPage={notificationsPerPage}
             parseEquipmentFromMessage={parseEquipmentFromMessage}
-            getEquipmentStatusColor={getEquipmentStatusColor}
             onMarkNotificationRead={onMarkNotificationRead}
             markNotificationReadPending={markNotificationReadPending}
           />

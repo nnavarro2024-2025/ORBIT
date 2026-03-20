@@ -212,7 +212,7 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
                     <h3 className="text-2xl font-bold text-gray-900">
                       {user.firstName || user.lastName
                         ? `${user.firstName || ''} ${user.lastName || ''}`.trim()
-                        : 'N/A'}
+                        : (user.fullName || user.name || user.displayName || 'N/A')}
                     </h3>
                     <p className="text-lg text-gray-600">
                       {user.email || 'N/A'}

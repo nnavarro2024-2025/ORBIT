@@ -347,7 +347,11 @@ export function BookingDashboardInner() {
           <ContentRenderer
             selectedView={viewState.selectedView}
             user={user}
-            userBookings={userBookings}
+            currentUserEmail={user?.email ?? undefined}            currentUserName={
+              user
+                ? [user.firstName, user.lastName].filter(Boolean).join(" ").trim() || undefined
+                : undefined
+            }            userBookings={userBookings}
             facilities={facilities}
             isUserBookingsLoading={isUserBookingsLoading}
             isUserBookingsFetching={isUserBookingsFetching}

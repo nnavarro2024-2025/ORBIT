@@ -11,6 +11,8 @@ interface ContentRendererProps {
   selectedView: string;
   // My Bookings props
   user: any;
+  currentUserEmail?: string;
+  currentUserName?: string;
   userBookings: any[];
   facilities: any[];
   isUserBookingsLoading: boolean;
@@ -129,7 +131,6 @@ export function ContentRenderer(props: ContentRendererProps) {
           getBookingStatus={props.getBookingStatus}
           getFacilityDisplay={props.getFacilityDisplay}
           parseEquipmentFromMessage={props.parseEquipmentFromMessage}
-          getEquipmentStatusColor={props.getEquipmentStatusColor}
           onNavigateToBookingDetails={props.onNavigateToBookingDetails}
           onMarkNotificationRead={props.onMarkNotificationRead}
           markNotificationReadPending={props.markNotificationReadPending}
@@ -224,6 +225,8 @@ export function ContentRenderer(props: ContentRendererProps) {
                 props.setActivityNotificationsPage(0);
               }
             }}
+            currentUserEmail={props.currentUserEmail}
+            currentUserName={props.currentUserName}
             userBookings={props.userBookings}
             notificationsData={props.notificationsData}
             isUserBookingsLoading={props.isUserBookingsLoading}

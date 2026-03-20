@@ -86,8 +86,6 @@ export function AnalyticsCharts({ DEBUG_ANALYTICS_CHARTS, PIE_CHART_COLORS, FACI
                 <RechartsTooltip formatter={(value: number, name: string) => [`${value} bookings`, name.charAt(0).toUpperCase() + name.slice(1)]} />
                 <RechartsLegend wrapperStyle={{ fontSize: 12 }} />
                 <Line type="monotone" dataKey="total" name="Total" stroke={WEEKLY_LINE_COLORS.total} strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="approved" name="Approved" stroke={WEEKLY_LINE_COLORS.approved} strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="pending" name="Pending" stroke={WEEKLY_LINE_COLORS.pending} strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
           ) : (

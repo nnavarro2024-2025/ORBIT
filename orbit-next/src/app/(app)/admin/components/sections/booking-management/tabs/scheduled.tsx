@@ -24,9 +24,6 @@ export type ScheduledBookingsTabProps = {
   renderEquipmentLine: (booking: FacilityBooking) => React.ReactNode;
   renderNeedsBadge: (booking: FacilityBooking) => React.ReactNode;
   isAdmin: boolean;
-  openEquipmentModal: (booking: FacilityBooking) => void;
-  getNeedsStatusForBooking: (booking: FacilityBooking) => 'prepared' | 'not_available' | undefined;
-  hasEquipmentBeenChecked: (booking: FacilityBooking) => boolean;
   forceActiveBookingMutation: { mutate: (booking: FacilityBooking) => void; isPending: boolean };
   renderPagination: (totalItems: number, page: number, setPage: React.Dispatch<React.SetStateAction<number>>) => React.ReactNode;
 };
@@ -48,15 +45,9 @@ export function ScheduledBookingsTab(props: ScheduledBookingsTabProps) {
     renderEquipmentLine,
     renderNeedsBadge,
     isAdmin,
-    openEquipmentModal,
-    getNeedsStatusForBooking,
-    hasEquipmentBeenChecked,
     forceActiveBookingMutation,
     renderPagination,
   } = props;
-
-  // Debug: Check if openEquipmentModal is passed
-  console.log('ScheduledBookingsTab - openEquipmentModal:', typeof openEquipmentModal, openEquipmentModal);
 
   const [selectedBooking, setSelectedBooking] = useState<FacilityBooking | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -107,12 +98,12 @@ export function ScheduledBookingsTab(props: ScheduledBookingsTabProps) {
                   </div>
                   <div className="grid grid-cols-2 gap-2 pl-11">
                     <div>
-                      <p className="text-xs font-medium text-gray-900">Starts</p>
-                      <p className="text-xs text-gray-600 mt-0.5">{formatDateTime(booking.startTime)}</p>
+                      <p className="text-xs font-medium text-gray-900">Date</p>
+                      <p className="text-xs text-gray-600 mt-0.5">{formatDate(booking.startTime)}</p>
                     </div>
                     <div>
-                      <p className="text-xs font-medium text-gray-900">Ends</p>
-                      <p className="text-xs text-gray-600 mt-0.5">{formatDateTime(booking.endTime)}</p>
+                      <p className="text-xs font-medium text-gray-900">Time</p>
+                      <p className="text-xs text-gray-600 mt-0.5">{formatTime(booking.startTime)} - {formatTime(booking.endTime)}</p>
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2 pl-11">
@@ -123,22 +114,10 @@ export function ScheduledBookingsTab(props: ScheduledBookingsTabProps) {
                   </div>
                   {!!booking.equipment && (
                     <div className="pl-11 mt-2">
-                      <div className="bg-white border border-gray-200 rounded-lg p-3">
-                        <h5 className="text-xs font-semibold text-gray-700 mb-3">Equipment or Needs</h5>
-                        <div className="space-y-2">
+                      <div>
+                        <h5 className="text-xs font-semibold text-gray-700 mb-2">Booked Equipment</h5>
+                        <div className="space-y-1">
                           {renderEquipmentLine(booking)}
-                        </div>
-                        <div className="flex flex-col gap-2 mt-3">
-                          {!hasEquipmentBeenChecked(booking) && (
-                            <Button 
-                              size="sm"
-                              onClick={() => openEquipmentModal(booking)} 
-                              aria-label={`Check equipment for ${booking.id}`} 
-                              className="text-xs font-medium w-full"
-                            >
-                              🔎 Check Equipment
-                            </Button>
-                          )}
                         </div>
                       </div>
                     </div>
@@ -187,14 +166,16 @@ export function ScheduledBookingsTab(props: ScheduledBookingsTabProps) {
                     {/* Time Info */}
                     <div className="flex items-center gap-4">
                       <div className="text-center">
+                        <p className="text-xs font-medium text-gray-500 mb-1">Date</p>
+                        <p className="text-sm font-semibold text-gray-900 whitespace-nowrap">{formatDate(booking.startTime)}</p>
+                      </div>
+                      <div className="text-center">
                         <p className="text-xs font-medium text-gray-500 mb-1">Starts</p>
                         <p className="text-lg font-semibold text-gray-900 whitespace-nowrap">{formatTime(booking.startTime)}</p>
-                        <p className="text-xs text-gray-500 mt-0.5">{formatDate(booking.startTime)}</p>
                       </div>
                       <div className="text-center">
                         <p className="text-xs font-medium text-gray-500 mb-1">Ends</p>
                         <p className="text-lg font-semibold text-gray-900 whitespace-nowrap">{formatTime(booking.endTime)}</p>
-                        <p className="text-xs text-gray-500 mt-0.5">{formatDate(booking.endTime)}</p>
                       </div>
                     </div>
                     {/* Status and Actions */}
@@ -204,27 +185,6 @@ export function ScheduledBookingsTab(props: ScheduledBookingsTabProps) {
                         {renderNeedsBadge(booking)}
                       </div>
                       <div className="flex flex-col gap-2 items-end">
-                        {!!booking.equipment && !hasEquipmentBeenChecked(booking) && (
-                          <Button 
-                            size="sm"
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              e.preventDefault();
-                              console.log('Check Equipment clicked', booking);
-                              console.log('openEquipmentModal function:', typeof openEquipmentModal);
-                              if (typeof openEquipmentModal === 'function') {
-                                openEquipmentModal(booking);
-                              } else {
-                                console.error('openEquipmentModal is not a function!');
-                              }
-                            }}
-                            aria-label={`Check equipment for ${booking.id}`} 
-                            className="text-xs font-medium h-7 px-3 bg-blue-600 hover:bg-blue-700 text-white pointer-events-auto"
-                          >
-                            🔎 Check Equipment
-                          </Button>
-                        )}
                         <Button
                           size="sm"
                           type="button"
@@ -232,11 +192,6 @@ export function ScheduledBookingsTab(props: ScheduledBookingsTabProps) {
                           onClick={(e) => {
                             e.stopPropagation();
                             e.preventDefault();
-                            console.log('Force Active clicked', booking);
-                            console.log('isAdmin:', isAdmin);
-                            console.log('Start time:', new Date(booking.startTime));
-                            console.log('Current time:', new Date());
-                            console.log('Future?:', new Date(booking.startTime) > new Date());
                             forceActiveBookingMutation.mutate(booking);
                           }}
                           disabled={forceActiveBookingMutation.isPending}
@@ -249,14 +204,12 @@ export function ScheduledBookingsTab(props: ScheduledBookingsTabProps) {
                     </div>
                     {/* Equipment List */}
                     {!!booking.equipment && (
-                      <div className="bg-gradient-to-br from-gray-50 to-gray-100 border border-gray-200 rounded-xl p-3.5 w-[250px] h-[145px] flex flex-col shadow-sm">
-                        <div className="flex items-center justify-between mb-2.5 flex-shrink-0">
-                          <h5 className="text-[10px] font-bold text-gray-700 uppercase tracking-wider">Equipment or Needs</h5>
+                      <div className="w-[250px]">
+                        <div className="mb-2">
+                          <h5 className="text-[10px] font-bold text-gray-700 uppercase tracking-wider">Booked Equipment</h5>
                         </div>
-                        <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent hover:scrollbar-thumb-gray-400">
-                          <div className="space-y-0">
-                            {renderEquipmentLine(booking)}
-                          </div>
+                        <div className="space-y-1">
+                          {renderEquipmentLine(booking)}
                         </div>
                       </div>
                     )}
@@ -298,14 +251,18 @@ export function ScheduledBookingsTab(props: ScheduledBookingsTabProps) {
                 <p className="text-sm text-gray-900">{getFacilityName(selectedBooking.facilityId)}</p>
               </div>
               <Separator />
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <h4 className="text-sm font-medium text-gray-500 mb-1">Date</h4>
+                  <p className="text-sm text-gray-900">{formatDate(selectedBooking.startTime)}</p>
+                </div>
                 <div>
                   <h4 className="text-sm font-medium text-gray-500 mb-1">Start Time</h4>
-                  <p className="text-sm text-gray-900">{formatDateTime(selectedBooking.startTime)}</p>
+                  <p className="text-sm text-gray-900">{formatTime(selectedBooking.startTime)}</p>
                 </div>
                 <div>
                   <h4 className="text-sm font-medium text-gray-500 mb-1">End Time</h4>
-                  <p className="text-sm text-gray-900">{formatDateTime(selectedBooking.endTime)}</p>
+                  <p className="text-sm text-gray-900">{formatTime(selectedBooking.endTime)}</p>
                 </div>
               </div>
               <Separator />
@@ -322,54 +279,27 @@ export function ScheduledBookingsTab(props: ScheduledBookingsTabProps) {
                   </div>
                 </>
               )}
-              {/* Equipment Status */}
+              {/* Booked Equipment */}
               {(() => {
                 const eq: any = selectedBooking.equipment || {};
                 const eqItems = Array.isArray(eq.items) ? eq.items : [];
-                if (eqItems.length > 0) {
+                const hasOthers = eq.others && String(eq.others).trim().length > 0;
+                if (eqItems.length > 0 || hasOthers) {
                   return (
                     <>
                       <Separator />
                       <div>
-                        <h3 className="font-semibold text-sm text-muted-foreground mb-2">Equipment Status</h3>
+                        <h3 className="font-semibold text-sm text-muted-foreground mb-2">Booked Equipment</h3>
                         <div className="space-y-2">
-                          {eqItems.map((item: string, idx: number) => {
-                            let statusValue = 'pending';
-                            try {
-                              const resp = String(selectedBooking?.adminResponse || '');
-                              const jsonMatch = resp.match(/\{"items":\{[^}]*\}\}/);
-                              if (jsonMatch) {
-                                const parsed = JSON.parse(jsonMatch[0]);
-                                if (parsed.items && typeof parsed.items === 'object') {
-                                  const itemKey = String(item).toLowerCase().replace(/\s+/g, '_');
-                                  for (const [key, value] of Object.entries(parsed.items)) {
-                                    const normalizedKey = String(key).toLowerCase().replace(/\s+/g, '_');
-                                    if (normalizedKey === itemKey || String(key).toLowerCase() === String(item).toLowerCase()) {
-                                      statusValue = String(value);
-                                      break;
-                                    }
-                                  }
-                                }
-                              }
-                            } catch {}
-
-                            return (
-                              <div key={`modal-eq-${idx}`} className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded-lg">
-                                <span className="text-sm text-gray-900 font-medium">{item}</span>
-                                <Badge variant={
-                                  statusValue === 'prepared' ? 'default' :
-                                  statusValue === 'not_available' || statusValue === 'not available' ? 'destructive' :
-                                  'secondary'
-                                }>
-                                  {statusValue === 'not_available' ? 'not available' : statusValue}
-                                </Badge>
-                              </div>
-                            );
-                          })}
-                          {eq.others && String(eq.others).trim().length > 0 && (
-                            <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                              <p className="text-xs font-semibold text-blue-900 mb-1">Additional Notes:</p>
-                              <p className="text-sm text-blue-800 leading-relaxed whitespace-pre-wrap break-words">
+                          {eqItems.map((item: string, idx: number) => (
+                            <div key={`modal-eq-${idx}`} className="py-1 px-1">
+                              <span className="text-sm text-gray-900 font-medium">{item}</span>
+                            </div>
+                          ))}
+                          {hasOthers && (
+                            <div className="mt-1 py-1 px-1">
+                              <p className="text-xs font-semibold text-gray-600 mb-1">Additional Notes</p>
+                              <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap break-words">
                                 {String(eq.others).trim()}
                               </p>
                             </div>

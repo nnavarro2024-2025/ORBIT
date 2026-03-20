@@ -8,6 +8,7 @@ import {
   faqs,
   bookingReminders,
   reportSchedules,
+  equipmentInventory,
   type User,
   type UpsertUser,
   type FacilityBooking,
@@ -17,6 +18,7 @@ import {
   type SystemAlert,
   type ActivityLog,
   type Faq,
+  type EquipmentInventory,
   createFacilityBookingSchema,
   insertFaqSchema,
   updateFaqSchema,
@@ -112,6 +114,11 @@ export interface IStorage {
   updateFaq(id: string, input: z.infer<typeof updateFaqSchema>): Promise<Faq | null>;
   deleteFaq(id: string): Promise<void>;
   recordFaqFeedback(id: string, helpful: boolean): Promise<Faq | null>;
+
+  // Equipment inventory
+  getEquipmentInventory(): Promise<EquipmentInventory[]>;
+  getEquipmentAvailability(startTime: Date, endTime: Date): Promise<Array<EquipmentInventory & { bookedCount: number }>>;
+  upsertEquipmentInventory(key: string, label: string, totalCount: number): Promise<EquipmentInventory>;
 
   // Statistics
   getOrzUsageStats(): Promise<any>; // returns empty data now that ORZ is removed
@@ -1018,6 +1025,57 @@ export class DatabaseStorage implements IStorage {
       console.error("❌ [STORAGE] Error fetching admin dashboard stats:", error);
       throw error; // Re-throw the error so it can be caught by the route handler
     }
+  }
+
+  // --- Equipment Inventory ---
+  async getEquipmentInventory(): Promise<EquipmentInventory[]> {
+    return db.select().from(equipmentInventory).orderBy(asc(equipmentInventory.key));
+  }
+
+  async getEquipmentAvailability(startTime: Date, endTime: Date): Promise<Array<EquipmentInventory & { bookedCount: number }>> {
+    const inventory = await db.select().from(equipmentInventory).orderBy(asc(equipmentInventory.key));
+
+    // Get all overlapping approved bookings that have equipment
+    const overlapping = await db
+      .select()
+      .from(facilityBookings)
+      .where(
+        and(
+          or(
+            eq(facilityBookings.status, 'approved'),
+            eq(facilityBookings.status, 'pending'),
+          ),
+          lt(facilityBookings.startTime, endTime),
+          gt(facilityBookings.endTime, startTime),
+          isNotNull(facilityBookings.equipment),
+        )
+      );
+
+    // Count how many bookings have each equipment key
+    const bookedCounts: Record<string, number> = {};
+    for (const booking of overlapping) {
+      const equip = booking.equipment as any;
+      if (!equip) continue;
+      const items: string[] = Array.isArray(equip.items) ? equip.items : [];
+      for (const item of items) {
+        const k = String(item).toLowerCase().replace(/\s+/g, '_');
+        bookedCounts[k] = (bookedCounts[k] ?? 0) + 1;
+      }
+    }
+
+    return inventory.map(inv => ({ ...inv, bookedCount: bookedCounts[inv.key] ?? 0 }));
+  }
+
+  async upsertEquipmentInventory(key: string, label: string, totalCount: number): Promise<EquipmentInventory> {
+    const existing = await db.select().from(equipmentInventory).where(eq(equipmentInventory.key, key));
+    if (existing.length > 0) {
+      await db.update(equipmentInventory)
+        .set({ label, totalCount, updatedAt: new Date() })
+        .where(eq(equipmentInventory.key, key));
+      return (await db.select().from(equipmentInventory).where(eq(equipmentInventory.key, key)))[0];
+    }
+    const [row] = await db.insert(equipmentInventory).values({ key, label, totalCount }).returning();
+    return row;
   }
 }
 

@@ -2,7 +2,6 @@ import { Dispatch, SetStateAction, useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
 import { Calendar } from "lucide-react";
 
-import { AvailabilityGrid } from "@/components/common";
 import { SkeletonFacilityCard } from "@/components/ui/skeleton-presets";
 
 interface AvailableRoomsSectionProps {
@@ -464,21 +463,7 @@ export function AvailableRoomsSection({
           </div>
         )}
 
-        {showAvailabilityGrid && (
-          <AvailabilityGrid
-            onSelectRange={(facilityId: number, startISO: string, endISO: string) => {
-              const start = new Date(startISO);
-              const end = new Date(endISO);
 
-              setSelectedFacilityForBooking(facilityId);
-              setInitialStartForBooking(start);
-              setInitialEndForBooking(end);
-              setInitialTimesAreSuggested(true);
-              openBookingModal(facilityId, start, end);
-            }}
-            unavailableDatesByFacility={unavailableDatesByFacility}
-          />
-        )}
       </div>
     </section>
   );
