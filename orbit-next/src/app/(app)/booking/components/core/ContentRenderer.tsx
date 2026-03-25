@@ -241,16 +241,7 @@ export function ContentRenderer(props: ContentRendererProps) {
             parseEquipmentFromMessage={props.parseEquipmentFromMessage}
             getEquipmentStatusColor={props.getEquipmentStatusColor}
             onSelectViewAllBookingHistory={() => {
-              try {
-                const newHash = "#activity-logs:booking";
-                props.setSelectedView("activity-logs");
-                props.setActivityTab("booking");
-                window.location.hash = newHash;
-                props.setActivityBookingPage(0);
-              } catch (error) {
-                props.setSelectedView("activity-logs");
-                props.setActivityTab("booking");
-              }
+              props.setSelectedView("my-bookings");
             }}
             onNavigateToBookingDetails={props.onNavigateToBookingDetails}
             onMarkNotificationRead={props.onMarkNotificationRead}

@@ -1,6 +1,6 @@
-import { Dispatch, SetStateAction } from "react";
+import { Dispatch, SetStateAction, useMemo } from "react";
 import { Calendar, Loader2 } from "lucide-react";
-import { format } from "date-fns";
+import { format, isToday } from "date-fns";
 
 import { SkeletonListItem } from "@/components/ui/skeleton-presets";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -53,6 +53,18 @@ export function DashboardRecentActivitySection({
   onMarkNotificationRead,
   markNotificationReadPending,
 }: DashboardRecentActivitySectionProps) {
+  // Filter: ALL Scheduled/Active/Pending bookings + only TODAY's Completed/Cancelled
+  const filteredBookings = useMemo(() => {
+    return userBookings.filter((booking) => {
+      const status = getBookingStatus(booking);
+      if (["Active", "Scheduled", "Pending"].includes(status.label)) return true;
+      if (status.label === "Completed" || status.label === "Cancelled") {
+        return isToday(new Date(booking.endTime));
+      }
+      return false;
+    });
+  }, [userBookings, getBookingStatus]);
+
   const renderBookingList = () => {
     if (isUserBookingsLoading || isUserBookingsFetching) {
       return (
@@ -64,7 +76,7 @@ export function DashboardRecentActivitySection({
       );
     }
 
-    if (userBookings.length === 0) {
+    if (filteredBookings.length === 0) {
       return (
         <div className="text-center py-8">
           <p className="text-gray-600 text-sm">No booking history</p>
@@ -74,7 +86,7 @@ export function DashboardRecentActivitySection({
 
     return (
       <div className="space-y-2">
-        {userBookings.slice(0, 5).map((booking) => {
+        {filteredBookings.map((booking) => {
           const id = String(booking.id || Math.random());
           const equipment = booking.equipment || {};
           const items = Array.isArray(equipment.items) ? equipment.items : [];
@@ -84,11 +96,11 @@ export function DashboardRecentActivitySection({
           return (
             <div
               key={booking.id}
-              className="bg-white rounded-lg p-3 sm:p-4 border border-gray-200 hover:border-pink-200 hover:shadow-sm transition-all duration-200 cursor-pointer"
+              className="bg-white rounded-lg p-3 sm:p-4 border border-gray-200 hover:border-pink-200 hover:shadow-sm transition-all duration-200 cursor-pointer overflow-hidden"
               onClick={() => onNavigateToBookingDetails(String(booking.id))}
             >
               <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 lg:gap-4">
-                {/* Left section: User info */}
+                {/* Left section: Facility info */}
                 <div className="flex-shrink-0">
                   <div className="flex items-start gap-2">
                     <div className={`${
@@ -105,70 +117,8 @@ export function DashboardRecentActivitySection({
                     <div className="flex-1 min-w-0">
                       <h4 className="font-semibold text-gray-900 text-sm leading-tight break-words">{getFacilityDisplay(booking.facilityId)}</h4>
                       <div className="flex flex-wrap items-center gap-2 mt-1">
-                        {(currentUserName || currentUserEmail || booking.userEmail || booking.userId) && (
-                          <>
-                            {currentUserName && (
-                              <span className="text-xs font-semibold text-gray-800">{currentUserName}</span>
-                            )}
-                            {(booking.userEmail || currentUserEmail) && (
-                              <span className="text-xs text-gray-500 break-all">{String(booking.userEmail || currentUserEmail)}</span>
-                            )}
-                            <span className="text-gray-300">•</span>
-                          </>
-                        )}
                         <span className="text-xs text-gray-500">Participants:</span>
                         <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">{booking.participants || 0}</span>
-                        {/* {booking.purpose && (
-                          <>
-                            <span className="text-gray-300">•</span>
-                            <TooltipProvider>
-                              <Tooltip>
-                                <Popover>
-                                  <TooltipTrigger asChild>
-                                    <PopoverTrigger asChild>
-                                      <button
-                                        className="inline-flex items-center gap-1 text-xs text-pink-600 hover:text-pink-700 transition-colors"
-                                        aria-expanded={false}
-                                        onClick={(e) => e.stopPropagation()}
-                                      >
-                                        <Eye className="h-3.5 w-3.5" />
-                                        <span className="text-xs">Purpose</span>
-                                      </button>
-                                    </PopoverTrigger>
-                                  </TooltipTrigger>
-                                  <TooltipContent
-                                    side="top"
-                                    align="end"
-                                    className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden"
-                                  >
-                                    <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                                      <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
-                                    </div>
-                                    <div className="p-3">
-                                      <p className="text-sm text-gray-900 leading-5 break-words text-left">
-                                        {booking.purpose || "No purpose specified"}
-                                      </p>
-                                    </div>
-                                  </TooltipContent>
-                                  <PopoverContent
-                                    side="top"
-                                    align="end"
-                                    className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50"
-                                  >
-                                    <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                                      <p className="font-semibold text-sm text-gray-800 text-left">Purpose</p>
-                                    </div>
-                                    <div className="p-3">
-                                      <p className="text-sm text-gray-900 leading-5 break-words text-left">
-                                        {booking.purpose || "No purpose specified"}
-                                      </p>
-                                    </div>
-                                  </PopoverContent>
-                                </Popover>
-                              </Tooltip>
-                            </TooltipProvider>
-                          </>
-                        )} */}
                       </div>
                     </div>
                   </div>
@@ -195,7 +145,10 @@ export function DashboardRecentActivitySection({
                       <span className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap ${
                         status.label === "Active" ? "bg-green-100 text-green-800" :
                         status.label === "Scheduled" ? "bg-pink-100 text-pink-800" :
+                        status.label === "Completed" ? "bg-green-100 text-green-800" :
+                        status.label === "Cancelled" ? "bg-orange-100 text-orange-800" :
                         status.label === "Denied" ? "bg-red-100 text-red-800" :
+                        status.label === "Pending" ? "bg-blue-100 text-blue-800" :
                         "bg-gray-100 text-gray-800"
                       }`}>
                         {status.label}
@@ -204,18 +157,18 @@ export function DashboardRecentActivitySection({
                   </div>
                   {/* Equipment */}
                   {(items.length > 0 || hasOthers) && (
-                    <div className="w-full lg:w-[280px]">
+                    <div className="w-full lg:w-auto lg:max-w-[280px]">
                       <div className="mb-1.5">
-                        <h5 className="text-[13px] font-bold text-gray-700 tracking-wider">Booked Equipment</h5>
+                        <h5 className="text-[13px] font-bold text-gray-700 tracking-wider text-left">Booked Equipment</h5>
                       </div>
-                      <div className="space-y-0.1">
+                      <div className="space-y-0.5 text-left">
                         {items.map((item: string, idx: number) => (
-                          <div key={`eq-status-${id}-${idx}`} className="py-1">
+                          <div key={`eq-status-${id}-${idx}`} className="py-0.5">
                             <span className="text-xs text-gray-700 font-medium">{item}</span>
                           </div>
                         ))}
                           {hasOthers && (
-                            <div className="py-1">
+                            <div className="py-0.5">
                               <Popover open={!!openOthers[id]} onOpenChange={(value) => setOpenOthers((prev) => ({ ...prev, [id]: value }))}>
                                 <TooltipProvider>
                                   <Tooltip>
@@ -366,36 +319,14 @@ export function DashboardRecentActivitySection({
                 {format(new Date(notification.createdAt), "EEE, MMM d • hh:mm a")}
               </p>
             </div>
-            <div className="flex flex-col gap-2 sm:items-end">
-              <button
-                onClick={async () => {
-                  if (notification.readAt) return;
-                  await onMarkNotificationRead(notification.id);
-                }}
-                disabled={notification.readAt || markNotificationReadPending}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                  notification.readAt
-                    ? "bg-gray-200 text-gray-600 cursor-not-allowed"
-                    : "bg-pink-600 text-white hover:bg-pink-700"
-                }`}
-              >
-                {markNotificationReadPending ? (
-                  <span className="inline-flex items-center gap-2">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    <span className="hidden sm:inline">Reading...</span>
-                  </span>
-                ) : (
-                  "Mark Read"
-                )}
-              </button>
-            </div>
+            {/* No Mark Read button — pink highlight indicates new */}
           </div>
         ))}
       </div>
     );
   };
 
-  const bookingsShown = Math.min(itemsPerPage, userBookings.length);
+  const bookingsShown = filteredBookings.length;
   const notificationsShown = Math.min(itemsPerPage, notificationsData.length);
 
   return (
@@ -408,13 +339,15 @@ export function DashboardRecentActivitySection({
           </div>
           <button
             onClick={() => {
-              // Navigate to the Activity Logs section with the appropriate tab
-              const newHash = activityTab === "booking" ? "#activity-logs:booking" : "#activity-logs:notifications";
-              try {
-                window.location.hash = newHash;
-                window.dispatchEvent(new HashChangeEvent('hashchange'));
-              } catch (e) {
+              if (activityTab === "booking") {
                 onSelectViewAllBookingHistory();
+              } else {
+                try {
+                  window.location.hash = "#activity-logs:notifications";
+                  window.dispatchEvent(new HashChangeEvent('hashchange'));
+                } catch (e) {
+                  onSelectViewAllBookingHistory();
+                }
               }
             }}
             className="text-pink-600 hover:text-pink-800 font-medium text-sm transition-colors duration-200 self-start sm:self-auto"
@@ -443,7 +376,7 @@ export function DashboardRecentActivitySection({
 
       <div className="pt-4 border-t border-gray-100 mt-6 flex items-center justify-between text-sm text-gray-600">
         {activityTab === "booking" ? (
-          <p>Showing {bookingsShown} of {userBookings.length} booking{userBookings.length !== 1 ? 's' : ''}</p>
+          <p>Showing {bookingsShown} of {filteredBookings.length} booking{filteredBookings.length !== 1 ? 's' : ''}</p>
         ) : (
           <p>Showing {notificationsShown} of {notificationsData.length} notification{notificationsData.length !== 1 ? 's' : ''}</p>
         )}

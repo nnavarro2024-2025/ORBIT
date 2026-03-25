@@ -6,11 +6,13 @@
  */
 
 import { useState, useMemo } from 'react';
+import { format } from 'date-fns';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/ui';
 import { useAuth } from '@/hooks/data';
 import { apiRequest } from '@/lib/api';
@@ -134,11 +136,15 @@ export function BookingModalContent({
   // Booking mutation
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [lastSubmissionTime, setLastSubmissionTime] = useState(0);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [successInfo, setSuccessInfo] = useState<{
+    facilityName: string;
+    startTime: Date;
+    endTime: Date;
+  } | null>(null);
 
   const createBookingMutation = useMutation({
     mutationFn: async (data: BookingFormData) => {
-      setIsSubmitting(true);
-      
       const bookingData = {
         ...data,
         facilityId: parseInt(data.facilityId),
@@ -153,25 +159,28 @@ export function BookingModalContent({
       return response.json();
     },
     onSuccess: async () => {
+      const bookedFacilityName = selectedFacility?.name || 'Facility';
+      const bookedStart = startTimeValue;
+      const bookedEnd = endTimeValue;
+
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["/api/bookings"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/notifications"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/admin/alerts"] }),
       ]);
       setIsSubmitting(false);
+      setIsProcessing(false);
       setLastSubmissionTime(Date.now());
-      
-      toast({
-        title: "Booking Scheduled",
-        description: `${selectedFacility?.name || "Facility"} booking created successfully.`,
-        variant: "default",
-      });
-      
       form.reset();
-      onClose();
+      setSuccessInfo({
+        facilityName: bookedFacilityName,
+        startTime: bookedStart,
+        endTime: bookedEnd,
+      });
     },
     onError: (error: any) => {
       setIsSubmitting(false);
+      setIsProcessing(false);
 
       const rawMessage = typeof error?.message === 'string' ? error.message : '';
       const parsedMessage = rawMessage.replace(/^\d{3}:\s*/, '').trim();
@@ -203,29 +212,109 @@ export function BookingModalContent({
       });
       return;
     }
-    
+
+    // Close form immediately, show loading overlay
+    setIsSubmitting(true);
+    onClose();
+    setIsProcessing(true);
     createBookingMutation.mutate(data);
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-        <BookingForm
-          form={form}
-          facilities={facilities}
-          equipmentState={equipmentState}
-          setEquipmentState={setEquipmentState}
-          equipmentOtherText={equipmentOtherText}
-          setEquipmentOtherText={setEquipmentOtherText}
-          onSubmit={onSubmit}
-          onClose={onClose}
-          isSubmitting={isSubmitting}
-          validationWarnings={formValidationWarnings}
-          slotManagement={slotManagement}
-          selectedFacility={selectedFacility}
-          isAdmin={isAdmin}
-        />
-      </DialogContent>
-    </Dialog>
+    <>
+      {/* Booking Form Dialog */}
+      <Dialog open={isOpen} onOpenChange={onClose}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogTitle className="sr-only">Create Booking</DialogTitle>
+          <DialogDescription className="sr-only">Fill in the form to book a facility.</DialogDescription>
+          <BookingForm
+            form={form}
+            facilities={facilities}
+            equipmentState={equipmentState}
+            setEquipmentState={setEquipmentState}
+            equipmentOtherText={equipmentOtherText}
+            setEquipmentOtherText={setEquipmentOtherText}
+            onSubmit={onSubmit}
+            onClose={onClose}
+            isSubmitting={isSubmitting}
+            validationWarnings={formValidationWarnings}
+            slotManagement={slotManagement}
+            selectedFacility={selectedFacility}
+            isAdmin={isAdmin}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* Processing / Loading Dialog */}
+      <Dialog open={isProcessing} onOpenChange={() => {}}>
+        <DialogContent
+          className="max-w-xs text-center px-8 py-10 [&>button]:hidden"
+          onInteractOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => e.preventDefault()}
+        >
+          <DialogTitle className="sr-only">Processing Booking</DialogTitle>
+          <DialogDescription className="sr-only">Please wait while your booking is being submitted.</DialogDescription>
+          <div className="flex flex-col items-center gap-4">
+            <div className="w-16 h-16 rounded-full bg-blue-50 flex items-center justify-center">
+              <svg className="w-8 h-8 text-blue-500 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-base font-semibold text-gray-800">Processing your booking...</p>
+              <p className="text-xs text-gray-400 mt-1">Please wait a moment.</p>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Success Dialog */}
+      <Dialog open={!!successInfo} onOpenChange={() => setSuccessInfo(null)}>
+        <DialogContent className="max-w-sm text-center px-8 py-10">
+          <DialogTitle className="sr-only">Booking Confirmed</DialogTitle>
+          <DialogDescription className="sr-only">Your booking has been scheduled.</DialogDescription>
+          {/* Animated checkmark */}
+          <div className="flex justify-center mb-5">
+            <div className="w-20 h-20 rounded-full bg-emerald-100 flex items-center justify-center animate-in zoom-in-50 duration-300">
+              <svg
+                className="w-10 h-10 text-emerald-600"
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+          </div>
+
+          <h2 className="text-xl font-bold text-gray-900 mb-1">Booking Scheduled!</h2>
+          {successInfo && (
+            <div className="rounded-xl border border-gray-100 bg-gray-50 px-5 py-4 mb-6 text-left space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Facility</span>
+                <span className="ml-auto text-sm font-semibold text-gray-800">{successInfo.facilityName}</span>
+              </div>
+              <div className="h-px bg-gray-200" />
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Date</span>
+                <span className="ml-auto text-sm text-gray-700">
+                  {successInfo.startTime ? format(successInfo.startTime, 'MMMM d, yyyy') : '—'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Time</span>
+                <span className="ml-auto text-sm text-gray-700">
+                  {successInfo.startTime && successInfo.endTime
+                    ? `${format(successInfo.startTime, 'h:mm a')} – ${format(successInfo.endTime, 'h:mm a')}`
+                    : '—'}
+                </span>
+              </div>
+            </div>
+          )}
+
+
+          <Button className="w-full" onClick={() => setSuccessInfo(null)}>Done</Button>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

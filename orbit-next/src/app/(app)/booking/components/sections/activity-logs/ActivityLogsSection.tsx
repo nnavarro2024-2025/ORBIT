@@ -1,7 +1,6 @@
-import { Dispatch, SetStateAction, useEffect, useMemo } from "react";
-import { Search } from "lucide-react";
-import { BookingHistoryTab } from "./BookingHistoryTab";
-import { NotificationsTab } from "./NotificationsTab";
+import { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState } from "react";
+import { format } from "date-fns";
+import { SkeletonListItem } from "@/components/ui/skeleton-presets";
 
 interface ActivityLogsSectionProps {
   activityTab: "booking" | "notifications";
@@ -30,203 +29,181 @@ interface ActivityLogsSectionProps {
   markNotificationReadPending: boolean;
 }
 
+const NOTIFICATIONS_BATCH_SIZE = 10;
+
 export function ActivityLogsSection({
-  activityTab,
-  onActivityTabChange,
-  activitySearchTerm,
-  onSearchTermChange,
-  activityBookingPage,
-  setActivityBookingPage,
-  activityNotificationsPage,
-  setActivityNotificationsPage,
-  bookingsPerPage,
-  notificationsPerPage,
-  userBookings,
   notificationsData,
-  isUserBookingsLoading,
-  isUserBookingsFetching,
   isNotificationsLoading,
   isNotificationsFetching,
-  openOthers,
-  setOpenOthers,
-  getBookingStatus,
-  getFacilityDisplay,
   parseEquipmentFromMessage,
-  onNavigateToBookingDetails,
   onMarkNotificationRead,
-  markNotificationReadPending,
 }: ActivityLogsSectionProps) {
-  const searchTerm = activitySearchTerm;
+  const [visibleCount, setVisibleCount] = useState(NOTIFICATIONS_BATCH_SIZE);
+  const [seenIds, setSeenIds] = useState<Set<string>>(() => new Set());
+  const scrollSentinelRef = useRef<HTMLDivElement>(null);
 
-  // Filter bookings for count
-  const filteredUserBookings = useMemo(() => {
-    if (!searchTerm) return userBookings;
-    const lowerSearch = searchTerm.toLowerCase();
-    return userBookings.filter((booking: any) => {
-      const facilityDisplay = getFacilityDisplay(booking.facilityId).toLowerCase();
-      const purpose = String(booking.purpose || "").toLowerCase();
-      const status = String(booking.status || "").toLowerCase();
-      const participants = String(booking.participants || "");
-      return (
-        facilityDisplay.includes(lowerSearch) ||
-        purpose.includes(lowerSearch) ||
-        status.includes(lowerSearch) ||
-        participants.includes(lowerSearch)
-      );
-    });
-  }, [userBookings, searchTerm, getFacilityDisplay]);
-
-  // Filter notifications for count
-  const filteredNotifications = useMemo(() => {
-    if (!searchTerm) return notificationsData;
-    const lowerSearch = searchTerm.toLowerCase();
-    return notificationsData.filter((notification: any) => {
-      const title = String(notification.title || "").toLowerCase();
-      const message = String(notification.message || "").toLowerCase();
-      const type = String(notification.type || "").toLowerCase();
-      return title.includes(lowerSearch) || message.includes(lowerSearch) || type.includes(lowerSearch);
-    });
-  }, [notificationsData, searchTerm]);
-
-  // Auto-switch tabs if one has no results
+  // On first render/reload, mark all current notifications as "seen" so they lose pink highlight
   useEffect(() => {
-    if (!searchTerm) return;
-    const bookingCount = filteredUserBookings.length;
-    const notifCount = filteredNotifications.length;
-    if (activityTab === "booking" && bookingCount === 0 && notifCount > 0) {
-      onActivityTabChange("notifications");
-    } else if (activityTab === "notifications" && notifCount === 0 && bookingCount > 0) {
-      onActivityTabChange("booking");
+    if (notificationsData.length > 0) {
+      // Mark all initially loaded notification ids as seen after a brief delay (simulates "reload unhighlight")
+      const timer = setTimeout(() => {
+        setSeenIds(new Set(notificationsData.map((n: any) => String(n.id))));
+        // Also mark unread ones as read on the server
+        notificationsData.forEach((n: any) => {
+          if (!n.readAt) {
+            onMarkNotificationRead(String(n.id)).catch(() => {});
+          }
+        });
+      }, 2000);
+      return () => clearTimeout(timer);
     }
-  }, [activityTab, filteredNotifications.length, filteredUserBookings.length, onActivityTabChange, searchTerm]);
+  }, [notificationsData.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleTabChange = (tab: "booking" | "notifications") => {
-    if (tab === activityTab) return;
-    onActivityTabChange(tab);
-    if (tab === "booking") {
-      setActivityBookingPage(0);
-    } else {
-      setActivityNotificationsPage(0);
-    }
-  };
+  // Infinite scroll - load more when sentinel is visible
+  useEffect(() => {
+    const sentinel = scrollSentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && visibleCount < notificationsData.length) {
+          setVisibleCount((prev) => Math.min(prev + NOTIFICATIONS_BATCH_SIZE, notificationsData.length));
+        }
+      },
+      { threshold: 0.1 }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [visibleCount, notificationsData.length]);
+
+  const visibleNotifications = notificationsData.slice(0, visibleCount);
 
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
-      {/* Header and Controls */}
+      {/* Header */}
       <div className="flex flex-col gap-4 mb-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h3 className="text-xl font-semibold text-gray-900">Activity Logs</h3>
-            <p className="text-sm text-gray-600 mt-1">View booking history and notification logs</p>
-          </div>
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            <button
-              onClick={() => handleTabChange("booking")}
-              className={`flex-1 sm:flex-none px-3 py-2 rounded whitespace-nowrap text-sm transition-colors ${activityTab === "booking" ? "bg-pink-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}
-            >
-              Booking History
-            </button>
-            <button
-              onClick={() => handleTabChange("notifications")}
-              className={`flex-1 sm:flex-none px-3 py-2 rounded whitespace-nowrap text-sm transition-colors ${activityTab === "notifications" ? "bg-pink-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}
-            >
-              Notification Logs
-            </button>
-          </div>
-        </div>
-
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            value={activitySearchTerm}
-            onChange={(e) => onSearchTermChange(e.target.value)}
-            placeholder="Search bookings and notifications..."
-            className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg focus:border-pink-600 focus:ring-1 focus:ring-pink-600 focus:outline-none transition-colors"
-          />
+        <div>
+          <h3 className="text-xl font-semibold text-gray-900">Notification Logs</h3>
+          <p className="text-sm text-gray-600 mt-1">Your latest notifications and activity updates</p>
         </div>
       </div>
 
-      {/* Tab Content */}
-      <div className="space-y-4">
-        {activityTab === "booking" ? (
-          <BookingHistoryTab
-            userBookings={filteredUserBookings}
-            isUserBookingsLoading={isUserBookingsLoading}
-            isUserBookingsFetching={isUserBookingsFetching}
-            searchTerm={searchTerm}
-            activityBookingPage={activityBookingPage}
-            setActivityBookingPage={setActivityBookingPage}
-            bookingsPerPage={bookingsPerPage}
-            openOthers={openOthers}
-            setOpenOthers={setOpenOthers}
-            getBookingStatus={getBookingStatus}
-            getFacilityDisplay={getFacilityDisplay}
-            onNavigateToBookingDetails={onNavigateToBookingDetails}
-          />
+      {/* Notification list */}
+      <div className="space-y-3">
+        {(isNotificationsLoading || isNotificationsFetching) ? (
+          <div className="space-y-3">
+            {Array.from({ length: 5 }).map((_, index) => (
+              <SkeletonListItem key={index} />
+            ))}
+          </div>
+        ) : visibleNotifications.length === 0 ? (
+          <div className="text-center py-8">
+            <p className="text-gray-600 text-sm">No notifications yet</p>
+          </div>
         ) : (
-          <NotificationsTab
-            notificationsData={filteredNotifications}
-            isNotificationsLoading={isNotificationsLoading}
-            isNotificationsFetching={isNotificationsFetching}
-            searchTerm={searchTerm}
-            activityNotificationsPage={activityNotificationsPage}
-            setActivityNotificationsPage={setActivityNotificationsPage}
-            notificationsPerPage={notificationsPerPage}
-            parseEquipmentFromMessage={parseEquipmentFromMessage}
-            onMarkNotificationRead={onMarkNotificationRead}
-            markNotificationReadPending={markNotificationReadPending}
-          />
+          visibleNotifications.map((notification: any) => {
+            const isNew = !notification.readAt && !seenIds.has(String(notification.id));
+            return (
+              <div
+                key={notification.id}
+                className={`p-4 rounded-lg border transition-colors duration-700 ${
+                  isNew
+                    ? "border-pink-200 bg-pink-50"
+                    : "border-gray-100 bg-gray-50"
+                }`}
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span
+                      className={`inline-flex items-center px-2 py-1 rounded-full text-[10px] font-medium ${
+                        notification.type === "BOOKING_APPROVED"
+                          ? "bg-green-100 text-green-800"
+                          : notification.type === "BOOKING_DENIED"
+                          ? "bg-red-100 text-red-800"
+                          : notification.type === "BOOKING_CANCELLED"
+                          ? "bg-orange-100 text-orange-800"
+                          : "bg-gray-100 text-gray-800"
+                      }`}
+                    >
+                      {notification.type?.replace(/_/g, " ") || "Notification"}
+                    </span>
+                    {isNew && (
+                      <span className="text-[10px] text-pink-600 font-medium uppercase tracking-wide">
+                        New
+                      </span>
+                    )}
+                  </div>
+                  <h4 className="text-sm font-semibold text-gray-900 truncate">
+                    {notification.title || "Notification"}
+                  </h4>
+                  <p className="text-xs text-gray-600 mt-1 whitespace-pre-wrap break-words">
+                    {(notification.message || "").split("\n").map((line: string, idx: number) => (
+                      <span key={idx} className="block">
+                        {(() => {
+                          const { baseMessage, equipment } = parseEquipmentFromMessage(line);
+                          const equipmentItems = equipment && typeof equipment === "object"
+                            ? Array.isArray(equipment.items)
+                              ? equipment.items
+                              : Object.keys(equipment).filter((key) => key !== "others")
+                            : [];
+                          return (
+                            <>
+                              {baseMessage}
+                              {equipmentItems.length > 0 ? (
+                                <span className="mt-2 block">
+                                  <span className="block text-[11px] font-semibold text-gray-700">
+                                    Equipment requested:
+                                  </span>
+                                  <span className="mt-1 flex flex-wrap gap-1.5">
+                                    {equipmentItems.map((itemKey: string) => (
+                                      <span
+                                        key={itemKey}
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border bg-blue-50 text-blue-700 border-blue-200"
+                                      >
+                                        <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                                        {itemKey.replace(/_/g, " ")}
+                                      </span>
+                                    ))}
+                                  </span>
+                                </span>
+                              ) : null}
+                              {equipment && equipment.others ? (
+                                <span className="mt-2 block">
+                                  <span className="block text-[11px] font-semibold text-gray-700">
+                                    Other notes:
+                                  </span>
+                                  <span className="text-xs text-gray-600 mt-1 block whitespace-pre-wrap break-words">
+                                    {String(equipment.others)}
+                                  </span>
+                                </span>
+                              ) : null}
+                            </>
+                          );
+                        })()}
+                      </span>
+                    ))}
+                  </p>
+                  <p className="text-[11px] text-gray-500 mt-2">
+                    {format(new Date(notification.createdAt), "EEE, MMM d • hh:mm a")}
+                  </p>
+                </div>
+              </div>
+            );
+          })
+        )}
+
+        {/* Scroll sentinel for infinite scroll */}
+        {visibleCount < notificationsData.length && (
+          <div ref={scrollSentinelRef} className="py-4 text-center">
+            <p className="text-xs text-gray-400">Loading more notifications...</p>
+          </div>
         )}
       </div>
 
-      {/* Pagination Footer */}
-      <div className="pt-4 border-t border-gray-100 mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        {activityTab === "booking" ? (
-          <p className="text-[11px] sm:text-sm text-gray-600">
-            {searchTerm
-              ? `${filteredUserBookings.length}/${userBookings.length} bookings`
-              : `Showing ${Math.min(bookingsPerPage, filteredUserBookings.length)} of ${filteredUserBookings.length} bookings`}
-          </p>
-        ) : (
-          <p className="text-[11px] sm:text-sm text-gray-600">
-            {searchTerm
-              ? `${filteredNotifications.length}/${notificationsData.length} notifications`
-              : `Showing ${
-                  filteredNotifications.length === 0
-                    ? 0
-                    : activityNotificationsPage * notificationsPerPage + 1
-                } to ${Math.min(
-                  (activityNotificationsPage + 1) * notificationsPerPage,
-                  filteredNotifications.length
-                )} of ${filteredNotifications.length} notifications`}
-          </p>
-        )}
-
-        <div className="flex items-center justify-between sm:justify-start gap-2 w-full sm:w-auto">
-          {activityTab === "booking" ? null : (
-            <>
-              <button
-                onClick={() => setActivityNotificationsPage((prev) => Math.max(0, prev - 1))}
-                disabled={activityNotificationsPage === 0}
-                className="flex-1 sm:flex-none px-3 py-1.5 sm:py-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-xs sm:text-sm font-medium transition-colors"
-              >
-                Prev
-              </button>
-              <button
-                onClick={() =>
-                  setActivityNotificationsPage((prev) =>
-                    (prev + 1) * notificationsPerPage < filteredNotifications.length ? prev + 1 : prev
-                  )
-                }
-                disabled={(activityNotificationsPage + 1) * notificationsPerPage >= filteredNotifications.length}
-                className="flex-1 sm:flex-none px-3 py-1.5 sm:py-2 rounded-lg bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-xs sm:text-sm font-medium transition-colors"
-              >
-                Next
-              </button>
-            </>
-          )}
-        </div>
+      {/* Footer */}
+      <div className="pt-4 border-t border-gray-100 mt-4">
+        <p className="text-[11px] sm:text-sm text-gray-600">
+          Showing {Math.min(visibleCount, notificationsData.length)} of {notificationsData.length} notification{notificationsData.length !== 1 ? "s" : ""}
+        </p>
       </div>
     </div>
   );
