@@ -66,6 +66,9 @@ export async function GET(request: NextRequest) {
     const isAdmin = authResult.userRecord?.role === "admin";
     const requesterId = authResult.user.id;
 
+    const adminUsers = await storage.getUsersByRole("admin");
+    const adminUserIds = new Set(adminUsers.map((u: any) => u.id));
+
     const result = facilities.map((facility) => {
       const checkDate = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
       let isUnavailableToday = false;
@@ -132,6 +135,8 @@ export async function GET(request: NextRequest) {
               endTime: booking.endTime,
               status: booking.status,
               userId: booking.userId,
+              purpose: booking.purpose ?? null,
+              bookedByAdmin: adminUserIds.has(booking.userId),
             })),
           };
         }

@@ -18,6 +18,7 @@ export interface FormValidationParams {
   allBookings: any[];
   userEmail?: string;
   existingBookingId?: number;
+  isAdmin?: boolean;
 }
 
 export function useFormValidation(params: FormValidationParams) {
@@ -54,6 +55,7 @@ export function useFormValidation(params: FormValidationParams) {
         participants: participants || 1,
         allBookings: allBookings || [],
         existingBookingId,
+        isAdmin: paramsRef.current.isAdmin || false,
       },
       facilities,
       userEmail

@@ -61,11 +61,15 @@ export async function POST(request: NextRequest) {
       status: "pending",
     });
 
-    const hoursValidation = validateLibraryHours(parsed.startTime, parsed.endTime);
-    if (!hoursValidation.ok) return NextResponse.json(hoursValidation.error.body, { status: hoursValidation.error.status });
+    const isAdminUser = authResult.userRecord?.role === 'admin';
 
-    const sameDayValidation = validateSameDay(parsed.startTime, parsed.endTime);
-    if (!sameDayValidation.ok) return NextResponse.json(sameDayValidation.error.body, { status: sameDayValidation.error.status });
+    if (!isAdminUser) {
+      const hoursValidation = validateLibraryHours(parsed.startTime, parsed.endTime);
+      if (!hoursValidation.ok) return NextResponse.json(hoursValidation.error.body, { status: hoursValidation.error.status });
+
+      const sameDayValidation = validateSameDay(parsed.startTime, parsed.endTime);
+      if (!sameDayValidation.ok) return NextResponse.json(sameDayValidation.error.body, { status: sameDayValidation.error.status });
+    }
 
     const facilityResult = await getFacilityOrError(parsed.facilityId);
     if (!facilityResult.ok) return NextResponse.json(facilityResult.error.body, { status: facilityResult.error.status });
@@ -85,45 +89,43 @@ export async function POST(request: NextRequest) {
     // Check facility-specific duration and daily booking limits
     const facilityName = facility.name.toLowerCase();
     const isCollabRoom = facilityName.includes('collaborative learning room 1') || facilityName.includes('collaborative learning room 2');
-    
-    if (isCollabRoom) {
+
+    if (isCollabRoom && !isAdminUser) {
       // Max 2 hours for collaborative learning rooms
       const durationMs = parsed.endTime.getTime() - parsed.startTime.getTime();
       const durationHours = durationMs / (1000 * 60 * 60);
-      
+
       if (durationHours > 2) {
         return NextResponse.json(
           { message: 'Collaborative Learning Rooms can only be booked for a maximum of 2 hours.' },
           { status: 400 }
         );
       }
-      
-      // Max 2 bookings per day for collaborative learning rooms
-      // TEMPORARILY DISABLED FOR TESTING
-      /*
+    }
+
+    // Global daily booking limit: max 2 bookings per user per day
+    if (!isAdminUser) {
       const startOfDay = new Date(parsed.startTime);
       startOfDay.setHours(0, 0, 0, 0);
       const endOfDay = new Date(parsed.startTime);
       endOfDay.setHours(23, 59, 59, 999);
-      
+
       const allUserBookings = await storage.getFacilityBookingsByUser(authResult.user.id);
-      const existingBookingsToday = allUserBookings.filter((b: any) => {
+      const bookingsTodayCount = allUserBookings.filter((b: any) => {
         const bookingStart = new Date(b.startTime);
         return (
-          b.facilityId === parsed.facilityId &&
           (b.status === 'approved' || b.status === 'pending') &&
           bookingStart >= startOfDay &&
           bookingStart <= endOfDay
         );
-      });
-      
-      if (existingBookingsToday.length >= 2) {
+      }).length;
+
+      if (bookingsTodayCount >= 2) {
         return NextResponse.json(
-          { message: 'You can only book this Collaborative Learning Room twice per day. You have reached your daily limit.' },
+          { message: 'You have reached the maximum of 2 bookings per day. Please cancel an existing booking or try a different day.' },
           { status: 400 }
         );
       }
-      */
     }
 
     const conflictResult = await enforceUserBookingConflicts(

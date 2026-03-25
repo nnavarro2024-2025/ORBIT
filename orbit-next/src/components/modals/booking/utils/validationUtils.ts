@@ -26,6 +26,7 @@ export interface BookingValidationData {
   participants?: number;
   allBookings?: any[];
   existingBookingId?: number;
+  isAdmin?: boolean;
 }
 
 /**
@@ -78,32 +79,36 @@ export function validateBookingForm(
     });
   }
 
-  // Validate same calendar day (no multi-day bookings)
-  const sDate = data.startTime;
-  const eDate = data.endTime;
-  if (
-    sDate.getFullYear() !== eDate.getFullYear() ||
-    sDate.getMonth() !== eDate.getMonth() ||
-    sDate.getDate() !== eDate.getDate()
-  ) {
-    validationErrors.push({
-      title: 'Single-Day Booking Required',
-      description: 'Bookings must start and end on the same calendar day. Please split multi-day events into separate bookings.',
-    });
+  // Validate same calendar day (no multi-day bookings) — admin may skip
+  if (!data.isAdmin) {
+    const sDate = data.startTime;
+    const eDate = data.endTime;
+    if (
+      sDate.getFullYear() !== eDate.getFullYear() ||
+      sDate.getMonth() !== eDate.getMonth() ||
+      sDate.getDate() !== eDate.getDate()
+    ) {
+      validationErrors.push({
+        title: 'Single-Day Booking Required',
+        description: 'Bookings must start and end on the same calendar day. Please split multi-day events into separate bookings.',
+      });
+    }
   }
 
-  // Validate library hours for both start and end time
-  const startTimeValid = isWithinLibraryHours(data.startTime);
-  const endTimeValid = isWithinLibraryHours(data.endTime);
+  // Validate library hours for both start and end time — admin may skip
+  if (!data.isAdmin) {
+    const startTimeValid = isWithinLibraryHours(data.startTime);
+    const endTimeValid = isWithinLibraryHours(data.endTime);
 
-  if (!startTimeValid || !endTimeValid) {
-    const timeIssues: string[] = [];
-    if (!startTimeValid) timeIssues.push('start time');
-    if (!endTimeValid) timeIssues.push('end time');
-    validationErrors.push({
-      title: 'Outside School Hours',
-      description: `Your ${timeIssues.join(' and ')} ${timeIssues.length > 1 ? 'are' : 'is'} outside school operating hours (${formatLibraryHours()}). Room access is only available during these hours.`,
-    });
+    if (!startTimeValid || !endTimeValid) {
+      const timeIssues: string[] = [];
+      if (!startTimeValid) timeIssues.push('start time');
+      if (!endTimeValid) timeIssues.push('end time');
+      validationErrors.push({
+        title: 'Outside School Hours',
+        description: `Your ${timeIssues.join(' and ')} ${timeIssues.length > 1 ? 'are' : 'is'} outside school operating hours (${formatLibraryHours()}). Room access is only available during these hours.`,
+      });
+    }
   }
 
   // Facility-specific duration validation
@@ -125,12 +130,12 @@ export function validateBookingForm(
       facilityName.includes('collaborative learning room 1') ||
       facilityName.includes('collaborative learning room 2');
 
-    if (isCollabRoom && durationHours > 2) {
+    if (isCollabRoom && durationHours > 2 && !data.isAdmin) {
       validationErrors.push({
         title: 'Duration Limit Exceeded',
         description: `Collaborative Learning Rooms can only be booked for a maximum of 2 hours. Your current booking is ${durationHours.toFixed(1)} hours. Please reduce your booking duration.`,
       });
-    } else if (!isCollabRoom && diff > BOOKING_MAX_DURATION_MS) {
+    } else if (!isCollabRoom && diff > BOOKING_MAX_DURATION_MS && !data.isAdmin) {
       validationErrors.push({
         title: 'Maximum Duration Exceeded',
         description: `Bookings cannot exceed ${BOOKING_MAX_DURATION_MINUTES} minutes (${BOOKING_MAX_DURATION_MINUTES / 60} hours). Your current booking is ${Math.floor(durationMinutes)} minutes.`,
@@ -228,6 +233,27 @@ export function validateBookingForm(
       validationErrors.push({
         title: 'Booking Conflict',
         description: `You already have a booking for this facility from ${format(conflictStart, 'h:mm a')} to ${format(conflictEnd, 'h:mm a')}. Please cancel your existing booking or choose a different time slot.`,
+      });
+    }
+  }
+
+  // Daily booking limit: max 2 active/pending bookings per day — admin may skip
+  if (!data.isAdmin && data.allBookings && data.startTime) {
+    const tgtDate = data.startTime;
+    const todayCount = data.allBookings.filter((b: any) => {
+      if (b.status === 'cancelled' || b.status === 'denied') return false;
+      if (data.existingBookingId && b.id === data.existingBookingId) return false;
+      const bStart = new Date(b.startTime);
+      return (
+        bStart.getFullYear() === tgtDate.getFullYear() &&
+        bStart.getMonth() === tgtDate.getMonth() &&
+        bStart.getDate() === tgtDate.getDate()
+      );
+    }).length;
+    if (todayCount >= 2) {
+      validationErrors.push({
+        title: 'Daily Booking Limit Reached',
+        description: 'You have reached the maximum of 2 bookings per day. Please cancel an existing booking first or choose a different day.',
       });
     }
   }

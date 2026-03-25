@@ -24,7 +24,7 @@ import {
   filterFacilitiesByRole,
 } from '../utils';
 import { useFacilities, useSlotManagement, useFormValidation } from '../hooks';
-import BookingForm from './BookingForm';
+import { BookingForm } from './BookingForm';
 import { FORM_LIMITS } from '../schemas/bookingSchema';
 import { useQuery } from '@tanstack/react-query';
 
@@ -47,6 +47,7 @@ export function BookingModalContent({
 }: BookingModalContentProps) {
   const { toast } = useToast();
   const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const queryClient = useQueryClient();
 
   // Get filtered facilities
@@ -125,6 +126,7 @@ export function BookingModalContent({
     facilities,
     allBookings,
     userEmail: user?.email,
+    isAdmin,
   });
 
   console.log('[BookingModal] Validation warnings:', formValidationWarnings);
@@ -221,6 +223,7 @@ export function BookingModalContent({
           validationWarnings={formValidationWarnings}
           slotManagement={slotManagement}
           selectedFacility={selectedFacility}
+          isAdmin={isAdmin}
         />
       </DialogContent>
     </Dialog>
