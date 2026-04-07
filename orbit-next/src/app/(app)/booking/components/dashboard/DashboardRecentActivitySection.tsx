@@ -1,4 +1,4 @@
-import { Dispatch, SetStateAction, useMemo } from "react";
+import { Dispatch, SetStateAction, useEffect, useMemo, useState } from "react";
 import { Calendar, Loader2 } from "lucide-react";
 import { format, isToday } from "date-fns";
 
@@ -6,11 +6,44 @@ import { SkeletonListItem } from "@/components/ui/skeleton-presets";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
+function DashboardCountdown({ expiry, onExpire }: { expiry: string | Date | undefined; onExpire?: () => void }) {
+  const [now, setNow] = useState(Date.now());
+  const [hasExpired, setHasExpired] = useState(false);
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (!expiry || hasExpired) return;
+    const ms = new Date(expiry).getTime() - now;
+    if (ms <= 0) {
+      setHasExpired(true);
+      onExpire?.();
+    }
+  }, [expiry, now, onExpire, hasExpired]);
+
+  if (!expiry) return <span />;
+
+  const diff = Math.max(0, new Date(expiry).getTime() - now);
+  const hours = Math.floor(diff / 3_600_000);
+  const mins = Math.floor((diff % 3_600_000) / 60_000);
+  const secs = Math.floor((diff % 60_000) / 1_000);
+
+  return (
+    <span className="font-mono text-base font-semibold">
+      {hours.toString().padStart(2, "0")}:{mins.toString().padStart(2, "0")}:{secs.toString().padStart(2, "0")}
+    </span>
+  );
+}
+
 interface DashboardRecentActivitySectionProps {
   activityTab: "booking" | "notifications";
   onChangeTab: (tab: "booking" | "notifications") => void;
   currentUserEmail?: string;
   currentUserName?: string;
+  user?: any;
   userBookings: any[];
   notificationsData: any[];
   isUserBookingsLoading: boolean;
@@ -28,6 +61,8 @@ interface DashboardRecentActivitySectionProps {
   onNavigateToBookingDetails: (bookingId: string) => void;
   onMarkNotificationRead: (notificationId: string) => void;
   markNotificationReadPending: boolean;
+  onArrivalCountdownExpire?: (booking: any) => void;
+  onActiveCountdownExpire?: (booking: any) => void;
 }
 
 export function DashboardRecentActivitySection({
@@ -35,6 +70,7 @@ export function DashboardRecentActivitySection({
   onChangeTab,
   currentUserEmail,
   currentUserName,
+  user,
   userBookings,
   notificationsData,
   isUserBookingsLoading,
@@ -52,6 +88,8 @@ export function DashboardRecentActivitySection({
   onNavigateToBookingDetails,
   onMarkNotificationRead,
   markNotificationReadPending,
+  onArrivalCountdownExpire,
+  onActiveCountdownExpire,
 }: DashboardRecentActivitySectionProps) {
   // Filter: ALL Scheduled/Active/Pending bookings + only TODAY's Completed/Cancelled
   const filteredBookings = useMemo(() => {
@@ -88,9 +126,6 @@ export function DashboardRecentActivitySection({
       <div className="space-y-2">
         {filteredBookings.map((booking) => {
           const id = String(booking.id || Math.random());
-          const equipment = booking.equipment || {};
-          const items = Array.isArray(equipment.items) ? equipment.items : [];
-          const hasOthers = equipment.others && String(equipment.others).trim().length > 0;
           const status = getBookingStatus(booking);
 
           return (
@@ -123,7 +158,7 @@ export function DashboardRecentActivitySection({
                     </div>
                   </div>
                 </div>
-                {/* Right section: Time, Status, Equipment */}
+                {/* Right section: Time, Status, Timer */}
                 <div className="flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-6">
                   {/* Time and Status Row on Mobile */}
                   <div className="flex items-center justify-between lg:justify-start gap-3 lg:gap-6">
@@ -140,77 +175,34 @@ export function DashboardRecentActivitySection({
                         <p className="text-xs text-gray-500 mt-0.5">{format(new Date(booking.endTime), "M/d/yyyy")}</p>
                       </div>
                     </div>
-                    {/* Status */}
+                    {/* Status / Confirm countdown */}
                     <div className="flex flex-col gap-2.5">
-                      <span className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap ${
-                        status.label === "Active" ? "bg-green-100 text-green-800" :
-                        status.label === "Scheduled" ? "bg-pink-100 text-pink-800" :
-                        status.label === "Completed" ? "bg-green-100 text-green-800" :
-                        status.label === "Cancelled" ? "bg-orange-100 text-orange-800" :
-                        status.label === "Denied" ? "bg-red-100 text-red-800" :
-                        status.label === "Pending" ? "bg-blue-100 text-blue-800" :
-                        "bg-gray-100 text-gray-800"
-                      }`}>
-                        {status.label}
-                      </span>
+                      {status.label === "Active" && user && booking.userId === user.id && booking.arrivalConfirmationDeadline && !booking.arrivalConfirmed ? (
+                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-300 rounded-full">
+                          <span className="text-[10px] font-medium text-amber-700 whitespace-nowrap">Confirm in:</span>
+                          <DashboardCountdown expiry={booking.arrivalConfirmationDeadline} onExpire={() => onArrivalCountdownExpire?.(booking)} />
+                        </div>
+                      ) : (
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap ${
+                          status.label === "Active" ? "bg-green-100 text-green-800" :
+                          status.label === "Scheduled" ? "bg-pink-100 text-pink-800" :
+                          status.label === "Completed" ? "bg-green-100 text-green-800" :
+                          status.label === "Cancelled" ? "bg-orange-100 text-orange-800" :
+                          status.label === "Denied" ? "bg-red-100 text-red-800" :
+                          status.label === "Pending" ? "bg-blue-100 text-blue-800" :
+                          "bg-gray-100 text-gray-800"
+                        }`}>
+                          {status.label}
+                        </span>
+                      )}
                     </div>
                   </div>
-                  {/* Equipment */}
-                  {(items.length > 0 || hasOthers) && (
-                    <div className="w-full lg:w-auto lg:max-w-[280px]">
-                      <div className="mb-1.5">
-                        <h5 className="text-[13px] font-bold text-gray-700 tracking-wider text-left">Booked Equipment</h5>
-                      </div>
-                      <div className="space-y-0.5 text-left">
-                        {items.map((item: string, idx: number) => (
-                          <div key={`eq-status-${id}-${idx}`} className="py-0.5">
-                            <span className="text-xs text-gray-700 font-medium">{item}</span>
-                          </div>
-                        ))}
-                          {hasOthers && (
-                            <div className="py-0.5">
-                              <Popover open={!!openOthers[id]} onOpenChange={(value) => setOpenOthers((prev) => ({ ...prev, [id]: value }))}>
-                                <TooltipProvider>
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <PopoverTrigger asChild>
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            e.preventDefault();
-                                          }}
-                                          className="text-xs text-pink-600 hover:text-pink-700 font-medium transition-colors"
-                                        >
-                                          View other
-                                        </button>
-                                      </PopoverTrigger>
-                                    </TooltipTrigger>
-                                    <TooltipContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden">
-                                      <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                                        <p className="font-semibold text-sm text-gray-800">Other equipment</p>
-                                      </div>
-                                      <div className="p-3">
-                                        <p className="text-sm text-gray-900 leading-5 break-words">{String(equipment.others).trim()}</p>
-                                      </div>
-                                    </TooltipContent>
-                                  </Tooltip>
-                                </TooltipProvider>
-                                <PopoverContent side="top" className="max-w-sm p-0 bg-white border border-gray-300 shadow-xl rounded-lg overflow-hidden z-50">
-                                  <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                                    <p className="font-semibold text-sm text-gray-800">Other equipment</p>
-                                  </div>
-                                  <div className="p-3 max-h-48 overflow-y-auto">
-                                    <p className="text-sm text-gray-900 leading-5 break-words">{String(equipment.others).trim()}</p>
-                                  </div>
-                                </PopoverContent>
-                              </Popover>
-                            </div>
-                          )}
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
+              {/* Booked date - below the card content */}
+              <p className="text-xs text-gray-400 mt-2">
+                Booked on {format(new Date(booking.createdAt || booking.startTime), "MMM d, yyyy 'at' h:mm a")}
+              </p>
             </div>
           );
         })}
@@ -268,7 +260,7 @@ export function DashboardRecentActivitySection({
               <h4 className="text-sm font-semibold text-gray-900 truncate">
                 {notification.title || "Notification"}
               </h4>
-              <p className="text-xs text-gray-600 mt-1 whitespace-pre-wrap break-words">
+              <div className="text-xs text-gray-600 mt-1 whitespace-pre-wrap break-words">
                 {(notification.message || "").split("\n").map((line: string, idx: number) => (
                   <span key={idx} className="block">
                     {(() => {
@@ -304,9 +296,9 @@ export function DashboardRecentActivitySection({
                               <span className="block text-[11px] font-semibold text-gray-700">
                                 Other notes:
                               </span>
-                              <p className="text-xs text-gray-600 mt-1 whitespace-pre-wrap break-words">
+                              <span className="text-xs text-gray-600 mt-1 whitespace-pre-wrap break-words block">
                                 {String(equipment.others)}
-                              </p>
+                              </span>
                             </div>
                           ) : null}
                         </>
@@ -314,7 +306,7 @@ export function DashboardRecentActivitySection({
                     })()}
                   </span>
                 ))}
-              </p>
+              </div>
               <p className="text-[11px] text-gray-500 mt-2">
                 {format(new Date(notification.createdAt), "EEE, MMM d • hh:mm a")}
               </p>

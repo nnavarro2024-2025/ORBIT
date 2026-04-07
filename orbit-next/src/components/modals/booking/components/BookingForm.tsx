@@ -203,9 +203,27 @@ export function BookingForm({
   const { PURPOSE_MAX, OTHERS_MAX } = FORM_LIMITS;
   const maxCapacity = selectedFacility ? getFacilityMaxCapacity(selectedFacility) : 8;
 
+  const [selectedCampus, setSelectedCampus] = useState<string>('');
+
   const startTime: Date | undefined = form.watch('startTime');
   const endTime: Date | undefined = form.watch('endTime');
   const facilityIdWatched: string | undefined = form.watch('facilityId');
+
+  // Filter facilities by selected campus
+  const filteredFacilities = useMemo(() => {
+    if (!selectedCampus) return facilities;
+    return facilities.filter((f: any) => f.campus === selectedCampus);
+  }, [facilities, selectedCampus]);
+
+  // Reset facility selection when campus changes
+  useEffect(() => {
+    if (!selectedCampus) return;
+    const currentFacility = facilities.find((f: any) => f.id.toString() === facilityIdWatched);
+    if (currentFacility && currentFacility.campus !== selectedCampus) {
+      const firstMatch = filteredFacilities[0];
+      form.setValue('facilityId', firstMatch ? firstMatch.id.toString() : '');
+    }
+  }, [selectedCampus]);
 
   // Sync endTime whenever startTime changes
   useEffect(() => {
@@ -276,6 +294,9 @@ export function BookingForm({
     return endTime.getTime() > startTime.getTime() + MAX_BOOKING_MS;
   }, [startTime?.getTime(), endTime?.getTime(), isAdmin]);
 
+  const purposeValue = form.watch('purpose');
+  const isPurposeEmpty = !purposeValue || purposeValue.trim().length === 0;
+
   const today = new Date();
   const minDate = new Date(today.getTime() - today.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 
@@ -286,6 +307,19 @@ export function BookingForm({
           <DialogTitle className="text-2xl font-semibold">Create Booking</DialogTitle>
           <DialogDescription>Book a facility for your event or meeting.</DialogDescription>
         </DialogHeader>
+
+        {/* Booking Policies */}
+        {!isAdmin && (
+          <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
+            <p className="text-[10px] font-bold text-blue-500 uppercase tracking-wider mb-2">Booking Policies</p>
+            <ul className="space-y-1 text-xs text-blue-700">
+              <li>• Operating hours: <strong>7:30 AM – 7:00 PM</strong></li>
+              <li>• Maximum booking duration: <strong>2 hours</strong></li>
+              <li>• Maximum bookings per day: <strong>2</strong></li>
+              <li>• Bookings cannot be made for past dates</li>
+            </ul>
+          </div>
+        )}
 
         {/* Admin banner */}
         {isAdmin && (
@@ -298,8 +332,22 @@ export function BookingForm({
           </div>
         )}
 
-        {/* Facility Selection */}
-        <div className="grid md:grid-cols-2 gap-4">
+        {/* Campus & Facility Selection */}
+        <div className="grid md:grid-cols-3 gap-4">
+          <FormItem>
+            <Label>Campus</Label>
+            <Select onValueChange={(val) => setSelectedCampus(val === '__all__' ? '' : val)} value={selectedCampus || '__all__'}>
+              <SelectTrigger>
+                <SelectValue placeholder="All Campuses" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All Campuses</SelectItem>
+                <SelectItem value="selga">Selga</SelectItem>
+                <SelectItem value="bonifacio">Bonifacio</SelectItem>
+              </SelectContent>
+            </Select>
+          </FormItem>
+
           <FormField
             control={form.control}
             name="facilityId"
@@ -313,7 +361,7 @@ export function BookingForm({
                     </SelectTrigger>
                   </FormControl>
                   <SelectContent>
-                    {facilities.map((facility) => (
+                    {filteredFacilities.map((facility) => (
                       <SelectItem key={facility.id} value={facility.id.toString()}>
                         {facility.name}
                       </SelectItem>
@@ -355,19 +403,6 @@ export function BookingForm({
           </div>
         )}
 
-        {/* Booking Policies */}
-        {!isAdmin && (
-          <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
-            <p className="text-[10px] font-bold text-blue-500 uppercase tracking-wider mb-2">Booking Policies</p>
-            <ul className="space-y-1 text-xs text-blue-700">
-              <li>• Operating hours: <strong>7:30 AM – 7:00 PM</strong></li>
-              <li>• Maximum booking duration: <strong>2 hours</strong></li>
-              <li>• Maximum bookings per day: <strong>2</strong></li>
-              <li>• Bookings cannot be made for past dates</li>
-            </ul>
-          </div>
-        )}
-
         {/* Date and Time */}
         <div className="grid md:grid-cols-2 gap-4">
           <FormField
@@ -381,6 +416,7 @@ export function BookingForm({
                     <Input
                       type="date"
                       min={minDate}
+                      className={hasTimeConflict && !isAdmin ? 'border-red-500 focus-visible:ring-red-400' : ''}
                       value={field.value ? new Date(field.value.getTime() - field.value.getTimezoneOffset() * 60000).toISOString().slice(0, 10) : ''}
                       onChange={(e) => {
                         const currentTime = field.value || new Date();
@@ -393,6 +429,7 @@ export function BookingForm({
                   <FormControl>
                     <Input
                       type="time"
+                      className={hasTimeConflict && !isAdmin ? 'border-red-500 focus-visible:ring-red-400' : ''}
                       value={field.value ? new Date(field.value.getTime() - field.value.getTimezoneOffset() * 60000).toISOString().slice(11, 16) : ''}
                       onChange={(e) => {
                         const currentDate = field.value || new Date();
@@ -414,7 +451,7 @@ export function BookingForm({
             render={({ field }) => {
               const exceedsMax = !isAdmin && startTime && field.value && field.value.getTime() > startTime.getTime() + MAX_BOOKING_MS;
               const exceedsHours = !isAdmin && field.value && (field.value.getHours() > 19 || (field.value.getHours() === 19 && field.value.getMinutes() > 0));
-              const hasError = exceedsMax || exceedsHours;
+              const hasError = exceedsMax || exceedsHours || (hasTimeConflict && !isAdmin);
               const maxTimeStr = !isAdmin && startTime ? (() => {
                 const cap2h = new Date(startTime.getTime() + MAX_BOOKING_MS);
                 const cap7pm = new Date(startTime); cap7pm.setHours(19, 0, 0, 0);
@@ -486,21 +523,27 @@ export function BookingForm({
         <FormField
           control={form.control}
           name="purpose"
-          render={({ field }) => (
-            <FormItem>
-              <Label>
-                Purpose <span className="text-red-500">*</span>
-              </Label>
-              <CustomTextarea
-                value={field.value}
-                onChange={field.onChange}
-                placeholder="Describe your purpose for booking this facility"
-                maxLength={PURPOSE_MAX}
-                isInvalid={field.value?.length >= PURPOSE_MAX}
-                required
-              />
-            </FormItem>
-          )}
+          render={({ field }) => {
+            const purposeEmpty = !field.value || field.value.trim().length === 0;
+            return (
+              <FormItem>
+                <Label>
+                  Purpose <span className="text-red-500">*</span>
+                </Label>
+                <CustomTextarea
+                  value={field.value}
+                  onChange={field.onChange}
+                  placeholder="Describe your purpose for booking this facility"
+                  maxLength={PURPOSE_MAX}
+                  isInvalid={purposeEmpty || field.value?.length >= PURPOSE_MAX}
+                  required
+                />
+                {purposeEmpty && (
+                  <p className="text-xs text-red-600 mt-1">Please provide a purpose for your booking.</p>
+                )}
+              </FormItem>
+            );
+          }}
         />
 
         {/* Equipment */}
@@ -559,10 +602,10 @@ export function BookingForm({
 
 
 
-        {/* Validation Warnings */}
-        {validationWarnings.length > 0 && (
+        {/* Validation Warnings (excluding Purpose Required and Booking Conflict — handled inline/redundant) */}
+        {validationWarnings.filter(w => w.title !== 'Purpose Required' && w.title !== 'Booking Conflict' && w.title !== 'Maximum Duration Exceeded').length > 0 && (
           <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4">
-            {validationWarnings.map((warning, idx) => (
+            {validationWarnings.filter(w => w.title !== 'Purpose Required' && w.title !== 'Booking Conflict' && w.title !== 'Maximum Duration Exceeded').map((warning, idx) => (
               <div key={idx} className="flex items-start gap-3 mb-2 last:mb-0">
                 <span className="text-yellow-600 text-xl">!</span>
                 <div>
@@ -581,7 +624,7 @@ export function BookingForm({
           </Button>
           <Button
             type="submit"
-            disabled={isSubmitting || (!isAdmin && (hasTimeConflict || hasEndAfterHours || hasEndExceedsMax))}
+            disabled={isSubmitting || isPurposeEmpty || (!isAdmin && (hasTimeConflict || hasEndAfterHours || hasEndExceedsMax))}
           >
             {isSubmitting
               ? 'Creating...'

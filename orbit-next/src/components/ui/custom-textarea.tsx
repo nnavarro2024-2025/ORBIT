@@ -80,7 +80,7 @@ export const CustomTextarea: React.FC<CustomTextareaProps> = ({
           fontFamily: 'inherit',
           fontSize: '14px',
           lineHeight: '1.5',
-          border: '1px solid #d1d5db',
+          border: isInvalid ? '1px solid #ef4444' : '1px solid #d1d5db',
           borderRadius: '6px',
           padding: '12px',
           outline: 'none',

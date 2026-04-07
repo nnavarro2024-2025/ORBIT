@@ -262,58 +262,29 @@ export function MyBookingsSection({
                   onClick={() => toggleExpand(id)}
                 >
                   <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 lg:gap-4">
-                    {/* Left: Actions + Facility info */}
-                    <div className="flex items-start gap-3 flex-shrink-0">
-                      {/* Edit/Cancel on left */}
-                      <div className="flex flex-col gap-1.5 flex-shrink-0">
-                        {canEditBooking(booking) && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); onEditBooking(booking); }}
-                            className="px-2.5 py-1 bg-pink-600 text-white text-[11px] font-medium rounded-md hover:bg-pink-700 transition-colors whitespace-nowrap"
-                          >
-                            Edit
-                          </button>
-                        )}
-                        {canCancelBooking(booking) && booking.userId === user?.id && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); onCancelBooking(booking); }}
-                            disabled={cancelBookingMutationStatus === "pending"}
-                            className={`px-2.5 py-1 text-white text-[11px] font-medium rounded-md transition-colors whitespace-nowrap ${
-                              cancelBookingMutationStatus === "pending" ? "bg-red-400 cursor-wait" : "bg-red-600 hover:bg-red-700"
-                            }`}
-                          >
-                            {cancelBookingMutationStatus === "pending" ? (
-                              <Loader2 className="h-3 w-3 animate-spin inline" />
-                            ) : (
-                              status.label === "Active" ? "End" : "Cancel"
-                            )}
-                          </button>
-                        )}
+                    {/* Left: Facility info */}
+                    <div className="flex items-start gap-2 flex-shrink-0">
+                      <div className={`${
+                        status.label === "Active" ? "bg-green-100" :
+                        status.label === "Scheduled" ? "bg-pink-100" :
+                        "bg-gray-100"
+                      } p-2 rounded-lg flex-shrink-0`}>
+                        <Calendar className={`h-4 w-4 ${
+                          status.label === "Active" ? "text-green-600" :
+                          status.label === "Scheduled" ? "text-pink-600" :
+                          "text-gray-600"
+                        }`} />
                       </div>
-                      {/* Facility name + participants */}
-                      <div className="flex items-start gap-2">
-                        <div className={`${
-                          status.label === "Active" ? "bg-green-100" :
-                          status.label === "Scheduled" ? "bg-pink-100" :
-                          "bg-gray-100"
-                        } p-2 rounded-lg flex-shrink-0`}>
-                          <Calendar className={`h-4 w-4 ${
-                            status.label === "Active" ? "text-green-600" :
-                            status.label === "Scheduled" ? "text-pink-600" :
-                            "text-gray-600"
-                          }`} />
-                        </div>
-                        <div className="min-w-0">
-                          <h4 className="font-semibold text-gray-900 text-sm leading-tight break-words">{getFacilityDisplay(booking.facilityId)}</h4>
-                          <div className="flex flex-wrap items-center gap-2 mt-1">
-                            <span className="text-xs text-gray-500">Participants:</span>
-                            <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">{booking.participants || 0}</span>
-                          </div>
+                      <div className="min-w-0">
+                        <h4 className="font-semibold text-gray-900 text-sm leading-tight break-words">{getFacilityDisplay(booking.facilityId)}</h4>
+                        <div className="flex flex-wrap items-center gap-2 mt-1">
+                          <span className="text-xs text-gray-500">Participants:</span>
+                          <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">{booking.participants || 0}</span>
                         </div>
                       </div>
                     </div>
 
-                    {/* Right: Time, Status, Expand indicator */}
+                    {/* Right: Time, Status, Actions, Expand indicator */}
                     <div className="flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-6">
                       <div className="flex items-center justify-between lg:justify-start gap-3 lg:gap-6">
                         {/* Time Info */}
@@ -329,8 +300,8 @@ export function MyBookingsSection({
                             <p className="text-xs text-gray-500 mt-0.5">{format(new Date(booking.endTime), "M/d/yyyy")}</p>
                           </div>
                         </div>
-                        {/* Status */}
-                        <div className="flex items-center gap-2">
+                        {/* Status badge + Edit/Cancel buttons */}
+                        <div className="flex items-center gap-3">
                           <span className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap ${
                             status.label === "Active" ? "bg-green-100 text-green-800" :
                             status.label === "Scheduled" ? "bg-pink-100 text-pink-800" :
@@ -342,6 +313,33 @@ export function MyBookingsSection({
                           }`}>
                             {status.label}
                           </span>
+                          {(canEditBooking(booking) || (canCancelBooking(booking) && booking.userId === user?.id)) && (
+                            <div className="flex flex-col gap-1">
+                              {canEditBooking(booking) && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); onEditBooking(booking); }}
+                                  className="px-2.5 py-1 bg-pink-600 text-white text-[11px] font-medium rounded-md hover:bg-pink-700 transition-colors whitespace-nowrap"
+                                >
+                                  Edit
+                                </button>
+                              )}
+                              {canCancelBooking(booking) && booking.userId === user?.id && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); onCancelBooking(booking); }}
+                                  disabled={cancelBookingMutationStatus === "pending"}
+                                  className={`px-2.5 py-1 text-white text-[11px] font-medium rounded-md transition-colors whitespace-nowrap ${
+                                    cancelBookingMutationStatus === "pending" ? "bg-red-400 cursor-wait" : "bg-red-600 hover:bg-red-700"
+                                  }`}
+                                >
+                                  {cancelBookingMutationStatus === "pending" ? (
+                                    <Loader2 className="h-3 w-3 animate-spin inline" />
+                                  ) : (
+                                    status.label === "Active" ? "End" : "Cancel"
+                                  )}
+                                </button>
+                              )}
+                            </div>
+                          )}
                           <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`} />
                         </div>
                       </div>
@@ -364,6 +362,10 @@ export function MyBookingsSection({
                       )}
                     </div>
                   </div>
+                  {/* Booked date - below the card content */}
+                  <p className="text-xs text-gray-400 mt-2">
+                    Booked on {format(new Date(booking.createdAt || booking.startTime), "MMM d, yyyy 'at' h:mm a")}
+                  </p>
                 </div>
 
                 {/* Expandable details section */}
@@ -373,7 +375,7 @@ export function MyBookingsSection({
                   }`}
                 >
                   <div className="px-3 sm:px-4 pb-3 sm:pb-4 border-t border-gray-100 pt-3">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {/* Purpose */}
                       <div className="bg-gray-50 rounded-lg p-3">
                         <p className="text-xs font-medium text-gray-500 mb-1">Purpose</p>
@@ -381,7 +383,7 @@ export function MyBookingsSection({
                       </div>
                       {/* Equipment */}
                       <div className="bg-gray-50 rounded-lg p-3">
-                        <p className="text-xs font-medium text-gray-500 mb-1">Equipment</p>
+                        <p className="text-xs font-medium text-gray-500 mb-1">Requested Equipment</p>
                         {(items.length > 0 || hasOthers) ? (
                           <div className="space-y-1 text-left">
                             {items.map((item: string, idx: number) => (
@@ -427,16 +429,6 @@ export function MyBookingsSection({
                         ) : (
                           <p className="text-xs text-gray-500">No equipment</p>
                         )}
-                      </div>
-                      {/* Group size & booking date */}
-                      <div className="bg-gray-50 rounded-lg p-3">
-                        <p className="text-xs font-medium text-gray-500 mb-1">Details</p>
-                        <p className="text-sm text-gray-900">
-                          <span className="font-medium">{booking.participants || 1}</span> participant{(booking.participants || 1) > 1 ? "s" : ""}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">
-                          Booked on {format(new Date(booking.createdAt || booking.startTime), "MMM d, yyyy")}
-                        </p>
                       </div>
                     </div>
                   </div>

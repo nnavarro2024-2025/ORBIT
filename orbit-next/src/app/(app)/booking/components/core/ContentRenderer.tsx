@@ -227,6 +227,7 @@ export function ContentRenderer(props: ContentRendererProps) {
             }}
             currentUserEmail={props.currentUserEmail}
             currentUserName={props.currentUserName}
+            user={props.user}
             userBookings={props.userBookings}
             notificationsData={props.notificationsData}
             isUserBookingsLoading={props.isUserBookingsLoading}
@@ -246,6 +247,8 @@ export function ContentRenderer(props: ContentRendererProps) {
             onNavigateToBookingDetails={props.onNavigateToBookingDetails}
             onMarkNotificationRead={props.onMarkNotificationRead}
             markNotificationReadPending={props.markNotificationReadPending}
+            onArrivalCountdownExpire={props.onArrivalCountdownExpire}
+            onActiveCountdownExpire={props.onActiveCountdownExpire}
           />
         </>
       );
