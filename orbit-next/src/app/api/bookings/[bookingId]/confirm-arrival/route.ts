@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 
 import { NextResponse, type NextRequest } from "next/server";
 
-import { requireAdminUser } from "@/server/core";
+import { requireActiveUser } from "@/server/core";
 import { storage } from "@/server/core";
 
 export const runtime = "nodejs";
@@ -11,7 +11,7 @@ export async function POST(
   request: NextRequest,
   context: { params: Promise<{ bookingId: string }> },
 ) {
-  const authResult = await requireAdminUser(request.headers);
+  const authResult = await requireActiveUser(request.headers);
   if (!authResult.ok) {
     return authResult.response;
   }
@@ -24,6 +24,13 @@ export async function POST(
       return NextResponse.json({ message: "Booking not found" }, { status: 404 });
     }
 
+    // Allow the booking owner OR an admin to confirm
+    const isAdmin = authResult.userRecord?.role === "admin";
+    const isOwner = booking.userId === authResult.user.id;
+    if (!isAdmin && !isOwner) {
+      return NextResponse.json({ message: "Not authorized to confirm this booking" }, { status: 403 });
+    }
+
     if (booking.status !== "approved") {
       return NextResponse.json({ message: "Only approved bookings can be confirmed for arrival" }, { status: 400 });
     }
@@ -34,10 +41,11 @@ export async function POST(
     } as any);
 
     try {
+      const actor = isAdmin ? `Admin ${authResult.user.id}` : `User ${authResult.user.id}`;
       await storage.createActivityLog({
         id: randomUUID(),
         action: "Arrival Confirmed",
-        details: `Admin ${authResult.user.id} confirmed arrival for booking ${bookingId}`,
+        details: `${actor} confirmed arrival for booking ${bookingId}`,
         userId: authResult.user.id,
         ipAddress: null,
         userAgent: request.headers.get("user-agent") ?? null,
@@ -48,9 +56,9 @@ export async function POST(
     }
 
     try {
-      const user = await storage.getUser(booking.userId).catch(() => null);
       const facility = await storage.getFacility(booking.facilityId).catch(() => null);
-      if (user) {
+      // Only send alert to user if admin confirmed (user already knows if they did it themselves)
+      if (isAdmin) {
         await storage.createSystemAlert({
           id: randomUUID(),
           type: "booking",

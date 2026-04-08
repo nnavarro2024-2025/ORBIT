@@ -1,6 +1,8 @@
 import { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Calendar, ChevronDown, Loader2 } from "lucide-react";
+import { Plus, Calendar, ChevronDown, Loader2, CheckCircle2 } from "lucide-react";
 import { format, startOfDay, endOfDay, parseISO } from "date-fns";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/api";
 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -91,6 +93,18 @@ export function MyBookingsSection({
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+
+  const queryClient = useQueryClient();
+  const confirmArrivalMutation = useMutation({
+    mutationFn: async (bookingId: string) => {
+      const res = await apiRequest('POST', `/api/bookings/${bookingId}/confirm-arrival`);
+      if (!res.ok) throw new Error('Failed to confirm arrival');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/bookings'] });
+    },
+  });
 
   const toggleExpand = useCallback((id: string) => {
     setExpandedCards((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -348,9 +362,26 @@ export function MyBookingsSection({
                       {status.label === "Active" && booking.userId === user?.id && (
                         <div className="flex-shrink-0">
                           {booking.arrivalConfirmationDeadline && !booking.arrivalConfirmed ? (
-                            <div className="inline-flex items-center gap-1.5 px-2 py-1 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-300 rounded-lg">
-                              <span className="text-[10px] font-medium text-amber-700 whitespace-nowrap">Confirm in:</span>
-                              <Countdown expiry={booking.arrivalConfirmationDeadline} onExpire={() => onArrivalCountdownExpire?.(booking)} />
+                            <div className="flex items-center gap-2">
+                              <div className="inline-flex items-center gap-1.5 px-2 py-1 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-300 rounded-lg">
+                                <span className="text-[10px] font-medium text-amber-700 whitespace-nowrap">Confirm in:</span>
+                                <Countdown expiry={booking.arrivalConfirmationDeadline} onExpire={() => onArrivalCountdownExpire?.(booking)} />
+                              </div>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  confirmArrivalMutation.mutate(String(booking.id));
+                                }}
+                                disabled={confirmArrivalMutation.isPending}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 transition-colors disabled:bg-green-400 disabled:cursor-wait"
+                              >
+                                {confirmArrivalMutation.isPending ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <CheckCircle2 className="h-3 w-3" />
+                                )}
+                                Confirm Arrival
+                              </button>
                             </div>
                           ) : (
                             <div className="inline-flex items-center gap-1.5 px-2 py-1 bg-gradient-to-r from-green-50 to-emerald-50 border border-green-300 rounded-lg">
