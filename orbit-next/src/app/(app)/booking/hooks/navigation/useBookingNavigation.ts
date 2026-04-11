@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useLegacyLocation } from "@/lib/utils";
 import { DEFAULT_BOOKING_LEAD_TIME, DEFAULT_BOOKING_DURATION } from '../../config/constants';
 import { apiRequest } from "@/lib/api";
-import { pickAvailableSlot, findEarliestAvailableSlot } from '../../lib/helpers/availabilityHelpers';
+import { pickAvailableSlot, findEarliestAvailableSlot, findSmartBookingSlot } from '../../lib/helpers/availabilityHelpers';
 
 /**
  * Hook for handling initial URL hash
@@ -246,7 +246,6 @@ export function useLegacyNotificationsRoute(
 export function useOpenBookingOnce(
   setSelectedView: (view: string) => void,
   setScrollToBookingId: (id: string | null) => void,
-  setEditingBooking: (booking: any) => void,
   userBookings: any[],
   allBookings: any[]
 ) {
@@ -260,7 +259,6 @@ export function useOpenBookingOnce(
         } catch (e) {}
         setSelectedView('my-bookings');
         setScrollToBookingId(String(id));
-        setEditingBooking(null);
       } catch (e) {}
     };
 
@@ -319,12 +317,13 @@ export function createOpenBookingModal(
       const now = new Date();
       
       try {
+        // Try smart slot from cached availability
         if (facilityId) {
           const entry = availabilityMap.get(facilityId);
-          const slot = pickAvailableSlot(entry, now);
-          if (slot) {
-            start = new Date(slot.start);
-            end = new Date(slot.end);
+          const smart = findSmartBookingSlot(entry, now);
+          if (smart) {
+            start = new Date(smart.start);
+            end = new Date(smart.end);
           }
         }
 
@@ -336,20 +335,19 @@ export function createOpenBookingModal(
           }
         }
 
-        // Try fresh fetch if still no slot
+        // Try fresh fetch for today if still no slot
         if (!start) {
           try {
-            const dateStr = todayDateStr;
-            const resp = await apiRequest('GET', `/api/availability?date=${dateStr}`);
+            const resp = await apiRequest('GET', `/api/availability?date=${todayDateStr}`);
             const json = await resp.json();
             const dataArr = Array.isArray(json?.data) ? json.data : [];
             
             if (facilityId) {
               const entry = dataArr.find((d: any) => d.facility && d.facility.id === facilityId);
-              const slot = pickAvailableSlot(entry, now);
-              if (slot) {
-                start = new Date(slot.start);
-                end = new Date(slot.end);
+              const smart = findSmartBookingSlot(entry, now);
+              if (smart) {
+                start = new Date(smart.start);
+                end = new Date(smart.end);
               }
             }
             
@@ -357,6 +355,43 @@ export function createOpenBookingModal(
               const earliestSlot = findEarliestAvailableSlot(
                 new Map(dataArr.map((d: any) => [d.facility.id, d])),
                 now
+              );
+              if (earliestSlot) {
+                start = new Date(earliestSlot.start);
+                end = new Date(earliestSlot.end);
+              }
+            }
+          } catch (e) {
+            // ignore fetch errors
+          }
+        }
+
+        // No slot today — try tomorrow
+        if (!start) {
+          try {
+            const tomorrow = new Date(now);
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            const tomorrowStr = tomorrow.toISOString().slice(0, 10);
+            const tomorrowStart = new Date(tomorrow);
+            tomorrowStart.setHours(0, 0, 0, 0);
+
+            const resp = await apiRequest('GET', `/api/availability?date=${tomorrowStr}`);
+            const json = await resp.json();
+            const dataArr = Array.isArray(json?.data) ? json.data : [];
+
+            if (facilityId) {
+              const entry = dataArr.find((d: any) => d.facility && d.facility.id === facilityId);
+              const smart = findSmartBookingSlot(entry, tomorrowStart);
+              if (smart) {
+                start = new Date(smart.start);
+                end = new Date(smart.end);
+              }
+            }
+
+            if (!start) {
+              const earliestSlot = findEarliestAvailableSlot(
+                new Map(dataArr.map((d: any) => [d.facility.id, d])),
+                tomorrowStart
               );
               if (earliestSlot) {
                 start = new Date(earliestSlot.start);

@@ -320,8 +320,8 @@ export default function AvailabilityGrid({ date, onSelectRange, unavailableDates
     }
     if (allSchoolHoursPast) {
       return (
-        <div className="flex-1 w-full overflow-x-auto flex items-center justify-center min-h-[400px]">
-          <span className="text-2xl text-gray-500 font-semibold">Unavailable</span>
+        <div className="flex-1 w-full overflow-x-auto flex items-center justify-center min-h-[200px] sm:min-h-[400px]">
+          <span className="text-lg sm:text-2xl text-gray-500 font-semibold">Unavailable</span>
         </div>
       );
     }

@@ -24,8 +24,6 @@ interface ContentRendererProps {
   openOthers: Record<string, boolean>;
   setOpenOthers: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   onViewAllBookingHistory: () => void;
-  canEditBooking: (booking: any) => boolean;
-  onEditBooking: (booking: any) => void;
   canCancelBooking: (booking: any) => boolean;
   onCancelBooking: (booking: any) => void;
   cancelBookingMutationStatus: 'idle' | 'pending' | 'success' | 'error';
@@ -95,8 +93,6 @@ export function ContentRenderer(props: ContentRendererProps) {
           openOthers={props.openOthers}
           setOpenOthers={props.setOpenOthers}
           onViewAllBookingHistory={props.onViewAllBookingHistory}
-          canEditBooking={props.canEditBooking}
-          onEditBooking={props.onEditBooking}
           canCancelBooking={props.canCancelBooking}
           onCancelBooking={props.onCancelBooking}
           cancelBookingMutationStatus={props.cancelBookingMutationStatus}
@@ -216,37 +212,21 @@ export function ContentRenderer(props: ContentRendererProps) {
           />
 
           <DashboardRecentActivitySection
-            activityTab={props.activityTab}
-            onChangeTab={(tab: 'booking' | 'notifications') => {
-              props.setActivityTab(tab);
-              if (tab === "booking") {
-                props.setActivityBookingPage(0);
-              } else {
-                props.setActivityNotificationsPage(0);
-              }
-            }}
             currentUserEmail={props.currentUserEmail}
             currentUserName={props.currentUserName}
             user={props.user}
             userBookings={props.userBookings}
-            notificationsData={props.notificationsData}
             isUserBookingsLoading={props.isUserBookingsLoading}
             isUserBookingsFetching={props.isUserBookingsFetching}
-            isNotificationsLoading={props.isNotificationsLoading}
-            isNotificationsFetching={props.isNotificationsFetching}
             itemsPerPage={props.itemsPerPage}
             openOthers={props.openOthers}
             setOpenOthers={props.setOpenOthers}
             getBookingStatus={props.getBookingStatus}
             getFacilityDisplay={props.getFacilityDisplay}
-            parseEquipmentFromMessage={props.parseEquipmentFromMessage}
-            getEquipmentStatusColor={props.getEquipmentStatusColor}
             onSelectViewAllBookingHistory={() => {
               props.setSelectedView("my-bookings");
             }}
             onNavigateToBookingDetails={props.onNavigateToBookingDetails}
-            onMarkNotificationRead={props.onMarkNotificationRead}
-            markNotificationReadPending={props.markNotificationReadPending}
             onArrivalCountdownExpire={props.onArrivalCountdownExpire}
             onActiveCountdownExpire={props.onActiveCountdownExpire}
           />

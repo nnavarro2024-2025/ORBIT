@@ -6,7 +6,6 @@
 
 // Booking Modals
 export { default as BookingModal } from './booking/BookingModal';
-export { default as EditBookingModal } from './booking/EditBookingModal';
 
 // User Management Modals
 export * from './user-management';

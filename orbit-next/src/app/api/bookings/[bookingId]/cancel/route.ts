@@ -69,6 +69,9 @@ export async function POST(
       const user = await storage.getUser(booking.userId).catch(() => null);
       const facility = await storage.getFacility(booking.facilityId).catch(() => null);
       const facilityName = facility?.name || `Facility ${booking.facilityId}`;
+      const now = new Date();
+      const cancelDate = now.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+      const bookingDate = start.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
 
       if (booking.status === "approved" && (isActiveApproved || isUpcomingApproved)) {
         const alertTitle = isActiveApproved ? "Booking Ended" : "Booking Cancelled";
@@ -81,8 +84,8 @@ export async function POST(
           message: `${user?.email || `User ${booking.userId}`} ${verb} their booking for ${facilityName} (${start.toLocaleString()} - ${end.toLocaleString()}).`,
           userId: null,
           isRead: false,
-          createdAt: new Date(),
-          updatedAt: new Date(),
+          createdAt: now,
+          updatedAt: now,
         });
       }
       
@@ -96,8 +99,34 @@ export async function POST(
           message: `Your booking for ${facilityName} was automatically cancelled because you did not confirm your arrival within the required time (${start.toLocaleString()} - ${end.toLocaleString()}).`,
           userId: booking.userId,
           isRead: false,
-          createdAt: new Date(),
-          updatedAt: new Date(),
+          createdAt: now,
+          updatedAt: now,
+        });
+      } else if (isAdmin && String(booking.userId) !== String(requesterId)) {
+        // Admin cancelled someone else's booking - notify the booking owner
+        await storage.createSystemAlert({
+          id: randomUUID(),
+          type: "booking",
+          severity: "medium",
+          title: "Booking Cancelled by Admin",
+          message: `Your booking for ${facilityName} booked on ${bookingDate} was cancelled by an administrator on ${cancelDate}.`,
+          userId: booking.userId,
+          isRead: false,
+          createdAt: now,
+          updatedAt: now,
+        });
+      } else {
+        // User cancelled their own booking
+        await storage.createSystemAlert({
+          id: randomUUID(),
+          type: "booking",
+          severity: "low",
+          title: "Booking Cancelled",
+          message: `You cancelled your booking for ${facilityName} booked on ${bookingDate}, cancelled on ${cancelDate}.`,
+          userId: booking.userId,
+          isRead: false,
+          createdAt: now,
+          updatedAt: now,
         });
       }
     } catch (error) {

@@ -1,12 +1,11 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/data";
 import { useToast } from "@/hooks/ui";
 import { Header, Sidebar } from "@/components/layout";
 import BookingModal from "@/components/modals/booking/BookingModal";
-import EditBookingModal from "@/components/modals/booking/EditBookingModal";
 import { format } from 'date-fns';
 import { useLegacyLocation } from "@/lib/utils";
 
@@ -23,7 +22,6 @@ import {
 import {
   // State hooks
   useBookingModalState,
-  useEditBookingModalState,
   useCancelBookingModalState,
   useViewState,
   useActivityState,
@@ -35,7 +33,6 @@ import {
   useAllBookings,
   useNotifications,
   // Mutation hooks
-  useUpdateBooking,
   useCancelBooking,
   useMarkNotificationRead,
   // Navigation hooks
@@ -63,7 +60,6 @@ import {
   getFacilityImageByName,
   parseEquipmentFromMessage,
   getEquipmentStatusColor,
-  canEditBooking,
   canCancelBooking,
   buildUnavailableDatesByFacility,
   generateMockForFacilities,
@@ -74,8 +70,6 @@ import {
   createCancelBookingHandler,
   createConfirmCancelBookingHandler,
   createCancelCancelBookingHandler,
-  createSaveEditBookingHandler,
-  createEditBookingHandler,
   createViewAllBookingHistoryHandler,
   createArrivalCountdownExpireHandler,
   createActiveCountdownExpireHandler,
@@ -107,7 +101,6 @@ export function BookingDashboardInner() {
   
   // State management
   const bookingModalState = useBookingModalState();
-  const editBookingModalState = useEditBookingModalState();
   const cancelBookingModalState = useCancelBookingModalState();
   const viewState = useViewState();
   const activityState = useActivityState();
@@ -118,13 +111,21 @@ export function BookingDashboardInner() {
   // Data fetching
   const todayDateStr = format(new Date(), 'yyyy-MM-dd');
   const { data: facilities = [], isLoading: isFacilitiesLoading, isFetching: isFacilitiesFetching } = useFacilities();
+  const { data: campuses = [] } = useQuery<any[]>({
+    queryKey: ["/api/campuses"],
+    queryFn: async () => {
+      const { apiRequest } = await import("@/lib/api");
+      const res = await apiRequest("GET", "/api/campuses");
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000,
+  });
   const { data: availabilityDataRaw } = useAvailability(todayDateStr, user, authLoading);
   const { data: userBookingsData = [], isLoading: isUserBookingsLoading, isFetching: isUserBookingsFetching } = useUserBookings(user, authLoading);
   const { data: allBookingsData = [] } = useAllBookings(user, authLoading);
   const { data: notificationsData = [], isLoading: isNotificationsLoading, isFetching: isNotificationsFetching } = useNotifications(user, authLoading);
   
   // Mutations
-  const updateBookingMutation = useUpdateBooking(toast, editBookingModalState.setEditingBooking);
   const cancelBookingMutation = useCancelBooking(toast);
   const markNotificationReadMutation = useMarkNotificationRead();
   
@@ -189,7 +190,7 @@ export function BookingDashboardInner() {
   const confirmCancelBooking = createConfirmCancelBookingHandler(
     cancelBookingModalState.bookingToCancel,
     cancelBookingMutation,
-    (id) => getFacilityDisplay(id, facilities),
+    (id) => getFacilityDisplay(id, facilities, campuses),
     toast,
     cancelBookingModalState.setShowCancelModal,
     cancelBookingModalState.setBookingToCancel
@@ -200,13 +201,6 @@ export function BookingDashboardInner() {
     cancelBookingModalState.setBookingToCancel
   );
   
-  const handleSaveEditBooking = createSaveEditBookingHandler(updateBookingMutation);
-  
-  const handleEditBooking = createEditBookingHandler(
-    editBookingModalState.setEditingBooking,
-    editBookingModalState.setShowEditBookingModal
-  );
-  
   const handleViewAllBookingHistory = createViewAllBookingHistoryHandler(
     viewState.setSelectedView,
     activityState.setActivityTab
@@ -214,13 +208,13 @@ export function BookingDashboardInner() {
   
   const handleArrivalCountdownExpire = createArrivalCountdownExpireHandler(
     queryClient,
-    (id) => getFacilityDisplay(id, facilities),
+    (id) => getFacilityDisplay(id, facilities, campuses),
     toast
   );
   
   const handleActiveCountdownExpire = createActiveCountdownExpireHandler(
     queryClient,
-    (id) => getFacilityDisplay(id, facilities),
+    (id) => getFacilityDisplay(id, facilities, campuses),
     toast
   );
   
@@ -266,7 +260,6 @@ export function BookingDashboardInner() {
   useOpenBookingOnce(
     viewState.setSelectedView,
     viewState.setScrollToBookingId,
-    editBookingModalState.setEditingBooking,
     userBookings,
     allBookings
   );
@@ -358,12 +351,10 @@ export function BookingDashboardInner() {
             itemsPerPage={ITEMS_PER_PAGE}
             openBookingModal={openBookingModal}
             getBookingStatus={getBookingStatus}
-            getFacilityDisplay={(id) => getFacilityDisplay(id, facilities)}
+            getFacilityDisplay={(id) => getFacilityDisplay(id, facilities, campuses)}
             openOthers={viewState.openOthers}
             setOpenOthers={viewState.setOpenOthers}
             onViewAllBookingHistory={handleViewAllBookingHistory}
-            canEditBooking={canEditBooking}
-            onEditBooking={handleEditBooking}
             canCancelBooking={canCancelBooking}
             onCancelBooking={handleCancelBooking}
             cancelBookingMutationStatus={cancelBookingMutation.status}
@@ -424,20 +415,12 @@ export function BookingDashboardInner() {
         showSuggestedSlot={bookingModalState.initialTimesAreSuggested}
       />
       
-      <EditBookingModal
-        isOpen={editBookingModalState.showEditBookingModal}
-        onClose={() => editBookingModalState.setShowEditBookingModal(false)}
-        booking={editBookingModalState.editingBooking}
-        facilities={facilities}
-        onSave={handleSaveEditBooking}
-      />
-      
       <CancellationModal
         showCancelModal={cancelBookingModalState.showCancelModal}
         setShowCancelModal={cancelBookingModalState.setShowCancelModal}
         bookingToCancel={cancelBookingModalState.bookingToCancel}
         cancelBookingMutationStatus={cancelBookingMutation.status}
-        getFacilityDisplay={(id) => getFacilityDisplay(id, facilities)}
+        getFacilityDisplay={(id) => getFacilityDisplay(id, facilities, campuses)}
         confirmCancelBooking={confirmCancelBooking}
         cancelCancelBooking={cancelCancelBooking}
       />

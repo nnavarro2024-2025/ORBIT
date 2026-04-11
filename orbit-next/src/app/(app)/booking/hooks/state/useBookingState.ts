@@ -33,21 +33,6 @@ export function useBookingModalState() {
 }
 
 /**
- * Hook for managing edit booking modal state
- */
-export function useEditBookingModalState() {
-  const [showEditBookingModal, setShowEditBookingModal] = useState(false);
-  const [editingBooking, setEditingBooking] = useState<any>(null);
-
-  return {
-    showEditBookingModal,
-    setShowEditBookingModal,
-    editingBooking,
-    setEditingBooking,
-  };
-}
-
-/**
  * Hook for managing cancel booking modal state
  */
 export function useCancelBookingModalState() {

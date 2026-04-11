@@ -23,8 +23,6 @@ interface MyBookingsSectionProps {
   openOthers: Record<string, boolean>;
   setOpenOthers: Dispatch<SetStateAction<Record<string, boolean>>>;
   onViewAllBookingHistory: () => void;
-  canEditBooking: (booking: any) => boolean;
-  onEditBooking: (booking: any) => void;
   canCancelBooking: (booking: any) => boolean;
   onCancelBooking: (booking: any) => void;
   cancelBookingMutationStatus: "idle" | "pending" | "success" | "error";
@@ -79,8 +77,6 @@ export function MyBookingsSection({
   openOthers,
   setOpenOthers,
   onViewAllBookingHistory,
-  canEditBooking,
-  onEditBooking,
   canCancelBooking,
   onCancelBooking,
   cancelBookingMutationStatus,
@@ -302,15 +298,15 @@ export function MyBookingsSection({
                     <div className="flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-6">
                       <div className="flex items-center justify-between lg:justify-start gap-3 lg:gap-6">
                         {/* Time Info */}
-                        <div className="flex items-center gap-6">
+                        <div className="flex items-center gap-3 sm:gap-6">
                           <div className="text-left">
                             <p className="text-xs font-medium text-gray-500 mb-1">Started</p>
-                            <p className="text-lg font-semibold text-gray-900 whitespace-nowrap">{format(new Date(booking.startTime), "h:mm a")}</p>
+                            <p className="text-sm sm:text-lg font-semibold text-gray-900 whitespace-nowrap">{format(new Date(booking.startTime), "h:mm a")}</p>
                             <p className="text-xs text-gray-500 mt-0.5">{format(new Date(booking.startTime), "M/d/yyyy")}</p>
                           </div>
                           <div className="text-left">
                             <p className="text-xs font-medium text-gray-500 mb-1">Ends</p>
-                            <p className="text-lg font-semibold text-gray-900 whitespace-nowrap">{format(new Date(booking.endTime), "h:mm a")}</p>
+                            <p className="text-sm sm:text-lg font-semibold text-gray-900 whitespace-nowrap">{format(new Date(booking.endTime), "h:mm a")}</p>
                             <p className="text-xs text-gray-500 mt-0.5">{format(new Date(booking.endTime), "M/d/yyyy")}</p>
                           </div>
                         </div>
@@ -325,18 +321,16 @@ export function MyBookingsSection({
                             status.label === "Pending" ? "bg-blue-100 text-blue-800" :
                             "bg-gray-100 text-gray-800"
                           }`}>
-                            {status.label}
+                            {status.label === "Cancelled"
+                              ? booking.arrivalConfirmationDeadline && !booking.arrivalConfirmed && new Date(booking.updatedAt) >= new Date(booking.arrivalConfirmationDeadline)
+                                ? "Cancelled | Not Confirmed"
+                                : booking.adminId
+                                ? "Cancelled by Admin"
+                                : "Cancelled by you"
+                              : status.label}
                           </span>
-                          {(canEditBooking(booking) || (canCancelBooking(booking) && booking.userId === user?.id)) && (
+                          {(canCancelBooking(booking) && booking.userId === user?.id) && (
                             <div className="flex flex-col gap-1">
-                              {canEditBooking(booking) && (
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); onEditBooking(booking); }}
-                                  className="px-2.5 py-1 bg-pink-600 text-white text-[11px] font-medium rounded-md hover:bg-pink-700 transition-colors whitespace-nowrap"
-                                >
-                                  Edit
-                                </button>
-                              )}
                               {canCancelBooking(booking) && booking.userId === user?.id && (
                                 <button
                                   onClick={(e) => { e.stopPropagation(); onCancelBooking(booking); }}
@@ -397,6 +391,15 @@ export function MyBookingsSection({
                   <p className="text-xs text-gray-400 mt-2">
                     Booked on {format(new Date(booking.createdAt || booking.startTime), "MMM d, yyyy 'at' h:mm a")}
                   </p>
+                  {status.label === "Cancelled" && booking.updatedAt && (
+                    <p className="text-xs text-orange-500 mt-0.5">
+                      {booking.arrivalConfirmationDeadline && !booking.arrivalConfirmed && new Date(booking.updatedAt) >= new Date(booking.arrivalConfirmationDeadline)
+                        ? `Auto Cancelled on ${format(new Date(booking.updatedAt), "MMM d, yyyy 'at' h:mm a")}`
+                        : booking.adminId
+                        ? `Cancelled by Admin on ${format(new Date(booking.updatedAt), "MMM d, yyyy 'at' h:mm a")}`
+                        : `Cancelled on ${format(new Date(booking.updatedAt), "MMM d, yyyy 'at' h:mm a")}`}
+                    </p>
+                  )}
                 </div>
 
                 {/* Expandable details section */}

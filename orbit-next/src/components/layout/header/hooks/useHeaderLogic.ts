@@ -10,7 +10,7 @@ import { supabase } from "@/lib/config";
 import { useAuth } from "@/hooks/data";
 import { useToast } from "@/hooks/ui";
 import { useLegacyLocation } from "@/lib/utils";
-import { useHeaderAlerts, useAlertVisibility, useHeaderSearch } from './useHeaderAlerts';
+import { useHeaderAlerts, useHeaderSearch } from './useHeaderAlerts';
 
 export function useHeaderLogic() {
   const { user } = useAuth();
@@ -23,8 +23,6 @@ export function useHeaderLogic() {
   const isOnBookingDashboard = pathname?.startsWith('/booking');
 
   // Use custom hooks for alert management
-  const { hiddenAlertIds, hiddenAlertIdsVersion, hideAlert } = useAlertVisibility(user?.id);
-  
   const { alertsData, alertsLoading, markAsRead } = useHeaderAlerts({
     user,
     isAdmin,
@@ -61,13 +59,10 @@ export function useHeaderLogic() {
     isAdmin,
     alertsData,
     alertsLoading,
-    hiddenAlertIds,
-    hiddenAlertIdsVersion,
     allFacilities,
     allBookings,
     userBookings,
     markAsRead,
-    hideAlert,
     handleLogout,
   };
 }

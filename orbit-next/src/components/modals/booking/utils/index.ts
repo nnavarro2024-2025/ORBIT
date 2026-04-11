@@ -5,7 +5,6 @@
 
 export * from './dateTimeUtils';
 export * from './facilityUtils';
-export * from './editBookingUtils';
 export * from './validationUtils';
 export * from './slotUtils';
 export * from './roleFilterUtils';

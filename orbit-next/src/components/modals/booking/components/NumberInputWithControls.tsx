@@ -15,6 +15,7 @@ interface NumberInputWithControlsProps {
   min?: number;
   max?: number;
   label?: string;
+  disabled?: boolean;
 }
 
 export function NumberInputWithControls({
@@ -23,6 +24,7 @@ export function NumberInputWithControls({
   min = 1,
   max = 99,
   label,
+  disabled = false,
 }: NumberInputWithControlsProps) {
   const handleIncrement = () => {
     if (value < max) {
@@ -52,7 +54,7 @@ export function NumberInputWithControls({
         variant="outline"
         size="icon"
         onClick={handleDecrement}
-        disabled={value <= min}
+        disabled={disabled || value <= min}
         className="h-9 w-9 shrink-0"
         aria-label={`Decrease ${label || 'value'}`}
       >
@@ -64,13 +66,14 @@ export function NumberInputWithControls({
         onChange={handleInputChange}
         className="w-16 text-center"
         aria-label={label}
+        disabled={disabled}
       />
       <Button
         type="button"
         variant="outline"
         size="icon"
         onClick={handleIncrement}
-        disabled={value >= max}
+        disabled={disabled || value >= max}
         className="h-9 w-9 shrink-0"
         aria-label={`Increase ${label || 'value'}`}
       >

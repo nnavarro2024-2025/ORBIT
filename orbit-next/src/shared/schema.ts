@@ -30,9 +30,6 @@ export const sessionsExpireIdx = index("IDX_session_expire").on(sessions.expire)
 // User roles enum
 export const userRoleEnum = pgEnum("user_role", ["student", "faculty", "admin", "authorize_selga", "authorize_bonifacio"]);
 
-// Campus enum
-export const campusEnum = pgEnum("campus", ["selga", "bonifacio"]);
-
 // User status enum
 export const userStatusEnum = pgEnum("user_status", ["active", "banned", "suspended"]);
 
@@ -69,6 +66,15 @@ export const computerStations = pgTable("computer_stations", {
 // ORZ computer sessions removed
 // ORZ feature has been removed; type stubs are defined later to maintain compatibility.
 
+// Campuses
+export const campuses = pgTable("campuses", {
+  id: serial("id").primaryKey(),
+  name: varchar("name").notNull().unique(),
+  isActive: boolean("is_active").default(true).notNull(),
+  sortOrder: integer("sort_order").default(0).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // Facilities
 export const facilities = pgTable("facilities", {
   id: serial("id").primaryKey(),
@@ -79,7 +85,7 @@ export const facilities = pgTable("facilities", {
   isActive: boolean("is_active").default(true).notNull(),
   unavailableReason: text("unavailable_reason"),
   unavailableDates: jsonb("unavailable_dates").$type<Array<{ startDate: string; endDate: string; reason?: string }>>(),
-  campus: campusEnum("campus"),
+  campusId: integer("campus_id").references(() => campuses.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -181,6 +187,11 @@ export const computerStationsRelations = relations(computerStations, () => ({
 
 export const facilitiesRelations = relations(facilities, (helpers) => ({
   bookings: helpers.many(facilityBookings),
+  campusRef: helpers.one(campuses, { fields: [facilities.campusId], references: [campuses.id] }),
+}));
+
+export const campusesRelations = relations(campuses, (helpers) => ({
+  facilities: helpers.many(facilities),
 }));
 
 export const facilityBookingsRelations = relations(facilityBookings, (helpers) => ({
@@ -349,3 +360,4 @@ export type UpdateReportSchedule = Partial<Omit<ReportSchedule, "id" | "createdA
 export type NormalizedInsertReportSchedule = Omit<InsertReportSchedule, "format"> & { format: string };
 export type Faq = typeof faqs.$inferSelect;
 export type EquipmentInventory = typeof equipmentInventory.$inferSelect;
+export type Campus = typeof campuses.$inferSelect;

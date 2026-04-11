@@ -20,18 +20,18 @@ export function SkeletonStatsCard() {
 
 export function SkeletonFacilityCard() {
   return (
-    <div className="group bg-white border rounded-xl overflow-hidden transition-all duration-300 flex flex-col h-full">
-      <Skeleton className="w-full" style={{ aspectRatio: "16/9", minHeight: 180 }} />
-      <div className="p-6 flex flex-col h-full">
+    <div className="group bg-white border rounded-xl overflow-hidden flex flex-col h-full max-w-sm w-full mx-auto sm:max-w-none">
+      <Skeleton className="w-full aspect-video max-h-[140px] sm:max-h-[200px]" />
+      <div className="p-3 sm:p-4 flex flex-col h-full">
         <div className="flex items-center justify-between mb-2">
-          <Skeleton className="h-5 w-40" />
-          <Skeleton className="h-5 w-16 rounded-full" />
+          <Skeleton className="h-4 w-32 sm:w-40" />
+          <Skeleton className="h-4 w-14 sm:w-16 rounded-full" />
         </div>
-        <Skeleton className="h-3 w-5/6 mb-2" />
-        <Skeleton className="h-3 w-3/4 mb-4" />
+        <Skeleton className="h-3 w-5/6 mb-1.5" />
+        <Skeleton className="h-3 w-3/4 mb-3" />
         <div className="mt-auto flex items-center justify-between">
-          <Skeleton className="h-4 w-28" />
-          <Skeleton className="h-9 w-28 rounded-lg" />
+          <Skeleton className="h-3 w-20 sm:w-28" />
+          <Skeleton className="h-8 w-20 sm:w-24 rounded-lg" />
         </div>
       </div>
     </div>

@@ -2,6 +2,7 @@ import {
   users,
   facilityBookings,
   facilities,
+  campuses,
   computerStations,
   systemAlerts,
   activityLogs,
@@ -19,6 +20,7 @@ import {
   type ActivityLog,
   type Faq,
   type EquipmentInventory,
+  type Campus,
   createFacilityBookingSchema,
   insertFaqSchema,
   updateFaqSchema,
@@ -119,6 +121,13 @@ export interface IStorage {
   getEquipmentInventory(): Promise<EquipmentInventory[]>;
   getEquipmentAvailability(startTime: Date, endTime: Date): Promise<Array<EquipmentInventory & { bookedCount: number }>>;
   upsertEquipmentInventory(key: string, label: string, totalCount: number): Promise<EquipmentInventory>;
+
+  // Campus operations
+  getAllCampuses(): Promise<Campus[]>;
+  getActiveCampuses(): Promise<Campus[]>;
+  getCampus(id: number): Promise<Campus | undefined>;
+  createCampus(campus: { name: string; sortOrder?: number }): Promise<Campus>;
+  updateCampus(id: number, updates: Partial<Campus>): Promise<Campus | null>;
 
   // Statistics
   getOrzUsageStats(): Promise<any>; // returns empty data now that ORZ is removed
@@ -1076,6 +1085,31 @@ export class DatabaseStorage implements IStorage {
     }
     const [row] = await db.insert(equipmentInventory).values({ key, label, totalCount }).returning();
     return row;
+  }
+  // Campus operations
+  async getAllCampuses(): Promise<Campus[]> {
+    return db.select().from(campuses).orderBy(asc(campuses.sortOrder), asc(campuses.id));
+  }
+
+  async getActiveCampuses(): Promise<Campus[]> {
+    return db.select().from(campuses)
+      .where(eq(campuses.isActive, true))
+      .orderBy(asc(campuses.sortOrder), asc(campuses.id));
+  }
+
+  async getCampus(id: number): Promise<Campus | undefined> {
+    const [campus] = await db.select().from(campuses).where(eq(campuses.id, id));
+    return campus;
+  }
+
+  async createCampus(campus: { name: string; sortOrder?: number }): Promise<Campus> {
+    const [newCampus] = await db.insert(campuses).values(campus as any).returning();
+    return newCampus;
+  }
+
+  async updateCampus(id: number, updates: Partial<Campus>): Promise<Campus | null> {
+    const [updated] = await db.update(campuses).set(updates).where(eq(campuses.id, id)).returning();
+    return updated ?? null;
   }
 }
 

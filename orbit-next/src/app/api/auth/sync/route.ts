@@ -1,3 +1,5 @@
+import { randomUUID } from "crypto";
+
 import { NextResponse, type NextRequest } from "next/server";
 
 import { requireActiveUser } from "@/server/core";
@@ -115,6 +117,23 @@ export async function POST(request: NextRequest) {
         { message: "Database upsert error: " + (dbError?.message || "Unknown error") },
         { status: 500 }
       );
+    }
+
+    // Send welcome notification for new users
+    if (!existingUser) {
+      await storage.createSystemAlert({
+        id: randomUUID(),
+        type: "user",
+        severity: "low",
+        title: "Welcome to ORBIT",
+        message: "Welcome! Thank you for choosing ORBIT. You can now browse and book facilities.",
+        userId,
+        isRead: false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }).catch((err) => {
+        console.warn("[auth/sync] Failed to create welcome notification", err);
+      });
     }
 
     return NextResponse.json(

@@ -78,18 +78,19 @@ export function getFacilityBookingStatus(
     };
   }
 
-  // Check for upcoming bookings
-  const upcomingBooking = facilityBookings.find(booking => {
+  // Check for pending booking (approved but user hasn't confirmed arrival yet)
+  const pendingArrival = facilityBookings.find(booking => {
     const start = new Date(booking.startTime);
-    return start > now && (booking.status === "approved" || booking.status === "pending");
+    const end = new Date(booking.endTime);
+    return now >= start && now <= end && booking.status === "pending";
   });
 
-  if (upcomingBooking) {
+  if (pendingArrival) {
     return {
-      status: "scheduled",
-      label: "Scheduled",
-      booking: upcomingBooking,
-      badgeClass: "bg-yellow-100 text-yellow-800"
+      status: "pending",
+      label: "Pending",
+      booking: pendingArrival,
+      badgeClass: "bg-amber-100 text-amber-800"
     };
   }
 
@@ -174,9 +175,9 @@ export function isLibraryClosedNow(devForceOpen: boolean = false): boolean {
 }
 
 /**
- * Get facility display name
+ * Get facility display name with campus
  */
-export function getFacilityDisplay(facilityId: number, facilities: any[]): string {
+export function getFacilityDisplay(facilityId: number, facilities: any[], campuses?: any[]): string {
   const facility = facilities.find((f) => f.id === facilityId);
   if (!facility) return `Facility ${facilityId}`;
   let name = facility.name || `Facility ${facilityId}`;
@@ -185,8 +186,9 @@ export function getFacilityDisplay(facilityId: number, facilities: any[]): strin
   if (lower === 'lounge' && !lower.includes('faculty')) {
     name = 'Faculty Lounge';
   }
-  
-  return name;
+
+  const campusName = campuses?.find((c: any) => c.id === facility.campusId)?.name;
+  return campusName ? `${campusName} | ${name}` : name;
 }
 
 /**
@@ -312,26 +314,6 @@ export function getEquipmentStatusColor(status: string): string {
     return 'bg-red-100 text-red-800';
   }
   return 'bg-gray-100 text-gray-800';
-}
-
-/**
- * Check if booking can be edited
- */
-export function canEditBooking(booking: any): boolean {
-  if (!booking) return false;
-  try {
-    const now = new Date();
-    const start = new Date(booking.startTime);
-    
-    const hasAdminResponse = booking.adminResponse && String(booking.adminResponse).trim().length > 0;
-    
-    if (booking.status === 'pending' && !hasAdminResponse) return true;
-    if (booking.status === 'approved' && start > now && !hasAdminResponse) return true;
-    
-    return false;
-  } catch (e) {
-    return false;
-  }
 }
 
 /**

@@ -209,12 +209,12 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
                   </Avatar>
                   {/* Profile preview - uploads are available in User Settings only */}
                   <div className="text-center space-y-2">
-                    <h3 className="text-2xl font-bold text-gray-900">
+                    <h3 className="text-xl sm:text-2xl font-bold text-gray-900">
                       {user.firstName || user.lastName
                         ? `${user.firstName || ''} ${user.lastName || ''}`.trim()
                         : (user.fullName || user.name || user.displayName || 'N/A')}
                     </h3>
-                    <p className="text-lg text-gray-600">
+                    <p className="text-sm sm:text-lg text-gray-600">
                       {user.email || 'N/A'}
                     </p>
                   </div>

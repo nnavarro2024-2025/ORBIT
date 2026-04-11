@@ -1,7 +1,10 @@
+import { randomUUID } from "crypto";
+
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 import { requireActiveUser } from "@/server/core";
+import { storage } from "@/server/core";
 import { isStrongPassword } from "@/lib/utils";
 
 export const runtime = "nodejs";
@@ -73,6 +76,28 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
+
+    // Create notification for password change
+    const now = new Date();
+    const formattedDate = now.toLocaleDateString("en-US", {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    });
+
+    await storage.createSystemAlert({
+      id: randomUUID(),
+      type: "security",
+      severity: "low",
+      title: "Password Updated",
+      message: `Your password was successfully updated on ${formattedDate}.`,
+      userId: authResult.user.id,
+      isRead: false,
+      createdAt: now,
+      updatedAt: now,
+    }).catch((err) => {
+      console.warn("[auth/password/setup] Failed to create password update notification", err);
+    });
 
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {

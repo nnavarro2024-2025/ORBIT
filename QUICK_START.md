@@ -16,7 +16,11 @@ cd c:\Users\nikko\Documents\GitHub\ORBIT\ORBIT\orbit-next
 
 ### 3️⃣ Start the development server
 ```cmd
+cd c:\Users\nikko\Documents\GitHub\ORBIT\ORBIT\orbit-next
+npm install
 npm run dev
+
+cd orbit-next; if (Test-Path node_modules\next) { Write-Output "NEXT_INSTALLED" } else { Write-Output "NEXT_MISSING" }; npm run --silent
 ```
 
 **Wait for this message:**

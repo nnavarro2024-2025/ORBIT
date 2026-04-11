@@ -79,93 +79,68 @@ function FacilityDayList({ facilityId, selectedDate }: { facilityId: number; sel
 
   if (isLoading) {
     return (
-      <div className="flex items-center gap-2 text-xs text-gray-400 py-3">
-        <Loader2 className="h-3 w-3 animate-spin" /> Checking {displayDate}…
+      <div className="flex items-center gap-2 text-xs text-gray-400 py-2">
+        <Loader2 className="h-3 w-3 animate-spin" /> Loading schedule…
       </div>
     );
   }
 
   const now = new Date();
   const visibleBlocks = bookedBlocks.filter(b => b.end > now);
+  const morningBlocks = visibleBlocks.filter(b => b.start.getHours() < 12);
+  const afternoonBlocks = visibleBlocks.filter(b => b.start.getHours() >= 12);
 
-  if (visibleBlocks.length === 0) {
+  const renderBlock = (block: BookedBlock, idx: number) => {
+    const isOwn = user?.id === block.userId;
+    const isAdminBlock = !!block.bookedByAdmin;
+    const isActive = block.start <= now;
+
+    const rowBg = isAdminBlock
+      ? 'bg-red-50 border-red-200'
+      : 'bg-pink-50 border-pink-200';
+    const textColor = isAdminBlock ? 'text-red-700' : 'text-gray-700';
+
     return (
-      <div className="flex items-center gap-2 p-2.5 bg-emerald-50 border border-emerald-100 rounded-lg">
-        <span className="text-emerald-600 text-xs font-bold">&#x2713;</span>
-        <p className="text-xs text-emerald-700">No upcoming reservations &mdash; fully available.</p>
+      <div key={idx} className={`flex items-center gap-2 px-3 py-1.5 rounded-md border ${rowBg}`}>
+        <span className={`text-xs flex-1 ${textColor}`}>
+          {format(block.start, 'EEE MMM d, yyyy')} | {format(block.start, 'h:mm a')} – {format(block.end, 'h:mm a')}
+        </span>
+        {isAdminBlock && (
+          <span className="text-[10px] font-medium text-red-600 bg-red-100 border border-red-200 px-1.5 py-0.5 rounded-full whitespace-nowrap">Admin</span>
+        )}
+        {isActive && !isAdminBlock && (
+          <span className="text-[10px] font-medium text-rose-600 bg-rose-100 px-1.5 py-0.5 rounded-full whitespace-nowrap">In Use</span>
+        )}
+        {isOwn && (
+          <span className="text-[10px] font-medium text-blue-600 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-full whitespace-nowrap">You</span>
+        )}
       </div>
     );
-  }
+  };
+
+  const emptyRow = (
+    <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-100 rounded-md">
+      <span className="text-emerald-600 text-xs font-bold">&#x2713;</span>
+      <span className="text-xs text-emerald-700">No reservations &mdash; fully available.</span>
+    </div>
+  );
 
   return (
-    <div className="space-y-2">
-      {visibleBlocks.map((block, idx) => {
-        const isActive     = block.start <= now;
-        const isOwn        = user?.id === block.userId;
-        const isAdminBlock = !!block.bookedByAdmin;
-
-        // Card border/bg
-        const cardBorder = isAdminBlock
-          ? 'border-red-300 bg-red-50'
-          : isActive
-          ? 'border-rose-300 bg-white'
-          : 'border-pink-200 bg-white';
-
-        const timeColor  = isAdminBlock ? 'text-red-800'  : 'text-gray-900';
-        const labelColor = isAdminBlock ? 'text-red-400'  : 'text-gray-400';
-        const dateColor  = isAdminBlock ? 'text-red-400'  : 'text-gray-500';
-
-        const badgeClass = isAdminBlock
-          ? 'bg-red-100 text-red-700 border border-red-300'
-          : isActive
-          ? 'bg-rose-100 text-rose-700'
-          : 'bg-pink-100 text-pink-700';
-
-        const badgeLabel = isAdminBlock
-          ? 'Scheduled By Admin'
-          : isActive ? 'In Use'
-          : 'Scheduled';
-
-        return (
-          <div key={idx} className={`rounded-xl border-2 px-4 py-3 ${cardBorder}`}>
-            <div className="flex items-center gap-3">
-
-              {/* Left: Started and Ends side by side */}
-              <div className="flex gap-5 flex-shrink-0">
-                <div>
-                  <p className={`text-[10px] font-semibold uppercase tracking-wide mb-0.5 ${labelColor}`}>Started</p>
-                  <p className={`text-base font-bold leading-tight ${timeColor}`}>{format(block.start, 'h:mm a')}</p>
-                  <p className={`text-xs mt-0.5 ${dateColor}`}>{format(block.start, 'M/d/yyyy')}</p>
-                </div>
-                <div>
-                  <p className={`text-[10px] font-semibold uppercase tracking-wide mb-0.5 ${labelColor}`}>Ends</p>
-                  <p className={`text-base font-bold leading-tight ${timeColor}`}>{format(block.end, 'h:mm a')}</p>
-                  <p className={`text-xs mt-0.5 ${dateColor}`}>{format(block.end, 'M/d/yyyy')}</p>
-                </div>
-              </div>
-
-              {/* Middle: purpose only for admin bookings */}
-              <div className="flex-1 flex items-center justify-center">
-                {isAdminBlock && block.purpose ? (
-                  <p className="text-xs italic text-red-600 text-center leading-snug px-2">"{block.purpose}"</p>
-                ) : isOwn ? (
-                  <span className="text-[10px] font-semibold text-blue-600 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full">
-                    Your booking
-                  </span>
-                ) : null}
-              </div>
-
-              {/* Right: badge */}
-              <div className="flex-shrink-0">
-                <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full whitespace-nowrap ${badgeClass}`}>
-                  {badgeLabel}
-                </span>
-              </div>
-
-            </div>
-          </div>
-        );
-      })}
+    <div className="space-y-3">
+      {/* Morning */}
+      <div>
+        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Morning Schedule</p>
+        <div className="space-y-1">
+          {morningBlocks.length > 0 ? morningBlocks.map(renderBlock) : emptyRow}
+        </div>
+      </div>
+      {/* Afternoon */}
+      <div>
+        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Afternoon Schedule</p>
+        <div className="space-y-1">
+          {afternoonBlocks.length > 0 ? afternoonBlocks.map(renderBlock) : emptyRow}
+        </div>
+      </div>
     </div>
   );
 }
@@ -203,7 +178,26 @@ export function BookingForm({
   const { PURPOSE_MAX, OTHERS_MAX } = FORM_LIMITS;
   const maxCapacity = selectedFacility ? getFacilityMaxCapacity(selectedFacility) : 8;
 
-  const [selectedCampus, setSelectedCampus] = useState<string>('');
+  // Initialize campus directly from the pre-selected facility prop
+  const [selectedCampus, setSelectedCampus] = useState<string>(
+    () => selectedFacility?.campusId ? String(selectedFacility.campusId) : ''
+  );
+
+  const { data: campusList = [] } = useQuery<Array<{ id: number; name: string }>>({
+    queryKey: ["/api/campuses"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/campuses");
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Update campus when facility selection changes after mount
+  useEffect(() => {
+    if (selectedFacility?.campusId) {
+      setSelectedCampus(String(selectedFacility.campusId));
+    }
+  }, [selectedFacility?.campusId]);
 
   const startTime: Date | undefined = form.watch('startTime');
   const endTime: Date | undefined = form.watch('endTime');
@@ -211,15 +205,17 @@ export function BookingForm({
 
   // Filter facilities by selected campus
   const filteredFacilities = useMemo(() => {
-    if (!selectedCampus) return facilities;
-    return facilities.filter((f: any) => f.campus === selectedCampus);
+    if (!selectedCampus) return [];
+    const campusId = parseInt(selectedCampus, 10);
+    return facilities.filter((f: any) => f.campusId === campusId);
   }, [facilities, selectedCampus]);
 
   // Reset facility selection when campus changes
   useEffect(() => {
     if (!selectedCampus) return;
+    const campusId = parseInt(selectedCampus, 10);
     const currentFacility = facilities.find((f: any) => f.id.toString() === facilityIdWatched);
-    if (currentFacility && currentFacility.campus !== selectedCampus) {
+    if (currentFacility && currentFacility.campusId !== campusId) {
       const firstMatch = filteredFacilities[0];
       form.setValue('facilityId', firstMatch ? firstMatch.id.toString() : '');
     }
@@ -255,7 +251,7 @@ export function BookingForm({
       const res = await apiRequest('GET', `/api/equipment/availability?startTime=${encodeURIComponent(startTime!.toISOString())}&endTime=${encodeURIComponent(endTime!.toISOString())}`);
       return res.json();
     },
-    enabled: !!(startTime && endTime && startTime < endTime),
+    enabled: !!(selectedCampus && startTime && endTime && startTime < endTime),
     staleTime: 30_000,
   });
 
@@ -274,7 +270,7 @@ export function BookingForm({
       return res.json();
     },
     staleTime: 60_000,
-    enabled: !!facilityIdWatched && !!conflictDateStr,
+    enabled: !!selectedCampus && !!facilityIdWatched && !!conflictDateStr,
   });
   const hasTimeConflict = useMemo(() => {
     if (isAdmin || !startTime || !endTime || !facilityIdWatched || !conflictAvailData) return false;
@@ -294,6 +290,34 @@ export function BookingForm({
     return endTime.getTime() > startTime.getTime() + MAX_BOOKING_MS;
   }, [startTime?.getTime(), endTime?.getTime(), isAdmin]);
 
+  const hasBookingTooShort = useMemo(() => {
+    if (isAdmin || !startTime || !endTime) return false;
+    const durationMs = endTime.getTime() - startTime.getTime();
+    return durationMs > 0 && durationMs < 30 * 60 * 1000;
+  }, [startTime?.getTime(), endTime?.getTime(), isAdmin]);
+
+  const hasStartInPast = useMemo(() => {
+    if (isAdmin || !startTime) return false;
+    return startTime.getTime() < Date.now();
+  }, [startTime?.getTime(), isAdmin]);
+
+  const hasStartBeforeHours = useMemo(() => {
+    if (isAdmin || !startTime) return false;
+    return startTime.getHours() < 7 || (startTime.getHours() === 7 && startTime.getMinutes() < 30);
+  }, [startTime?.getTime(), isAdmin]);
+
+  const hasInvalidTimeOrder = useMemo(() => {
+    if (isAdmin || !startTime || !endTime) return false;
+    return endTime.getTime() <= startTime.getTime();
+  }, [startTime?.getTime(), endTime?.getTime(), isAdmin]);
+
+  // Granular red flags per input box
+  const startDateHasError = !isAdmin && hasStartInPast;
+  const startTimeHasError = !isAdmin && (hasStartInPast || hasStartBeforeHours || hasInvalidTimeOrder || hasTimeConflict);
+  const endTimeHasError = !isAdmin && (hasEndAfterHours || hasEndExceedsMax || hasBookingTooShort || hasInvalidTimeOrder || hasTimeConflict);
+
+  const hasAnyTimeError = !isAdmin && (hasTimeConflict || hasEndAfterHours || hasEndExceedsMax || hasBookingTooShort || hasStartInPast || hasStartBeforeHours || hasInvalidTimeOrder);
+
   const purposeValue = form.watch('purpose');
   const isPurposeEmpty = !purposeValue || purposeValue.trim().length === 0;
 
@@ -304,7 +328,7 @@ export function BookingForm({
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
         <DialogHeader>
-          <DialogTitle className="text-2xl font-semibold">Create Booking</DialogTitle>
+          <DialogTitle className="text-xl sm:text-2xl font-semibold">Create Booking</DialogTitle>
           <DialogDescription>Book a facility for your event or meeting.</DialogDescription>
         </DialogHeader>
 
@@ -313,10 +337,13 @@ export function BookingForm({
           <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
             <p className="text-[10px] font-bold text-blue-500 uppercase tracking-wider mb-2">Booking Policies</p>
             <ul className="space-y-1 text-xs text-blue-700">
-              <li>• Operating hours: <strong>7:30 AM – 7:00 PM</strong></li>
+              <li>• School operating hours <strong>(7:30 AM - 7:00 PM)</strong>. Room access is only available during these hours.</li>
               <li>• Maximum booking duration: <strong>2 hours</strong></li>
               <li>• Maximum bookings per day: <strong>2</strong></li>
-              <li>• Bookings cannot be made for past dates</li>
+              <li>• Please provide a clear purpose for your booking</li>
+              <li>• Check the schedule for existing reservations before booking</li>
+
+
             </ul>
           </div>
         )}
@@ -335,15 +362,15 @@ export function BookingForm({
         {/* Campus & Facility Selection */}
         <div className="grid md:grid-cols-3 gap-4">
           <FormItem>
-            <Label>Campus</Label>
-            <Select onValueChange={(val) => setSelectedCampus(val === '__all__' ? '' : val)} value={selectedCampus || '__all__'}>
+            <Label>Campus <span className="text-red-500">*</span></Label>
+            <Select onValueChange={(val) => setSelectedCampus(val)} value={selectedCampus || ''}>
               <SelectTrigger>
-                <SelectValue placeholder="All Campuses" />
+                <SelectValue placeholder="Select Campus" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="__all__">All Campuses</SelectItem>
-                <SelectItem value="selga">Selga</SelectItem>
-                <SelectItem value="bonifacio">Bonifacio</SelectItem>
+                {campusList.map((campus) => (
+                  <SelectItem key={campus.id} value={String(campus.id)}>{campus.name}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </FormItem>
@@ -353,11 +380,11 @@ export function BookingForm({
             name="facilityId"
             render={({ field }) => (
               <FormItem>
-                <Label>Facility</Label>
-                <Select onValueChange={field.onChange} value={field.value}>
+                <Label>Facility <span className="text-red-500">*</span></Label>
+                <Select onValueChange={field.onChange} value={field.value} disabled={!selectedCampus}>
                   <FormControl>
                     <SelectTrigger>
-                      <SelectValue placeholder="Select a facility" />
+                      <SelectValue placeholder={selectedCampus ? "Select a facility" : "Select Campus First"} />
                     </SelectTrigger>
                   </FormControl>
                   <SelectContent>
@@ -383,8 +410,9 @@ export function BookingForm({
                   onChange={field.onChange}
                   min={1}
                   max={maxCapacity}
+                  disabled={!selectedCampus}
                 />
-                {selectedFacility && (
+                {selectedCampus && selectedFacility && (
                   <p className="text-xs text-gray-500 mt-1">Max capacity: <strong>{maxCapacity}</strong> {maxCapacity === 1 ? 'person' : 'people'}</p>
                 )}
               </FormItem>
@@ -393,13 +421,19 @@ export function BookingForm({
         </div>
 
         {/* Facility schedule */}
-        {facilityIdWatched && (
+        {selectedCampus && facilityIdWatched ? (
           <div className="border rounded-lg p-4 bg-gray-50">
-            <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-3">Current reservations</p>
+            <p className="text-[11px] font-semibold text-gray-800 uppercase tracking-wide mb-3">
+              Current reservations{startTime ? ` on ${format(startTime, 'MMM d, yyyy')}` : ''}
+            </p>
             <FacilityDayList
               facilityId={parseInt(facilityIdWatched)}
               selectedDate={startTime}
             />
+          </div>
+        ) : (
+          <div className="border border-dashed border-gray-300 rounded-lg p-4 bg-gray-50/50">
+            <p className="text-xs text-gray-400 text-center">Select a campus, facility, and date to view current reservations.</p>
           </div>
         )}
 
@@ -416,7 +450,7 @@ export function BookingForm({
                     <Input
                       type="date"
                       min={minDate}
-                      className={hasTimeConflict && !isAdmin ? 'border-red-500 focus-visible:ring-red-400' : ''}
+                      className={startDateHasError ? 'border-red-500 focus-visible:ring-red-400' : ''}
                       value={field.value ? new Date(field.value.getTime() - field.value.getTimezoneOffset() * 60000).toISOString().slice(0, 10) : ''}
                       onChange={(e) => {
                         const currentTime = field.value || new Date();
@@ -429,7 +463,7 @@ export function BookingForm({
                   <FormControl>
                     <Input
                       type="time"
-                      className={hasTimeConflict && !isAdmin ? 'border-red-500 focus-visible:ring-red-400' : ''}
+                      className={startTimeHasError ? 'border-red-500 focus-visible:ring-red-400' : ''}
                       value={field.value ? new Date(field.value.getTime() - field.value.getTimezoneOffset() * 60000).toISOString().slice(11, 16) : ''}
                       onChange={(e) => {
                         const currentDate = field.value || new Date();
@@ -449,9 +483,6 @@ export function BookingForm({
             control={form.control}
             name="endTime"
             render={({ field }) => {
-              const exceedsMax = !isAdmin && startTime && field.value && field.value.getTime() > startTime.getTime() + MAX_BOOKING_MS;
-              const exceedsHours = !isAdmin && field.value && (field.value.getHours() > 19 || (field.value.getHours() === 19 && field.value.getMinutes() > 0));
-              const hasError = exceedsMax || exceedsHours || (hasTimeConflict && !isAdmin);
               const maxTimeStr = !isAdmin && startTime ? (() => {
                 const cap2h = new Date(startTime.getTime() + MAX_BOOKING_MS);
                 const cap7pm = new Date(startTime); cap7pm.setHours(19, 0, 0, 0);
@@ -467,7 +498,7 @@ export function BookingForm({
                     <Input
                       type="time"
                       max={isAdmin ? undefined : maxTimeStr}
-                      className={hasError ? 'border-red-500 focus-visible:ring-red-400' : ''}
+                      className={endTimeHasError ? 'border-red-500 focus-visible:ring-red-400' : ''}
                       value={field.value ? format(field.value, 'HH:mm') : ''}
                       onChange={(e) => {
                         if (!startTime) return;
@@ -478,45 +509,22 @@ export function BookingForm({
                       }}
                     />
                   </FormControl>
-                  {hasError && (
-                    <p className="text-xs text-red-600 mt-1">
-                      {exceedsHours ? 'End time cannot be after 7:00 PM.' : 'Maximum booking duration is 2 hours.'}
-                    </p>
-                  )}
                 </FormItem>
               );
             }}
           />
         </div>
 
-
-        {/* Error banners */}
-        {hasTimeConflict && !isAdmin && (
-          <div className="flex items-start gap-3 p-3 bg-red-50 border border-red-200 rounded-lg">
-            <XCircle className="h-4 w-4 text-red-500 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="font-semibold text-red-800 text-sm">Time Slot Unavailable</p>
-              <p className="text-xs text-red-600 mt-0.5">Your selected time overlaps with an existing booking. Please choose a different time.</p>
-            </div>
-          </div>
-        )}
-        {hasEndAfterHours && !isAdmin && (
-          <div className="flex items-start gap-3 p-3 bg-red-50 border border-red-200 rounded-lg">
-            <XCircle className="h-4 w-4 text-red-500 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="font-semibold text-red-800 text-sm">Outside Operating Hours</p>
-              <p className="text-xs text-red-600 mt-0.5">Bookings cannot end after 7:00 PM. Please adjust your end time.</p>
-            </div>
-          </div>
-        )}
-        {hasEndExceedsMax && !isAdmin && (
-          <div className="flex items-start gap-3 p-3 bg-red-50 border border-red-200 rounded-lg">
-            <XCircle className="h-4 w-4 text-red-500 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="font-semibold text-red-800 text-sm">Duration Exceeded</p>
-              <p className="text-xs text-red-600 mt-0.5">Maximum booking duration is 2 hours. Please shorten your booking.</p>
-            </div>
-          </div>
+        {/* Inline time validation errors — bullet list */}
+        {hasAnyTimeError && (
+          <ul className="text-xs text-red-600 space-y-0.5 mt-1">
+            {hasStartInPast && <li>• Start time cannot be in the past. Please select a future time.</li>}
+            {hasInvalidTimeOrder && <li>• Start time must be earlier than the end time.</li>}
+            {(hasEndAfterHours || hasStartBeforeHours) && <li>• School operating hours (7:30 AM - 7:00 PM). Room access is only available during these hours.</li>}
+            {hasEndExceedsMax && <li>• Maximum booking duration is 2 hours.</li>}
+            {hasBookingTooShort && <li>• Bookings must be at least 30 minutes long.</li>}
+            {hasTimeConflict && <li>• Your selected time overlaps with an existing booking. Please choose a different time.</li>}
+          </ul>
         )}
 
         {/* Purpose */}
@@ -591,10 +599,10 @@ export function BookingForm({
 
         {/* Booking Summary */}
         <BookingSummary
-          facility={selectedFacility}
+          facility={selectedCampus && selectedFacility ? selectedFacility : undefined}
           startTime={form.watch("startTime")}
           endTime={form.watch("endTime")}
-          participants={form.watch("participants")}
+          participants={selectedCampus && selectedFacility ? form.watch("participants") : undefined}
           purpose={form.watch("purpose")}
           equipment={equipmentState}
           equipmentOtherText={equipmentOtherText}
@@ -603,9 +611,9 @@ export function BookingForm({
 
 
         {/* Validation Warnings (excluding Purpose Required and Booking Conflict — handled inline/redundant) */}
-        {validationWarnings.filter(w => w.title !== 'Purpose Required' && w.title !== 'Booking Conflict' && w.title !== 'Maximum Duration Exceeded').length > 0 && (
+        {validationWarnings.filter(w => !['Purpose Required', 'Booking Conflict', 'Maximum Duration Exceeded', 'Booking Too Short', 'Invalid Start Time', 'Outside Operating Hours', 'Invalid Time Selection', 'Outside School Hours'].includes(w.title)).length > 0 && (
           <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4">
-            {validationWarnings.filter(w => w.title !== 'Purpose Required' && w.title !== 'Booking Conflict' && w.title !== 'Maximum Duration Exceeded').map((warning, idx) => (
+            {validationWarnings.filter(w => !['Purpose Required', 'Booking Conflict', 'Maximum Duration Exceeded', 'Booking Too Short', 'Invalid Start Time', 'Outside Operating Hours', 'Invalid Time Selection', 'Outside School Hours'].includes(w.title)).map((warning, idx) => (
               <div key={idx} className="flex items-start gap-3 mb-2 last:mb-0">
                 <span className="text-yellow-600 text-xl">!</span>
                 <div>
@@ -624,14 +632,12 @@ export function BookingForm({
           </Button>
           <Button
             type="submit"
-            disabled={isSubmitting || isPurposeEmpty || (!isAdmin && (hasTimeConflict || hasEndAfterHours || hasEndExceedsMax))}
+            disabled={isSubmitting || isPurposeEmpty || hasAnyTimeError || !selectedCampus}
           >
             {isSubmitting
               ? 'Creating...'
-              : (!isAdmin && hasTimeConflict)
-              ? 'Time Slot Unavailable'
-              : (!isAdmin && (hasEndAfterHours || hasEndExceedsMax))
-              ? 'Invalid Time'
+              : hasAnyTimeError
+              ? 'Fix Time Errors'
               : 'Create Booking'}
           </Button>
         </DialogFooter>

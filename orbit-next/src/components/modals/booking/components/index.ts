@@ -7,4 +7,3 @@ export * from './NumberInputWithControls';
 export * from './BookingSummary';
 export * from './BookingModalContent';
 export * from './BookingForm';
-export * from './EditBookingModalContent';

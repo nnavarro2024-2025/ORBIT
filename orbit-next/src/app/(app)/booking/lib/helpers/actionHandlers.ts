@@ -121,28 +121,6 @@ export function createCancelCancelBookingHandler(
 }
 
 /**
- * Create save edit booking handler
- */
-export function createSaveEditBookingHandler(updateBookingMutation: any) {
-  return (updatedBooking: any) => {
-    return updateBookingMutation.mutateAsync(updatedBooking);
-  };
-}
-
-/**
- * Create edit booking handler
- */
-export function createEditBookingHandler(
-  setEditingBooking: (booking: any) => void,
-  setShowEditBookingModal: (value: boolean) => void
-) {
-  return (booking: any) => {
-    setEditingBooking(booking);
-    setShowEditBookingModal(true);
-  };
-}
-
-/**
  * Create view all booking history handler
  */
 export function createViewAllBookingHistoryHandler(

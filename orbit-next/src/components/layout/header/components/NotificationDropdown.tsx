@@ -1,10 +1,10 @@
 /**
  * Notification Dropdown Component
  * 
- * Displays notifications in a dropdown menu with mark as read functionality
+ * Displays the 5 latest notifications in a dropdown
  */
 
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useMemo, useCallback, useRef } from 'react';
 import { Bell } from 'lucide-react';
 import {
   DropdownMenu,
@@ -13,7 +13,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { SkeletonListItem } from '@/components/ui/skeleton-presets';
-import { useToast } from '@/hooks/ui';
 import { NotificationItem } from './NotificationItem';
 
 interface NotificationDropdownProps {
@@ -21,13 +20,10 @@ interface NotificationDropdownProps {
   isAdmin: boolean;
   alertsData: any[];
   alertsLoading: boolean;
-  hiddenAlertIds: Set<string>;
-  hiddenAlertIdsVersion: number;
   allBookings: any[];
   userBookings: any[];
   allFacilities: any[];
-  onMarkAsRead: (id: string) => Promise<void>;
-  onHideAlert: (id: string) => void;
+  onMarkAsRead: (alertId: string) => Promise<void>;
 }
 
 export function NotificationDropdown({
@@ -35,58 +31,38 @@ export function NotificationDropdown({
   isAdmin,
   alertsData,
   alertsLoading,
-  hiddenAlertIds,
-  hiddenAlertIdsVersion,
   allBookings,
   userBookings,
   allFacilities,
   onMarkAsRead,
-  onHideAlert,
 }: NotificationDropdownProps) {
-  const { toast } = useToast();
-  const [pendingMarkIds, setPendingMarkIds] = useState<Set<string>>(new Set());
+  const markedRef = useRef<Set<string>>(new Set());
 
-  // Calculate unread count
+  // Count all unread notifications (not just visible ones)
   const unreadCount = useMemo(() => {
     if (!Array.isArray(alertsData)) return 0;
-    return alertsData.filter((a: any) => !a.isRead && !hiddenAlertIds.has(a.id)).length;
-  }, [alertsData, hiddenAlertIdsVersion]);
+    return alertsData.filter((a: any) => !a.isRead).length;
+  }, [alertsData]);
 
-  // Get visible alerts (filtered and sorted)
+  // Mark all visible unread notifications as read when dropdown opens
+  const handleOpenChange = useCallback((open: boolean) => {
+    if (open && Array.isArray(alertsData)) {
+      alertsData
+        .filter((a: any) => !a.isRead && !markedRef.current.has(a.id))
+        .forEach((a: any) => {
+          markedRef.current.add(a.id);
+          onMarkAsRead(String(a.id)).catch(() => {});
+        });
+    }
+  }, [alertsData, onMarkAsRead]);
+
+  // Show only the 5 latest notifications
   const visibleAlerts = useMemo(() => {
     if (!Array.isArray(alertsData)) return [];
-    return alertsData
-      .filter((a: any) => !hiddenAlertIds.has(a.id))
+    return [...alertsData]
       .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       .slice(0, 5);
-  }, [alertsData, hiddenAlertIdsVersion]);
-
-  const handleMarkAsRead = useCallback(async (alertId: string) => {
-    setPendingMarkIds((prev) => {
-      if (!alertId || prev.has(alertId)) return prev;
-      const next = new Set(prev);
-      next.add(alertId);
-      return next;
-    });
-
-    try {
-      await onMarkAsRead(alertId);
-    } catch (error) {
-      console.error("Failed to mark notification as read", error);
-      toast({
-        title: "Mark as read failed",
-        description: "Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setPendingMarkIds((prev) => {
-        if (!prev.has(alertId)) return prev;
-        const next = new Set(prev);
-        next.delete(alertId);
-        return next;
-      });
-    }
-  }, [onMarkAsRead, toast]);
+  }, [alertsData]);
 
   const handleViewAll = useCallback(() => {
     try {
@@ -96,7 +72,6 @@ export function NotificationDropdown({
         return;
       }
 
-      // Navigate to Activity Logs → Notification Logs tab in booking dashboard
       const newHash = '#activity-logs:notifications';
       const currentPath = window.location.pathname;
       
@@ -107,7 +82,6 @@ export function NotificationDropdown({
         window.location.href = '/booking' + newHash;
       }
     } catch (e) {
-      // Fallback
       if (isAdmin) {
         window.location.href = '/admin#activity-logs:notifications';
       } else {
@@ -117,7 +91,7 @@ export function NotificationDropdown({
   }, [isAdmin]);
 
   return (
-    <DropdownMenu key="notifications-dropdown" modal={false}>
+    <DropdownMenu key="notifications-dropdown" modal={false} onOpenChange={handleOpenChange}>
       <DropdownMenuTrigger asChild>
         <button
           className="relative p-2 text-gray-600 hover:text-pink-600 hover:bg-pink-50 rounded-lg transition-all duration-200"
@@ -126,7 +100,7 @@ export function NotificationDropdown({
           <Bell className="h-5 w-5" />
           {unreadCount > 0 && (
             <span className="absolute -top-1 -right-1 inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-medium leading-none text-white bg-red-600 rounded-full">
-              {unreadCount}
+              {unreadCount > 99 ? '99+' : unreadCount}
             </span>
           )}
         </button>
@@ -142,18 +116,16 @@ export function NotificationDropdown({
         ) : visibleAlerts.length > 0 ? (
           <div className="space-y-2">
             {visibleAlerts.map((alert: any) => (
-              <NotificationItem
-                key={alert.id}
-                alert={alert}
-                user={user}
-                isAdmin={isAdmin}
-                allBookings={allBookings}
-                userBookings={userBookings}
-                allFacilities={allFacilities}
-                onMarkAsRead={handleMarkAsRead}
-                onHideAlert={onHideAlert}
-                pendingMarkIds={pendingMarkIds}
-              />
+              <div key={alert.id} className="border border-gray-200 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors">
+                <NotificationItem
+                  alert={alert}
+                  user={user}
+                  isAdmin={isAdmin}
+                  allBookings={allBookings}
+                  userBookings={userBookings}
+                  allFacilities={allFacilities}
+                />
+              </div>
             ))}
 
             {alertsData.length > 5 && (
@@ -170,13 +142,13 @@ export function NotificationDropdown({
         ) : (
           <div className="p-4">
             <div className="text-sm text-gray-700">No notifications</div>
-            <div className="text-xs text-gray-500 mt-2">Check the Notification Logs for older items.</div>
+            <div className="text-xs text-gray-500 mt-2">Check the Activity Logs for older items.</div>
             <div className="mt-3">
               <button
                 onClick={handleViewAll}
                 className="text-sm text-pink-600 hover:text-pink-700"
               >
-                View Notification Logs
+                View Activity Logs
               </button>
             </div>
           </div>

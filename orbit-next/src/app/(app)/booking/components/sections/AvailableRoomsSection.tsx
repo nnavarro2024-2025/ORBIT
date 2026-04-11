@@ -1,6 +1,8 @@
 import { Dispatch, SetStateAction, useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
 import { Calendar } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/api";
 
 import { SkeletonFacilityCard } from "@/components/ui/skeleton-presets";
 
@@ -42,19 +44,16 @@ const FacilityStatusBadge = ({
   facility: any;
   bookingStatus: { status: string; label: string };
 }) => {
-  const classes = `px-3 py-1 rounded-full text-sm font-medium ${
-    !facility.isActive
-      ? "bg-red-500 text-white"
-      : bookingStatus.status === "closed"
-        ? "bg-gray-700 text-white"
-        : bookingStatus.status === "booked"
-          ? "bg-red-500 text-white"
-          : bookingStatus.status === "scheduled"
-            ? "bg-yellow-500 text-white"
-            : "bg-pink-500 text-white"
-  }`;
-
-  return <span className={classes}>{!facility.isActive ? "Unavailable" : bookingStatus.label}</span>;
+  if (!facility.isActive) {
+    return <span className="px-2 py-0.5 sm:px-3 sm:py-1 rounded-full text-xs sm:text-sm font-medium bg-red-500 text-white">Not Available</span>;
+  }
+  if (bookingStatus.status === "booked") {
+    return <span className="px-2 py-0.5 sm:px-3 sm:py-1 rounded-full text-xs sm:text-sm font-medium bg-red-500 text-white">In Use</span>;
+  }
+  if (bookingStatus.status === "pending") {
+    return <span className="px-2 py-0.5 sm:px-3 sm:py-1 rounded-full text-xs sm:text-sm font-medium bg-amber-500 text-white">Pending</span>;
+  }
+  return null;
 };
 
 export function AvailableRoomsSection({
@@ -82,7 +81,23 @@ export function AvailableRoomsSection({
   className,
   showAvailabilityGrid = true,
 }: AvailableRoomsSectionProps) {
-  const [selectedCampus, setSelectedCampus] = useState<"selga" | "bonifacio">("selga");
+  const { data: campusList = [] } = useQuery<Array<{ id: number; name: string }>>({
+    queryKey: ["/api/campuses"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/campuses");
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const [selectedCampusId, setSelectedCampusId] = useState<number | null>(null);
+
+  // Auto-select first campus when list loads
+  useEffect(() => {
+    if (campusList.length > 0 && selectedCampusId === null) {
+      setSelectedCampusId(campusList[0].id);
+    }
+  }, [campusList, selectedCampusId]);
 
   const roleFilteredFacilities = useMemo(() => {
     const userRole = user?.role || "student";
@@ -98,37 +113,33 @@ export function AvailableRoomsSection({
   }, [facilities, isRestrictedFacility, user?.role]);
 
   const filteredFacilities = useMemo(() => {
-    return roleFilteredFacilities.filter((facility) => String(facility?.campus || "") === selectedCampus);
-  }, [roleFilteredFacilities, selectedCampus]);
+    if (selectedCampusId === null) return roleFilteredFacilities;
+    return roleFilteredFacilities.filter((facility) => facility.campusId === selectedCampusId);
+  }, [roleFilteredFacilities, selectedCampusId]);
 
   const campusCounts = useMemo(() => {
-    return roleFilteredFacilities.reduce(
-      (acc, facility) => {
-        const campus = String(facility?.campus || "");
-        if (campus === "selga") acc.selga += 1;
-        if (campus === "bonifacio") acc.bonifacio += 1;
-        return acc;
-      },
-      { selga: 0, bonifacio: 0 },
-    );
-  }, [roleFilteredFacilities]);
+    const counts: Record<number, number> = {};
+    for (const campus of campusList) {
+      counts[campus.id] = 0;
+    }
+    for (const facility of roleFilteredFacilities) {
+      if (facility.campusId && counts[facility.campusId] !== undefined) {
+        counts[facility.campusId] += 1;
+      }
+    }
+    return counts;
+  }, [roleFilteredFacilities, campusList]);
 
   useEffect(() => {
-    const hasSelga = campusCounts.selga > 0;
-    const hasBonifacio = campusCounts.bonifacio > 0;
-
-    if (selectedCampus === "selga" && hasSelga) return;
-    if (selectedCampus === "bonifacio" && hasBonifacio) return;
-
-    if (hasSelga) {
-      setSelectedCampus("selga");
-      return;
+    if (selectedCampusId === null || campusList.length === 0) return;
+    // If current campus has facilities, stay
+    if ((campusCounts[selectedCampusId] ?? 0) > 0) return;
+    // Switch to first campus that has facilities
+    const firstWithFacilities = campusList.find((c) => (campusCounts[c.id] ?? 0) > 0);
+    if (firstWithFacilities) {
+      setSelectedCampusId(firstWithFacilities.id);
     }
-
-    if (hasBonifacio) {
-      setSelectedCampus("bonifacio");
-    }
-  }, [campusCounts.bonifacio, campusCounts.selga, selectedCampus]);
+  }, [campusCounts, campusList, selectedCampusId]);
 
   const handleOpenBooking = (facility: any, start?: Date, end?: Date) => {
     const restricted = isRestrictedFacility(facility);
@@ -153,57 +164,18 @@ export function AvailableRoomsSection({
 
   const renderFacilityCard = (facility: any) => {
     const bookingStatus = getFacilityBookingStatus(facility.id);
-    const isAvailableForBooking = facility.isActive && bookingStatus.status === "available";
+    const isAvailableForBooking = facility.isActive && (bookingStatus.status === "available" || bookingStatus.status === "closed");
     // Allow booking request if facility is active (regardless of current booking status)
     const canRequestBooking = facility.isActive;
-    const isOwnerOrAdmin = user?.role === "admin" || bookingStatus.booking?.userId === user?.id;
-
-    const nextAvailableInfo = (() => {
-      try {
-        const entry = availabilityMap.get(facility.id);
-        if (!entry || !Array.isArray(entry.slots)) return null;
-
-        const slots = entry.slots as Array<{ start: string; end: string; status: string }>;
-        if (slots.length === 0) return null;
-
-        const ranges: Array<{ start: string; end: string; status: string }> = [];
-        let current = { ...slots[0] };
-
-        for (let i = 1; i < slots.length; i++) {
-          const slot = slots[i];
-          if (slot.status === current.status && new Date(slot.start).getTime() === new Date(current.end).getTime()) {
-            current = { ...current, end: slot.end };
-          } else {
-            ranges.push(current);
-            current = { ...slot };
-          }
-        }
-        ranges.push(current);
-
-        const now = new Date();
-        const nextAvailable = ranges.find((range) => range.status === "available" && new Date(range.end) > now && new Date(range.start) >= now);
-        if (!nextAvailable) return null;
-
-        const start = new Date(nextAvailable.start);
-        const end = new Date(nextAvailable.end);
-
-        return {
-          start,
-          end,
-          label: `${format(start, "EEE, MMM d")} • ${format(start, "hh:mm a")} - ${format(end, "hh:mm a")}`,
-        };
-      } catch (_error) {
-        return null;
-      }
-    })();
 
     // Check if it's within library hours
     const isLibraryClosed = isLibraryClosedNow();
+    const showBadge = !facility.isActive || bookingStatus.status === "booked" || bookingStatus.status === "pending";
 
     return (
       <div
         key={facility.id}
-        className={`group bg-white border rounded-xl overflow-hidden transition-all duration-300 flex flex-col h-full ${
+        className={`group bg-white border rounded-xl overflow-hidden transition-all duration-300 flex flex-col h-full max-w-sm w-full mx-auto sm:max-w-none ${
           isAvailableForBooking 
             ? "border-gray-200 hover:shadow-lg cursor-pointer hover:border-pink-200" 
             : isLibraryClosed 
@@ -215,9 +187,9 @@ export function AvailableRoomsSection({
           handleOpenBooking(facility);
         }}
       >
-        <div className="aspect-video bg-gradient-to-br from-pink-100 to-rose-100 flex items-center justify-center relative">
-          {isAvailableForBooking && (
-            <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+        <div className="aspect-video bg-gradient-to-br from-pink-100 to-rose-100 flex items-center justify-center relative max-h-[140px] sm:max-h-[200px]">
+          {showBadge && (
+            <div className="absolute inset-0 bg-black/40 flex items-center justify-center z-10">
               <FacilityStatusBadge facility={facility} bookingStatus={bookingStatus} />
             </div>
           )}
@@ -228,21 +200,20 @@ export function AvailableRoomsSection({
             if (!image) {
               return (
                 <div className="text-center">
-                  <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mx-auto mb-2 shadow-sm">
-                    <Calendar className={`h-8 w-8 ${isAvailableForBooking ? "text-gray-400" : "text-gray-300"}`} />
+                  <div className="w-10 h-10 sm:w-14 sm:h-14 bg-white rounded-full flex items-center justify-center mx-auto mb-1.5 shadow-sm">
+                    <Calendar className={`h-5 w-5 sm:h-7 sm:w-7 ${isAvailableForBooking ? "text-gray-400" : "text-gray-300"}`} />
                   </div>
-                  <p className={`text-sm ${isAvailableForBooking ? "text-gray-500" : "text-gray-400"}`}>No image available</p>
+                  <p className={`text-xs sm:text-sm ${isAvailableForBooking ? "text-gray-500" : "text-gray-400"}`}>No image</p>
                 </div>
               );
             }
 
             return (
-              <div className="absolute inset-0 w-full h-full flex items-center justify-center">
+              <div className="absolute inset-0 w-full h-full">
                 <img
                   src={image}
                   alt={facility.name}
                   className={`w-full h-full object-cover transition-transform duration-300 ${isAvailableForBooking ? "group-hover:scale-105" : "group-hover:scale-105 opacity-85"}`}
-                  style={{ objectPosition: "center", width: "100%", height: "100%", aspectRatio: "16/9", minHeight: "180px", maxHeight: "320px" }}
                   onError={(event) => {
                     event.currentTarget.style.display = "none";
                   }}
@@ -252,116 +223,100 @@ export function AvailableRoomsSection({
           })()}
         </div>
 
-        <div className="p-6 flex flex-col h-full">
-          <div className="flex items-center justify-between mb-1">
+        <div className="p-3 sm:p-4 flex flex-col flex-1">
+          <div className="flex items-center justify-between gap-2 mb-1">
             <h3
-              className={`font-bold text-lg mb-1 transition-colors ${
+              className={`font-bold text-sm sm:text-base leading-tight transition-colors truncate ${
                 isAvailableForBooking ? "text-gray-900 group-hover:text-pink-700" : "text-gray-500"
               }`}
             >
               {formatFacilityName(facility.name)}
             </h3>
-            <span className={`px-2 py-1 rounded-full text-xs font-medium ${bookingStatus.badgeClass}`}>{bookingStatus.label}</span>
+            {showBadge && (
+              <span className={`px-1.5 py-0.5 sm:px-2 sm:py-1 rounded-full text-[10px] sm:text-xs font-medium flex-shrink-0 ${
+                !facility.isActive
+                  ? "bg-red-100 text-red-800"
+                  : bookingStatus.status === "booked"
+                    ? "bg-red-100 text-red-800"
+                    : "bg-amber-100 text-amber-800"
+              }`}>
+                {!facility.isActive
+                  ? "Not Available"
+                  : bookingStatus.status === "booked"
+                    ? "In Use"
+                    : "Pending"}
+              </span>
+            )}
           </div>
 
-          {nextAvailableInfo && !isOwnerOrAdmin && facility.isActive && (
-            <div className="mb-3 p-3 bg-green-50 rounded-lg border border-green-100 flex items-center justify-between">
-              <div>
-                <div className="text-xs text-green-800 font-medium">Next available booking</div>
-                <div className="text-sm font-semibold text-gray-900">{nextAvailableInfo.label}</div>
-              </div>
-              {/* <div>
-                <button
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    handleOpenBooking(facility, nextAvailableInfo.start, nextAvailableInfo.end);
-                  }}
-                  className="bg-pink-600 text-white px-3 py-1 rounded-lg text-sm"
-                >
-                  Book Now
-                </button>
-              </div> */}
-            </div>
-          )}
-
-          <p className={`text-sm leading-relaxed mb-1 flex-grow ${isAvailableForBooking ? "text-gray-600" : "text-gray-500"}`}>
-            {getFacilityDescriptionByName(facility.name)}
-          </p>
-
-          {bookingStatus.booking && bookingStatus.status !== "available" && (user?.role === "admin" || bookingStatus.booking?.userId === user?.id) && (
-            <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
-              <p className="text-xs font-medium text-gray-600 mb-1">
-                {bookingStatus.booking?.status === "pending"
-                  ? "Pending booking:"
-                  : bookingStatus.status === "booked"
-                    ? "Currently in use until:"
-                    : bookingStatus.status === "scheduled"
-                      ? "Next booking:"
-                      : "Scheduled:"}
-              </p>
-              <p className="text-sm text-gray-900 font-medium">
-                {bookingStatus.status === "booked"
-                  ? new Date(bookingStatus.booking.endTime).toLocaleTimeString("en-US", {
-                      hour: "numeric",
-                      minute: "2-digit",
-                      hour12: true,
-                    })
-                  : `${format(new Date(bookingStatus.booking.startTime), "EEE, MMM d")} • ${format(new Date(bookingStatus.booking.startTime), "hh:mm a")} - ${format(new Date(bookingStatus.booking.endTime), "hh:mm a")}`}
-              </p>
-              {bookingStatus.booking?.status === "pending" && (
-                <p className="text-xs text-gray-500 mt-1">Scheduled automatically; you'll be notified of any changes.</p>
+          {!facility.isActive && (
+            <div className="mb-2 p-2 rounded-md border bg-red-50 border-red-100">
+              <div className="text-[10px] sm:text-xs font-medium text-red-800">Not Available</div>
+              {facility.unavailableReason && (
+                <div className="text-xs sm:text-sm text-red-700">{facility.unavailableReason}</div>
               )}
             </div>
           )}
 
-          <div className="mt-auto">
-            {isLibraryClosed && facility.isActive && (
-              <div className="mb-3 p-2 bg-amber-50 rounded-lg border border-amber-200 flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0" />
-                <div className="text-xs text-amber-700 font-medium">
-                  Request outside hours • Library: 7:30 AM - 7:00 PM
+          <p className={`text-xs sm:text-sm leading-relaxed mb-2 flex-grow line-clamp-2 ${isAvailableForBooking ? "text-gray-600" : "text-gray-500"}`}>
+            {getFacilityDescriptionByName(facility.name)}
+          </p>
+
+          {bookingStatus.booking && (user?.role === "admin" || bookingStatus.booking?.userId === user?.id) && (
+            <>
+              {bookingStatus.status === "booked" && (
+                <div className="mb-2 p-2 bg-gray-50 rounded-md border border-gray-200">
+                  <p className="text-[10px] sm:text-xs font-medium text-gray-600 mb-0.5">In use until:</p>
+                  <p className="text-xs sm:text-sm text-gray-900 font-medium">
+                    {new Date(bookingStatus.booking.endTime).toLocaleTimeString("en-US", {
+                      hour: "numeric",
+                      minute: "2-digit",
+                      hour12: true,
+                    })}
+                  </p>
                 </div>
-              </div>
-            )}
-            
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${isAvailableForBooking ? "bg-green-500" : "bg-gray-400"}`} />
-                <span className={`text-sm font-medium ${isAvailableForBooking ? "text-green-700" : "text-gray-500"}`}>
-                  {`Up to ${facility.capacity || 8} people`}
+              )}
+              {bookingStatus.booking?.status === "pending" && bookingStatus.status !== "booked" && (
+                <div className="mb-2 p-2 bg-amber-50 rounded-md border border-amber-100">
+                  <p className="text-[10px] sm:text-xs font-medium text-amber-800 mb-0.5">Pending:</p>
+                  <p className="text-xs sm:text-sm text-gray-900 font-medium">
+                    {`${format(new Date(bookingStatus.booking.startTime), "MMM d")} • ${format(new Date(bookingStatus.booking.startTime), "h:mm a")} - ${format(new Date(bookingStatus.booking.endTime), "h:mm a")}`}
+                  </p>
+                  <p className="text-[10px] text-gray-500 mt-0.5">Awaiting arrival confirmation.</p>
+                </div>
+              )}
+            </>
+          )}
+
+          <div className="mt-auto">
+
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5">
+                <div className={`w-1.5 h-1.5 rounded-full ${isAvailableForBooking ? "bg-green-500" : "bg-gray-400"}`} />
+                <span className={`text-xs sm:text-sm font-medium ${isAvailableForBooking ? "text-green-700" : "text-gray-500"}`}>
+                  {`Up to ${facility.capacity || 8}`}
                 </span>
               </div>
 
-              <div className="flex flex-col items-end">
-                <button
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    if (!canRequestBooking) return;
-
-                    handleOpenBooking(facility);
-                  }}
-                  disabled={!canRequestBooking}
-                  className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors duration-200 shadow-sm flex-shrink-0 ${
-                    !facility.isActive
-                      ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                      : isAvailableForBooking
-                        ? "bg-pink-600 hover:bg-pink-700 text-white shadow-md"
-                        : isLibraryClosed
-                          ? "bg-amber-500 hover:bg-amber-600 text-white shadow-md"
-                          : "bg-pink-50 hover:bg-pink-100 text-pink-700 border border-pink-200"
-                  }`}
-                >
-                  {!facility.isActive ? "Unavailable" : isAvailableForBooking ? "Book Now" : isLibraryClosed ? "Request Booking" : "Book Now"}
-                </button>
-
-                {!isAvailableForBooking && facility.isActive && (
-                  <p className="text-xs text-gray-500 mt-2 text-right max-w-xs">
-                    {bookingStatus.status === "closed" 
-                      ? "If requested outside school hours, the system will schedule it automatically and notify you of any changes."
-                      : "Select a different time slot when booking"}
-                  </p>
-                )}
-              </div>
+              <button
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (!canRequestBooking) return;
+                  handleOpenBooking(facility);
+                }}
+                disabled={!canRequestBooking}
+                className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg font-medium text-xs sm:text-sm transition-colors duration-200 shadow-sm flex-shrink-0 ${
+                  !facility.isActive
+                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                    : isAvailableForBooking
+                      ? "bg-pink-600 hover:bg-pink-700 text-white shadow-md"
+                      : isLibraryClosed
+                        ? "bg-amber-500 hover:bg-amber-600 text-white shadow-md"
+                        : "bg-pink-50 hover:bg-pink-100 text-pink-700 border border-pink-200"
+                }`}
+              >
+                {!facility.isActive ? "Unavailable" : isAvailableForBooking ? "Book Now" : isLibraryClosed ? "Request" : "Book Now"}
+              </button>
             </div>
           </div>
         </div>
@@ -381,31 +336,20 @@ export function AvailableRoomsSection({
             <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Available Study Rooms</h2>
             <p className="text-sm sm:text-base text-gray-600 mt-1">Browse and book available facilities</p>
 
-            {(isLibraryClosedNow() || filteredFacilities.some((facility) => getFacilityBookingStatus(facility.id).status === "closed")) && (
-              <div className="mt-3 text-sm text-gray-500 bg-gray-50 rounded p-2 border border-gray-100">
-                If you request a booking outside school hours, the system will schedule it automatically and notify you of any changes.
-              </div>
-            )}
 
             <div className="mt-3 inline-flex flex-wrap p-1 rounded-lg bg-gray-100 border border-gray-200">
-              <button
-                type="button"
-                onClick={() => setSelectedCampus("selga")}
-                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                  selectedCampus === "selga" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"
-                }`}
-              >
-                Main Campus ({campusCounts.selga})
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedCampus("bonifacio")}
-                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                  selectedCampus === "bonifacio" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"
-                }`}
-              >
-                Annex Campus ({campusCounts.bonifacio})
-              </button>
+              {campusList.map((campus) => (
+                <button
+                  key={campus.id}
+                  type="button"
+                  onClick={() => setSelectedCampusId(campus.id)}
+                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                    selectedCampusId === campus.id ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"
+                  }`}
+                >
+                  {campus.name} ({campusCounts[campus.id] ?? 0})
+                </button>
+              ))}
             </div>
           </div>
 
@@ -426,7 +370,27 @@ export function AvailableRoomsSection({
           )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-4 sm:gap-6 transition-all duration-300">
+                {!isFacilitiesLoading && !isFacilitiesFetching && filteredFacilities.length > 0 && availableRooms.length === 0 && (
+          <div className="text-center py-12">
+            <div className="bg-red-100 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
+              <Calendar className="h-8 w-8 text-red-500" />
+            </div>
+            {isLibraryClosedNow() ? (
+              <>
+                <h4 className="text-lg font-medium text-gray-900 mb-2">School Closed</h4>
+                <p className="text-gray-600">School operating hours (7:30 AM - 7:00 PM). Room access is only available during these hours.</p>
+              </>
+            ) : (
+              <>
+                <h4 className="text-lg font-medium text-gray-900 mb-2">All rooms are currently booked</h4>
+                <p className="text-gray-600">All facilities are currently in use, scheduled, or otherwise unavailable. Please check back later or contact school staff for assistance.</p>
+              </>
+            )}
+          </div>
+        )}
+
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
           {(isFacilitiesLoading || isFacilitiesFetching)
             ? Array.from({ length: 6 }).map((_, index) => <SkeletonFacilityCard key={index} />)
             : filteredFacilities.map(renderFacilityCard)}
@@ -439,29 +403,11 @@ export function AvailableRoomsSection({
             </div>
             <h4 className="text-lg font-medium text-gray-900 mb-2">No facilities available</h4>
             <p className="text-gray-600">
-              {`No facilities found for the ${selectedCampus === "selga" ? "Main Campus" : "Annex Campus"}.`}
+              {`No facilities found for the ${campusList.find((c) => c.id === selectedCampusId)?.name ?? "selected campus"}.`}
             </p>
           </div>
         )}
 
-        {!isFacilitiesLoading && !isFacilitiesFetching && filteredFacilities.length > 0 && availableRooms.length === 0 && (
-          <div className="text-center py-12">
-            <div className="bg-red-100 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-4">
-              <Calendar className="h-8 w-8 text-red-500" />
-            </div>
-            {isLibraryClosedNow() ? (
-              <>
-                <h4 className="text-lg font-medium text-gray-900 mb-2">School Closed</h4>
-                <p className="text-gray-600">The school is currently closed. Please return during normal operating hours (7:30 AM – 7:00 PM).</p>
-              </>
-            ) : (
-              <>
-                <h4 className="text-lg font-medium text-gray-900 mb-2">All rooms are currently booked</h4>
-                <p className="text-gray-600">All facilities are currently in use, scheduled, or otherwise unavailable. Please check back later or contact school staff for assistance.</p>
-              </>
-            )}
-          </div>
-        )}
 
 
       </div>

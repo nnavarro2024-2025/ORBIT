@@ -241,7 +241,7 @@ export function BookingHistoryTab({
                   </div>
                   {/* Equipment List */}
                   {(items.length > 0 || hasOthers) && (
-                    <div className="w-[280px]">
+                    <div className="w-full sm:w-[280px]">
                       <div className="mb-1.5">
                         <h5 className="text-[14px] font-bold text-gray-700  tracking-wider">Equipment</h5>
                       </div>

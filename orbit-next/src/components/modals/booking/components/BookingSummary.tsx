@@ -82,7 +82,7 @@ export function BookingSummary({
           </>
         )}
 
-        {participants && (
+        {participants != null && (
           <div className="flex justify-between">
             <span className="text-sm">Participants:</span>
             <span className="text-sm font-medium">{participants}</span>

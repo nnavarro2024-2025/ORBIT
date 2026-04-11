@@ -19,5 +19,8 @@ interface BookingModalProps {
 }
 
 export default function BookingModal(props: BookingModalProps) {
-  return <BookingModalContent {...props} />;
+  // Key forces full remount when modal opens with a new facility,
+  // ensuring useForm defaults and local state are always fresh.
+  const mountKey = props.isOpen ? `open-${props.selectedFacilityId ?? 'none'}` : 'closed';
+  return <BookingModalContent key={mountKey} {...props} />;
 }

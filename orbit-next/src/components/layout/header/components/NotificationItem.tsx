@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { Check, X, Clock, CheckCircle2, XCircle } from 'lucide-react';
+import { Check, X, Clock } from 'lucide-react';
 import { parseEquipmentAlert, sanitizeDisplayText } from '../utils';
 
 interface NotificationItemProps {
@@ -15,9 +15,6 @@ interface NotificationItemProps {
   allBookings: any[];
   userBookings: any[];
   allFacilities: any[];
-  onMarkAsRead: (id: string) => void;
-  onHideAlert: (id: string) => void;
-  pendingMarkIds: Set<string>;
 }
 
 export function NotificationItem({
@@ -27,9 +24,6 @@ export function NotificationItem({
   allBookings,
   userBookings,
   allFacilities,
-  onMarkAsRead,
-  onHideAlert,
-  pendingMarkIds,
 }: NotificationItemProps) {
   const parsed = parseEquipmentAlert(alert);
 
@@ -69,42 +63,24 @@ export function NotificationItem({
     actorEmail,
   });
 
-  const readPrefix = alert.isRead ? 'READ: ' : '';
-  const shouldAppendWhen = Boolean(
-    (parsed.itemsWithStatus && parsed.itemsWithStatus.length > 0) || 
-    (parsed.equipmentList && parsed.equipmentList.length > 0)
-  );
-  
   const fallbackShort = sanitizeDisplayText(parsed.cleaned || String(alert.message || alert.details || ''), isAdmin);
-  const smallMessage = `${readPrefix}${leadIn}${shouldAppendWhen && when ? ` at ${when}` : ''}${(!leadIn || leadIn.length === 0) ? ` ${fallbackShort}` : ''}`.trim();
+  const smallMessage = `${leadIn}${(!leadIn || leadIn.length === 0) ? ` ${fallbackShort}` : ''}`.trim();
+
+  // Format timestamp for display
+  const formattedTime = alert.createdAt
+    ? new Date(alert.createdAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) +
+      ' \u2022 ' +
+      new Date(alert.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
+    : '';
 
   return (
-    <div className={`p-2 rounded-md ${alert.isRead ? 'opacity-70' : ''}`}>
+    <div className="p-2 rounded-md">
       <div className="flex flex-col gap-2">
-        <div className="flex items-start justify-between gap-2">
+        <div className="flex items-start gap-2">
           <div className="flex-1 min-w-0">
             <div className="text-sm font-medium text-gray-900 truncate">
               {parsed.visibleTitle}
             </div>
-          </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            {!alert.isRead && (
-              <button
-                onClick={() => onMarkAsRead(alert.id)}
-                disabled={pendingMarkIds.has(alert.id)}
-                className="text-xs text-blue-600 hover:text-blue-700 disabled:opacity-50"
-                title="Mark as read"
-              >
-                <CheckCircle2 className="h-4 w-4" />
-              </button>
-            )}
-            <button
-              onClick={() => onHideAlert(alert.id)}
-              className="text-xs text-gray-400 hover:text-gray-600"
-              title="Hide notification"
-            >
-              <XCircle className="h-4 w-4" />
-            </button>
           </div>
         </div>
 
@@ -113,6 +89,12 @@ export function NotificationItem({
         </div>
 
         {itemsDisplay}
+
+        {formattedTime && (
+          <div className="text-[11px] text-red-400">
+            {formattedTime}
+          </div>
+        )}
       </div>
     </div>
   );

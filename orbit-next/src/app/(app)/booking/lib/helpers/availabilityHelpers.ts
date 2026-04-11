@@ -1,5 +1,6 @@
 import { format } from 'date-fns';
 import { DAILY_START_HOUR, DAILY_END_HOUR, SLOT_DURATION_MINUTES } from '../../config/constants';
+import { BOOKING_MAX_DURATION_MS } from '@shared/bookingRules';
 
 /**
  * Generate mock availability slots for facilities
@@ -100,6 +101,46 @@ export function pickAvailableSlot(entry: any, now: Date) {
       return false; 
     }
   }) || null;
+}
+
+/**
+ * Find smart booking slot: starts at first available slot, extends end
+ * through consecutive available slots up to max booking duration (2 hours).
+ */
+export function findSmartBookingSlot(entry: any, now: Date): { start: string; end: string } | null {
+  if (!entry || !Array.isArray(entry.slots)) return null;
+
+  const futureSlots = entry.slots
+    .filter((s: any) => {
+      try {
+        return s.status === 'available' &&
+               new Date(s.end).getTime() > now.getTime() &&
+               new Date(s.start).getTime() >= now.getTime();
+      } catch { return false; }
+    })
+    .sort((a: any, b: any) => new Date(a.start).getTime() - new Date(b.start).getTime());
+
+  if (futureSlots.length === 0) return null;
+
+  const startTime = new Date(futureSlots[0].start);
+  let endTime = new Date(futureSlots[0].end);
+  const maxEnd = new Date(startTime.getTime() + BOOKING_MAX_DURATION_MS);
+
+  for (let i = 1; i < futureSlots.length; i++) {
+    const slotStart = new Date(futureSlots[i].start);
+    const slotEnd = new Date(futureSlots[i].end);
+
+    if (slotStart.getTime() !== endTime.getTime()) break;
+
+    if (slotEnd.getTime() > maxEnd.getTime()) {
+      endTime = maxEnd;
+      break;
+    }
+
+    endTime = slotEnd;
+  }
+
+  return { start: startTime.toISOString(), end: endTime.toISOString() };
 }
 
 /**

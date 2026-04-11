@@ -29,14 +29,11 @@ export default function Header({ onMobileToggle }: { onMobileToggle?: () => void
         isAdmin={headerData.isAdmin}
         alertsData={headerData.alertsData}
         alertsLoading={headerData.alertsLoading}
-        hiddenAlertIds={headerData.hiddenAlertIds}
-        hiddenAlertIdsVersion={headerData.hiddenAlertIdsVersion}
         allBookings={headerData.allBookings}
         userBookings={headerData.userBookings}
         allFacilities={headerData.allFacilities}
         onMobileToggle={handleMobileToggle}
         onMarkAsRead={headerData.markAsRead}
-        onHideAlert={headerData.hideAlert}
         onLogout={headerData.handleLogout}
       />
     </header>

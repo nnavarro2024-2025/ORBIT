@@ -14,14 +14,11 @@ interface HeaderContentProps {
   isAdmin: boolean;
   alertsData: any;
   alertsLoading: boolean;
-  hiddenAlertIds: Set<string>;
-  hiddenAlertIdsVersion: number;
   allBookings: any[];
   userBookings: any[];
   allFacilities: any[];
   onMobileToggle?: () => void;
   onMarkAsRead: (alertId: string) => Promise<void>;
-  onHideAlert: (alertId: string) => void;
   onLogout: () => void;
 }
 
@@ -30,14 +27,11 @@ export function HeaderContent({
   isAdmin,
   alertsData,
   alertsLoading,
-  hiddenAlertIds,
-  hiddenAlertIdsVersion,
   allBookings,
   userBookings,
   allFacilities,
   onMobileToggle,
   onMarkAsRead,
-  onHideAlert,
   onLogout,
 }: HeaderContentProps) {
   const { toast } = useToast();
@@ -93,7 +87,7 @@ export function HeaderContent({
         <img
           src="/orbit-logo.png"
           alt="ORBIT Logo"
-          className="h-10 w-auto object-contain"
+          className="h-8 sm:h-10 w-auto object-contain"
         />
         <span className="font-bold text-xl sm:text-2xl tracking-wider bg-gradient-to-r from-pink-600 to-rose-600 bg-clip-text text-transparent truncate">
           ORBIT
@@ -109,13 +103,10 @@ export function HeaderContent({
               isAdmin={isAdmin}
               alertsData={alertsData}
               alertsLoading={alertsLoading}
-              hiddenAlertIds={hiddenAlertIds}
-              hiddenAlertIdsVersion={hiddenAlertIdsVersion}
               allBookings={allBookings}
               userBookings={userBookings}
               allFacilities={allFacilities}
               onMarkAsRead={onMarkAsRead}
-              onHideAlert={onHideAlert}
             />
             {process.env.NODE_ENV !== "production" && (
               <div className="hidden md:flex items-center gap-2 border border-gray-200 rounded-lg px-2 py-1 bg-gray-50">

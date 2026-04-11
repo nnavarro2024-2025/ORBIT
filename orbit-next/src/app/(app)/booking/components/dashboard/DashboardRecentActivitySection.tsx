@@ -39,55 +39,37 @@ function DashboardCountdown({ expiry, onExpire }: { expiry: string | Date | unde
 }
 
 interface DashboardRecentActivitySectionProps {
-  activityTab: "booking" | "notifications";
-  onChangeTab: (tab: "booking" | "notifications") => void;
   currentUserEmail?: string;
   currentUserName?: string;
   user?: any;
   userBookings: any[];
-  notificationsData: any[];
   isUserBookingsLoading: boolean;
   isUserBookingsFetching: boolean;
-  isNotificationsLoading: boolean;
-  isNotificationsFetching: boolean;
   itemsPerPage: number;
   openOthers: Record<string, boolean>;
   setOpenOthers: Dispatch<SetStateAction<Record<string, boolean>>>;
   getBookingStatus: (booking: any) => { label: string; badgeClass: string };
   getFacilityDisplay: (facilityId: number) => string;
-  parseEquipmentFromMessage: (message: string) => { baseMessage: string; equipment: any };
-  getEquipmentStatusColor: (status: string) => string;
   onSelectViewAllBookingHistory: () => void;
   onNavigateToBookingDetails: (bookingId: string) => void;
-  onMarkNotificationRead: (notificationId: string) => void;
-  markNotificationReadPending: boolean;
   onArrivalCountdownExpire?: (booking: any) => void;
   onActiveCountdownExpire?: (booking: any) => void;
 }
 
 export function DashboardRecentActivitySection({
-  activityTab,
-  onChangeTab,
   currentUserEmail,
   currentUserName,
   user,
   userBookings,
-  notificationsData,
   isUserBookingsLoading,
   isUserBookingsFetching,
-  isNotificationsLoading,
-  isNotificationsFetching,
   itemsPerPage,
   openOthers,
   setOpenOthers,
   getBookingStatus,
   getFacilityDisplay,
-  parseEquipmentFromMessage,
-  getEquipmentStatusColor,
   onSelectViewAllBookingHistory,
   onNavigateToBookingDetails,
-  onMarkNotificationRead,
-  markNotificationReadPending,
   onArrivalCountdownExpire,
   onActiveCountdownExpire,
 }: DashboardRecentActivitySectionProps) {
@@ -96,7 +78,11 @@ export function DashboardRecentActivitySection({
     return userBookings.filter((booking) => {
       const status = getBookingStatus(booking);
       if (["Active", "Scheduled", "Pending"].includes(status.label)) return true;
-      if (status.label === "Completed" || status.label === "Cancelled") {
+      if (status.label === "Cancelled") {
+        // Show if cancelled today (updatedAt) OR if booking endTime is today
+        return isToday(new Date(booking.updatedAt)) || isToday(new Date(booking.endTime));
+      }
+      if (status.label === "Completed") {
         return isToday(new Date(booking.endTime));
       }
       return false;
@@ -163,15 +149,15 @@ export function DashboardRecentActivitySection({
                   {/* Time and Status Row on Mobile */}
                   <div className="flex items-center justify-between lg:justify-start gap-3 lg:gap-6">
                     {/* Time Info */}
-                    <div className="flex items-center gap-6">
+                    <div className="flex items-center gap-3 sm:gap-6">
                       <div className="text-left">
                         <p className="text-xs font-medium text-gray-500 mb-1">Started</p>
-                        <p className="text-lg font-semibold text-gray-900 whitespace-nowrap">{format(new Date(booking.startTime), "h:mm a")}</p>
+                        <p className="text-sm sm:text-lg font-semibold text-gray-900 whitespace-nowrap">{format(new Date(booking.startTime), "h:mm a")}</p>
                         <p className="text-xs text-gray-500 mt-0.5">{format(new Date(booking.startTime), "M/d/yyyy")}</p>
                       </div>
                       <div className="text-left">
                         <p className="text-xs font-medium text-gray-500 mb-1">Ends</p>
-                        <p className="text-lg font-semibold text-gray-900 whitespace-nowrap">{format(new Date(booking.endTime), "h:mm a")}</p>
+                        <p className="text-sm sm:text-lg font-semibold text-gray-900 whitespace-nowrap">{format(new Date(booking.endTime), "h:mm a")}</p>
                         <p className="text-xs text-gray-500 mt-0.5">{format(new Date(booking.endTime), "M/d/yyyy")}</p>
                       </div>
                     </div>
@@ -192,7 +178,13 @@ export function DashboardRecentActivitySection({
                           status.label === "Pending" ? "bg-blue-100 text-blue-800" :
                           "bg-gray-100 text-gray-800"
                         }`}>
-                          {status.label}
+                          {status.label === "Cancelled"
+                            ? booking.arrivalConfirmationDeadline && !booking.arrivalConfirmed && new Date(booking.updatedAt) >= new Date(booking.arrivalConfirmationDeadline)
+                              ? "Cancelled | Not Confirmed"
+                              : booking.adminId
+                              ? "Cancelled by Admin"
+                              : "Cancelled by you"
+                            : status.label}
                         </span>
                       )}
                     </div>
@@ -203,6 +195,15 @@ export function DashboardRecentActivitySection({
               <p className="text-xs text-gray-400 mt-2">
                 Booked on {format(new Date(booking.createdAt || booking.startTime), "MMM d, yyyy 'at' h:mm a")}
               </p>
+              {status.label === "Cancelled" && booking.updatedAt && (
+                <p className="text-xs text-orange-500 mt-0.5">
+                  {booking.arrivalConfirmationDeadline && !booking.arrivalConfirmed && new Date(booking.updatedAt) >= new Date(booking.arrivalConfirmationDeadline)
+                    ? `Auto Cancelled on ${format(new Date(booking.updatedAt), "MMM d, yyyy 'at' h:mm a")}`
+                    : booking.adminId
+                    ? `Cancelled by Admin on ${format(new Date(booking.updatedAt), "MMM d, yyyy 'at' h:mm a")}`
+                    : `Cancelled on ${format(new Date(booking.updatedAt), "MMM d, yyyy 'at' h:mm a")}`}
+                </p>
+              )}
             </div>
           );
         })}
@@ -210,168 +211,29 @@ export function DashboardRecentActivitySection({
     );
   };
 
-  const renderNotificationList = () => {
-    if (isNotificationsLoading || isNotificationsFetching) {
-      return (
-        <div className="space-y-3">
-          {Array.from({ length: 4 }).map((_, index) => (
-            <SkeletonListItem key={`notification-skeleton-${index}`} />
-          ))}
-        </div>
-      );
-    }
-
-    if (notificationsData.length === 0) {
-      return (
-        <div className="text-center py-8">
-          <p className="text-gray-600 text-sm">No notifications yet</p>
-        </div>
-      );
-    }
-
-    return (
-      <div className="space-y-3">
-        {notificationsData.slice(0, itemsPerPage).map((notification: any) => (
-          <div
-            key={notification.id}
-            className={`p-4 rounded-lg border ${
-              notification.readAt ? "border-gray-100 bg-gray-50" : "border-pink-100 bg-pink-50"
-            } flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3`}
-          >
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1">
-                <span
-                  className={`inline-flex items-center px-2 py-1 rounded-full text-[10px] font-medium ${
-                    notification.type === "BOOKING_APPROVED"
-                      ? "bg-green-100 text-green-800"
-                      : notification.type === "BOOKING_DENIED"
-                      ? "bg-red-100 text-red-800"
-                      : "bg-gray-100 text-gray-800"
-                  }`}
-                >
-                  {notification.type?.replace(/_/g, " ") || "Notification"}
-                </span>
-                {!notification.readAt && (
-                  <span className="text-[10px] text-pink-600 font-medium uppercase tracking-wide">
-                    New
-                  </span>
-                )}
-              </div>
-              <h4 className="text-sm font-semibold text-gray-900 truncate">
-                {notification.title || "Notification"}
-              </h4>
-              <div className="text-xs text-gray-600 mt-1 whitespace-pre-wrap break-words">
-                {(notification.message || "").split("\n").map((line: string, idx: number) => (
-                  <span key={idx} className="block">
-                    {(() => {
-                      const { baseMessage, equipment } = parseEquipmentFromMessage(line);
-                      const equipmentItems = equipment && typeof equipment === "object"
-                        ? Array.isArray(equipment.items)
-                          ? equipment.items
-                          : Object.keys(equipment).filter((key) => key !== "others")
-                        : [];
-                      return (
-                        <>
-                          {baseMessage}
-                          {equipmentItems.length > 0 ? (
-                            <div className="mt-2">
-                              <span className="block text-[11px] font-semibold text-gray-700">
-                                Equipment requested:
-                              </span>
-                              <div className="mt-1 flex flex-wrap gap-1.5">
-                                {equipmentItems.map((itemKey: string) => (
-                                  <span
-                                    key={itemKey}
-                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border bg-blue-50 text-blue-700 border-blue-200"
-                                  >
-                                    <span className="w-1.5 h-1.5 rounded-full bg-current" />
-                                    {itemKey.replace(/_/g, " ")}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          ) : null}
-                          {equipment && equipment.others ? (
-                            <div className="mt-2">
-                              <span className="block text-[11px] font-semibold text-gray-700">
-                                Other notes:
-                              </span>
-                              <span className="text-xs text-gray-600 mt-1 whitespace-pre-wrap break-words block">
-                                {String(equipment.others)}
-                              </span>
-                            </div>
-                          ) : null}
-                        </>
-                      );
-                    })()}
-                  </span>
-                ))}
-              </div>
-              <p className="text-[11px] text-gray-500 mt-2">
-                {format(new Date(notification.createdAt), "EEE, MMM d • hh:mm a")}
-              </p>
-            </div>
-            {/* No Mark Read button — pink highlight indicates new */}
-          </div>
-        ))}
-      </div>
-    );
-  };
-
   const bookingsShown = filteredBookings.length;
-  const notificationsShown = Math.min(itemsPerPage, notificationsData.length);
 
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
       <div className="flex flex-col gap-4 mb-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h3 className="text-xl font-semibold text-gray-900">My Scheduled Facility Logs</h3>
-            <p className="text-sm text-gray-600 mt-1">Your latest facility reservations and notifications</p>
+            <h3 className="text-lg sm:text-xl font-semibold text-gray-900">My Scheduled Facility Logs</h3>
+            <p className="text-xs sm:text-sm text-gray-600 mt-1">Your latest facility reservations</p>
           </div>
           <button
-            onClick={() => {
-              if (activityTab === "booking") {
-                onSelectViewAllBookingHistory();
-              } else {
-                try {
-                  window.location.hash = "#activity-logs:notifications";
-                  window.dispatchEvent(new HashChangeEvent('hashchange'));
-                } catch (e) {
-                  onSelectViewAllBookingHistory();
-                }
-              }
-            }}
+            onClick={() => onSelectViewAllBookingHistory()}
             className="text-pink-600 hover:text-pink-800 font-medium text-sm transition-colors duration-200 self-start sm:self-auto"
           >
             View All →
           </button>
         </div>
-
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <button
-            onClick={() => onChangeTab("booking")}
-            className={`flex-1 sm:flex-none px-3 py-2 rounded whitespace-nowrap text-sm transition-colors ${activityTab === "booking" ? "bg-pink-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}
-          >
-            Booking Logs
-          </button>
-          <button
-            onClick={() => onChangeTab("notifications")}
-            className={`flex-1 sm:flex-none px-3 py-2 rounded whitespace-nowrap text-sm transition-colors ${activityTab === "notifications" ? "bg-pink-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}
-          >
-            Notifications
-          </button>
-        </div>
       </div>
 
-      {activityTab === "booking" ? renderBookingList() : renderNotificationList()}
+      {renderBookingList()}
 
       <div className="pt-4 border-t border-gray-100 mt-6 flex items-center justify-between text-sm text-gray-600">
-        {activityTab === "booking" ? (
-          <p>Showing {bookingsShown} of {filteredBookings.length} booking{filteredBookings.length !== 1 ? 's' : ''}</p>
-        ) : (
-          <p>Showing {notificationsShown} of {notificationsData.length} notification{notificationsData.length !== 1 ? 's' : ''}</p>
-        )}
+        <p>Showing {bookingsShown} of {filteredBookings.length} booking{filteredBookings.length !== 1 ? 's' : ''}</p>
       </div>
     </div>
   );

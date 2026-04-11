@@ -28,7 +28,7 @@ export function DashboardStatsSection({ stats, isLoading, onSelectMyBookings }: 
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-gray-600 group-hover:text-pink-700">Active Bookings</p>
-                <p className="text-3xl font-bold text-pink-600 mt-1">{stats.active}</p>
+                <p className="text-2xl sm:text-3xl font-bold text-pink-600 mt-1">{stats.active}</p>
                 <p className="text-xs text-gray-500 mt-1">Currently in progress</p>
               </div>
               <div className="bg-pink-100 p-3 rounded-full group-hover:bg-pink-200 transition-colors duration-200">
@@ -44,7 +44,7 @@ export function DashboardStatsSection({ stats, isLoading, onSelectMyBookings }: 
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-gray-600 group-hover:text-pink-700">Scheduled Bookings</p>
-                <p className="text-3xl font-bold text-pink-600 mt-1">{stats.upcoming}</p>
+                <p className="text-2xl sm:text-3xl font-bold text-pink-600 mt-1">{stats.upcoming}</p>
                 <p className="text-xs text-gray-500 mt-1">Approved and scheduled</p>
               </div>
               <div className="bg-pink-100 p-3 rounded-full group-hover:bg-pink-200 transition-colors duration-200">

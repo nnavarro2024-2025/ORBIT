@@ -1,5 +1,5 @@
-import { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState } from "react";
-import { format } from "date-fns";
+import { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { format, startOfDay, endOfDay, isWithinInterval, parseISO } from "date-fns";
 import { SkeletonListItem } from "@/components/ui/skeleton-presets";
 
 interface ActivityLogsSectionProps {
@@ -36,28 +36,37 @@ export function ActivityLogsSection({
   isNotificationsLoading,
   isNotificationsFetching,
   parseEquipmentFromMessage,
-  onMarkNotificationRead,
 }: ActivityLogsSectionProps) {
   const [visibleCount, setVisibleCount] = useState(NOTIFICATIONS_BATCH_SIZE);
-  const [seenIds, setSeenIds] = useState<Set<string>>(() => new Set());
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const scrollSentinelRef = useRef<HTMLDivElement>(null);
 
-  // On first render/reload, mark all current notifications as "seen" so they lose pink highlight
+  // Filter notifications by date range
+  const filteredNotifications = useMemo(() => {
+    if (!dateFrom && !dateTo) return notificationsData;
+    return notificationsData.filter((n: any) => {
+      try {
+        const created = new Date(n.createdAt);
+        if (dateFrom) {
+          const from = startOfDay(parseISO(dateFrom));
+          if (created < from) return false;
+        }
+        if (dateTo) {
+          const to = endOfDay(parseISO(dateTo));
+          if (created > to) return false;
+        }
+        return true;
+      } catch {
+        return true;
+      }
+    });
+  }, [notificationsData, dateFrom, dateTo]);
+
+  // Reset visible count when filters change
   useEffect(() => {
-    if (notificationsData.length > 0) {
-      // Mark all initially loaded notification ids as seen after a brief delay (simulates "reload unhighlight")
-      const timer = setTimeout(() => {
-        setSeenIds(new Set(notificationsData.map((n: any) => String(n.id))));
-        // Also mark unread ones as read on the server
-        notificationsData.forEach((n: any) => {
-          if (!n.readAt) {
-            onMarkNotificationRead(String(n.id)).catch(() => {});
-          }
-        });
-      }, 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [notificationsData.length]); // eslint-disable-line react-hooks/exhaustive-deps
+    setVisibleCount(NOTIFICATIONS_BATCH_SIZE);
+  }, [dateFrom, dateTo]);
 
   // Infinite scroll - load more when sentinel is visible
   useEffect(() => {
@@ -65,25 +74,56 @@ export function ActivityLogsSection({
     if (!sentinel) return;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && visibleCount < notificationsData.length) {
-          setVisibleCount((prev) => Math.min(prev + NOTIFICATIONS_BATCH_SIZE, notificationsData.length));
+        if (entries[0].isIntersecting && visibleCount < filteredNotifications.length) {
+          setVisibleCount((prev) => Math.min(prev + NOTIFICATIONS_BATCH_SIZE, filteredNotifications.length));
         }
       },
       { threshold: 0.1 }
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [visibleCount, notificationsData.length]);
+  }, [visibleCount, filteredNotifications.length]);
 
-  const visibleNotifications = notificationsData.slice(0, visibleCount);
+  const visibleNotifications = filteredNotifications.slice(0, visibleCount);
 
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
       {/* Header */}
       <div className="flex flex-col gap-4 mb-6">
         <div>
-          <h3 className="text-xl font-semibold text-gray-900">Notification Logs</h3>
+          <h3 className="text-xl font-semibold text-gray-900">Activity Logs</h3>
           <p className="text-sm text-gray-600 mt-1">Your latest notifications and activity updates</p>
+        </div>
+        {/* Date range filter */}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <label htmlFor="date-from" className="text-xs font-medium text-gray-600">From</label>
+            <input
+              id="date-from"
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="text-xs border border-gray-300 rounded-md px-2 py-1.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <label htmlFor="date-to" className="text-xs font-medium text-gray-600">To</label>
+            <input
+              id="date-to"
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="text-xs border border-gray-300 rounded-md px-2 py-1.5 text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+          {(dateFrom || dateTo) && (
+            <button
+              onClick={() => { setDateFrom(""); setDateTo(""); }}
+              className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+            >
+              Clear
+            </button>
+          )}
         </div>
       </div>
 
@@ -101,15 +141,10 @@ export function ActivityLogsSection({
           </div>
         ) : (
           visibleNotifications.map((notification: any) => {
-            const isNew = !notification.readAt && !seenIds.has(String(notification.id));
             return (
               <div
                 key={notification.id}
-                className={`p-4 rounded-lg border transition-colors duration-700 ${
-                  isNew
-                    ? "border-pink-200 bg-pink-50"
-                    : "border-gray-100 bg-gray-50"
-                }`}
+                className="p-4 rounded-lg border border-pink-100 bg-pink-50"
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
@@ -126,11 +161,6 @@ export function ActivityLogsSection({
                     >
                       {notification.type?.replace(/_/g, " ") || "Notification"}
                     </span>
-                    {isNew && (
-                      <span className="text-[10px] text-pink-600 font-medium uppercase tracking-wide">
-                        New
-                      </span>
-                    )}
                   </div>
                   <h4 className="text-sm font-semibold text-gray-900 truncate">
                     {notification.title || "Notification"}
@@ -182,7 +212,7 @@ export function ActivityLogsSection({
                       </span>
                     ))}
                   </p>
-                  <p className="text-[11px] text-gray-500 mt-2">
+                  <p className="text-[11px] text-red-500 mt-2">
                     {format(new Date(notification.createdAt), "EEE, MMM d • hh:mm a")}
                   </p>
                 </div>
@@ -192,7 +222,7 @@ export function ActivityLogsSection({
         )}
 
         {/* Scroll sentinel for infinite scroll */}
-        {visibleCount < notificationsData.length && (
+        {visibleCount < filteredNotifications.length && (
           <div ref={scrollSentinelRef} className="py-4 text-center">
             <p className="text-xs text-gray-400">Loading more notifications...</p>
           </div>
@@ -202,7 +232,10 @@ export function ActivityLogsSection({
       {/* Footer */}
       <div className="pt-4 border-t border-gray-100 mt-4">
         <p className="text-[11px] sm:text-sm text-gray-600">
-          Showing {Math.min(visibleCount, notificationsData.length)} of {notificationsData.length} notification{notificationsData.length !== 1 ? "s" : ""}
+          Showing {Math.min(visibleCount, filteredNotifications.length)} of {filteredNotifications.length} notification{filteredNotifications.length !== 1 ? "s" : ""}
+          {(dateFrom || dateTo) && filteredNotifications.length !== notificationsData.length && (
+            <span className="text-gray-400"> (filtered from {notificationsData.length})</span>
+          )}
         </p>
       </div>
     </div>
