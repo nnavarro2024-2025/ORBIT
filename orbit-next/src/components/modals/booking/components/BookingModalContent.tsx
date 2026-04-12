@@ -47,6 +47,15 @@ export function BookingModalContent({
   initialStartTime = null,
   initialEndTime = null,
 }: BookingModalContentProps) {
+  // Fetch campus list for campus name lookup (must be inside component)
+  const { data: campusList = [] } = useQuery({
+    queryKey: ["/api/campuses"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/campuses");
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000,
+  });
   const { toast } = useToast();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -97,7 +106,11 @@ export function BookingModalContent({
 
   const slotManagement = useSlotManagement(isOpen, selectedFacility?.name);
 
-  // Fetch user's bookings for conflict detection
+  // Clear availability cache on close to prevent stale 'Current reservations'
+  const handleClose = () => {
+    queryClient.removeQueries({ queryKey: ['/api/availability'] });
+    onClose();
+  };
   const { data: userBookingsData } = useQuery({
     queryKey: ['/api/bookings'],
     queryFn: async () => {
@@ -139,6 +152,7 @@ export function BookingModalContent({
   const [isProcessing, setIsProcessing] = useState(false);
   const [successInfo, setSuccessInfo] = useState<{
     facilityName: string;
+    campusName?: string;
     startTime: Date;
     endTime: Date;
   } | null>(null);
@@ -162,6 +176,14 @@ export function BookingModalContent({
       const bookedFacilityName = selectedFacility?.name || 'Facility';
       const bookedStart = startTimeValue;
       const bookedEnd = endTimeValue;
+      // Find campus name from selectedFacility using campusList
+      let campusName = '';
+      // Use type assertion to access campusId if present
+      const facilityCampusId = (selectedFacility as any)?.campusId;
+      if (facilityCampusId && campusList.length > 0) {
+        const campus = campusList.find((c: any) => c.id === facilityCampusId);
+        campusName = campus?.name || '';
+      }
 
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["/api/bookings"] }),
@@ -174,6 +196,7 @@ export function BookingModalContent({
       form.reset();
       setSuccessInfo({
         facilityName: bookedFacilityName,
+        campusName,
         startTime: bookedStart,
         endTime: bookedEnd,
       });
@@ -203,7 +226,7 @@ export function BookingModalContent({
   const onSubmit = (data: BookingFormData) => {
     const now = Date.now();
     if (isSubmitting || (now - lastSubmissionTime < 2000)) return;
-    
+
     if (formValidationWarnings.length > 0) {
       toast({
         title: "Validation Error",
@@ -213,37 +236,39 @@ export function BookingModalContent({
       return;
     }
 
-    // Close form immediately, show loading overlay
+    // Show loading overlay, but do NOT close modal yet
     setIsSubmitting(true);
-    onClose();
     setIsProcessing(true);
     createBookingMutation.mutate(data);
   };
 
   return (
     <>
-      {/* Booking Form Dialog */}
-      <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogTitle className="sr-only">Create Booking</DialogTitle>
-          <DialogDescription className="sr-only">Fill in the form to book a facility.</DialogDescription>
-          <BookingForm
-            form={form}
-            facilities={facilities}
-            equipmentState={equipmentState}
-            setEquipmentState={setEquipmentState}
-            equipmentOtherText={equipmentOtherText}
-            setEquipmentOtherText={setEquipmentOtherText}
-            onSubmit={onSubmit}
-            onClose={onClose}
-            isSubmitting={isSubmitting}
-            validationWarnings={formValidationWarnings}
-            slotManagement={slotManagement}
-            selectedFacility={selectedFacility}
-            isAdmin={isAdmin}
-          />
-        </DialogContent>
-      </Dialog>
+
+      {/* Booking Form Dialog (only show if not processing or success) */}
+      {isOpen && !isProcessing && !successInfo && (
+        <Dialog open={isOpen} onOpenChange={handleClose}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogTitle className="sr-only">Create Booking</DialogTitle>
+            <DialogDescription className="sr-only">Fill in the form to book a facility.</DialogDescription>
+            <BookingForm
+              form={form}
+              facilities={facilities}
+              equipmentState={equipmentState}
+              setEquipmentState={setEquipmentState}
+              equipmentOtherText={equipmentOtherText}
+              setEquipmentOtherText={setEquipmentOtherText}
+              onSubmit={onSubmit}
+              onClose={onClose}
+              isSubmitting={isSubmitting}
+              validationWarnings={formValidationWarnings}
+              slotManagement={slotManagement}
+              selectedFacility={selectedFacility}
+              isAdmin={isAdmin}
+            />
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Processing / Loading Dialog */}
       <Dialog open={isProcessing} onOpenChange={() => {}}>
@@ -270,7 +295,7 @@ export function BookingModalContent({
       </Dialog>
 
       {/* Success Dialog */}
-      <Dialog open={!!successInfo} onOpenChange={() => setSuccessInfo(null)}>
+      <Dialog open={!!successInfo} onOpenChange={(open) => { if (!open) { setSuccessInfo(null); handleClose(); } }}>
         <DialogContent className="max-w-sm text-center px-8 py-10">
           <DialogTitle className="sr-only">Booking Confirmed</DialogTitle>
           <DialogDescription className="sr-only">Your booking has been scheduled.</DialogDescription>
@@ -289,20 +314,29 @@ export function BookingModalContent({
           <h2 className="text-xl font-bold text-gray-900 mb-1">Booking Scheduled!</h2>
           {successInfo && (
             <div className="rounded-xl border border-gray-100 bg-gray-50 px-5 py-4 mb-6 text-left space-y-3">
+
+                            {successInfo.campusName && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-black-400">Campus</span>
+                  <span className="ml-auto text-sm font-semibold text-pink-700">{successInfo.campusName}</span>
+                </div>
+              )}
+              
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Facility</span>
-                <span className="ml-auto text-sm font-semibold text-gray-800">{successInfo.facilityName}</span>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-black-400">Facility</span>
+                <span className="ml-auto text-sm font-semibold text-pink-700">{successInfo.facilityName}</span>
               </div>
+
               <div className="h-px bg-gray-200" />
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Date</span>
-                <span className="ml-auto text-sm text-gray-700">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-black-400">Date</span>
+                <span className="ml-auto text-sm font-semibold text-pink-700">
                   {successInfo.startTime ? format(successInfo.startTime, 'MMMM d, yyyy') : '—'}
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Time</span>
-                <span className="ml-auto text-sm text-gray-700">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-black-400">Time</span>
+                <span className="ml-auto text-sm font-semibold text-pink-700">
                   {successInfo.startTime && successInfo.endTime
                     ? `${format(successInfo.startTime, 'h:mm a')} – ${format(successInfo.endTime, 'h:mm a')}`
                     : '—'}
@@ -312,7 +346,7 @@ export function BookingModalContent({
           )}
 
 
-          <Button className="w-full" onClick={() => setSuccessInfo(null)}>Done</Button>
+          <Button className="w-full" onClick={() => { setSuccessInfo(null); handleClose(); }}>Done</Button>
         </DialogContent>
       </Dialog>
     </>

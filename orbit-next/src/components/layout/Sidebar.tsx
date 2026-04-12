@@ -89,8 +89,8 @@ export default function Sidebar({ items, activeItem, onItemClick }: SidebarProps
           onClick={handleLogout}
           className="w-full text-left flex items-center px-3 sm:px-4 py-2 sm:py-3 rounded-lg hover:bg-pink-50 text-muted-foreground text-sm sm:text-base"
         >
-          <LogOut className="h-4 w-4 sm:h-5 sm:w-5 mr-2 sm:mr-3 flex-shrink-0" />
-          <span className="truncate">Log Out</span>
+          <LogOut className="font-medium text-red-500 h-4 w-4 sm:h-5 sm:w-5 mr-2 sm:mr-3 flex-shrink-0" />
+          <span className="font-medium truncate text-red-500">Sign Out</span>
         </button>
       </div>
     </div>

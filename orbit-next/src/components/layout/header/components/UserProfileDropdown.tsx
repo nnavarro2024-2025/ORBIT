@@ -25,6 +25,17 @@ interface UserProfileDropdownProps {
 
 export function UserProfileDropdown({ user, onLogout }: UserProfileDropdownProps) {
   const [isProfileSidebarOpen, setIsProfileSidebarOpen] = useState(false);
+  const [startInSettings, setStartInSettings] = useState(false);
+
+  const handleProfileSettingsClick = () => {
+    setStartInSettings(true);
+    setIsProfileSidebarOpen(true);
+  };
+
+  const handleProfileModalClose = () => {
+    setIsProfileSidebarOpen(false);
+    setTimeout(() => setStartInSettings(false), 200); // reset after close
+  };
 
   return (
     <>
@@ -42,7 +53,7 @@ export function UserProfileDropdown({ user, onLogout }: UserProfileDropdownProps
             </Avatar>
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-64 p-2">
+        <DropdownMenuContent align="end" className="min-w-[16rem] max-w-[22rem] p-2">
           <DropdownMenuLabel className="font-normal p-3">
             <div className="text-sm text-gray-600">Signed in as</div>
             <div className="font-semibold text-gray-900 truncate">
@@ -51,14 +62,22 @@ export function UserProfileDropdown({ user, onLogout }: UserProfileDropdownProps
                 : user.email}
             </div>
             {user.firstName && user.lastName && (
-              <div className="text-sm text-gray-500 truncate">
-                {user.email}
-              </div>
+              <div className="text-sm text-gray-600 break-all whitespace-normal" title={user.email}>{user.email}</div>
             )}
+            <div className="mt-3 space-y-1">
+              <div className="flex items-center text-xs">
+                <span className="font-semibold text-black-500 w-30">Role:</span>
+                <span className="ml-2 text-pink-700 px-2 py-0.5 font-medium">{user.role || 'N/A'}</span>
+              </div>
+              <div className="flex items-center text-xs">
+                <span className="font-semibold text-black-500 w-30">Member Since:</span>
+                <span className="ml-2 text-pink-700 px-1 py-0.5 font-medium">{user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'N/A'}</span>
+              </div>
+            </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem
-            onClick={() => setIsProfileSidebarOpen(true)}
+            onClick={handleProfileSettingsClick}
             className="cursor-pointer p-3 rounded-lg hover:bg-pink-50 hover:text-pink-700"
           >
             <User className="mr-3 h-4 w-4" />
@@ -74,10 +93,10 @@ export function UserProfileDropdown({ user, onLogout }: UserProfileDropdownProps
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      
       <ProfileModal
         isOpen={isProfileSidebarOpen}
-        onClose={() => setIsProfileSidebarOpen(false)}
+        onClose={handleProfileModalClose}
+        startInSettings={startInSettings}
       />
     </>
   );

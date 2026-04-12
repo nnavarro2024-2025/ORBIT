@@ -1,3 +1,29 @@
+// Patch JSON.parse globally so bundled contexts (like Turbopack) handle
+// database values such as "undefined" or "null" without throwing.
+// This must run before pg/drizzle schemas import JSON values.
+if (typeof JSON !== "undefined" && typeof JSON.parse === "function") {
+  const originalParse = JSON.parse;
+  JSON.parse = function (this: unknown, text: unknown, reviver?: any) {
+    if (text === null || text === undefined) return null;
+    const str = String(text).trim();
+    if (
+      str === "undefined" ||
+      str === "null" ||
+      str === "" ||
+      str === '"undefined"' ||
+      str === '"null"' ||
+      str === '""'
+    ) {
+      return null;
+    }
+    try {
+      return originalParse.call(this, text as any, reviver);
+    } catch (err) {
+      return null;
+    }
+  } as any;
+}
+
 import {
   pgTable,
   text,

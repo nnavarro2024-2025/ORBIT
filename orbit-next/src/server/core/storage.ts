@@ -370,21 +370,30 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateFacilityBooking(id: string, updates: Partial<FacilityBooking>): Promise<void> {
+    // Sanitize updates to prevent 'undefined' string or undefined/null in JSONB columns
+    const safeUpdates = { ...updates };
+    // Only sanitize equipment if present in updates
+    if (Object.prototype.hasOwnProperty.call(safeUpdates, 'equipment')) {
+      let eqVal = (safeUpdates as any).equipment;
+      if (eqVal === undefined || eqVal === 'undefined' || eqVal === '' || eqVal === 'null' || eqVal === null) {
+        (safeUpdates as any).equipment = null;
+      }
+    }
     try {
-      if (updates && (updates as any).equipment) {
-        try { console.log('[storage] updateFacilityBooking - writing equipment for booking', id, (updates as any).equipment); } catch (e) {}
+      if (safeUpdates && (safeUpdates as any).equipment) {
+        try { console.log('[storage] updateFacilityBooking - writing equipment for booking', id, (safeUpdates as any).equipment); } catch (e) {}
       }
     } catch (e) {}
     await db.transaction(async (tx: DbTransaction) => {
       const [existing] = await tx.select().from(facilityBookings).where(eq(facilityBookings.id, id));
       if (!existing) return;
 
-      await tx.update(facilityBookings).set(updates).where(eq(facilityBookings.id, id));
+      await tx.update(facilityBookings).set(safeUpdates).where(eq(facilityBookings.id, id));
 
       const [updated] = await tx.select().from(facilityBookings).where(eq(facilityBookings.id, id));
       if (!updated) return;
 
-      if ((updates as any).reminderOptIn === false) {
+      if ((safeUpdates as any).reminderOptIn === false) {
         await tx.delete(bookingReminders).where(eq(bookingReminders.bookingId, id));
         await tx
           .update(facilityBookings)
@@ -393,7 +402,7 @@ export class DatabaseStorage implements IStorage {
         return;
       }
 
-      const reminderOptIn = (updates as any).reminderOptIn ?? updated.reminderOptIn;
+      const reminderOptIn = (safeUpdates as any).reminderOptIn ?? updated.reminderOptIn;
       if (!reminderOptIn) {
         await tx.delete(bookingReminders).where(eq(bookingReminders.bookingId, id));
         await tx
@@ -404,8 +413,8 @@ export class DatabaseStorage implements IStorage {
       }
 
       if (reminderOptIn) {
-        const leadMinutes = updates.reminderLeadMinutes ?? updated.reminderLeadMinutes ?? 60;
-        const startTime = updates.startTime ?? updated.startTime;
+        const leadMinutes = safeUpdates.reminderLeadMinutes ?? updated.reminderLeadMinutes ?? 60;
+        const startTime = safeUpdates.startTime ?? updated.startTime;
         await this.upsertBookingReminder(tx as any, id, leadMinutes, startTime);
       }
     });

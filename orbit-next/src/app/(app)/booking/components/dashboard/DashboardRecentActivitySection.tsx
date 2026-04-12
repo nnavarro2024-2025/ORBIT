@@ -73,9 +73,11 @@ export function DashboardRecentActivitySection({
   onArrivalCountdownExpire,
   onActiveCountdownExpire,
 }: DashboardRecentActivitySectionProps) {
+  const MAX_DASHBOARD_BOOKINGS = 5;
+
   // Filter: ALL Scheduled/Active/Pending bookings + only TODAY's Completed/Cancelled
   const filteredBookings = useMemo(() => {
-    return userBookings.filter((booking) => {
+    const all = userBookings.filter((booking) => {
       const status = getBookingStatus(booking);
       if (["Active", "Scheduled", "Pending"].includes(status.label)) return true;
       if (status.label === "Cancelled") {
@@ -87,6 +89,7 @@ export function DashboardRecentActivitySection({
       }
       return false;
     });
+    return all.slice(0, MAX_DASHBOARD_BOOKINGS);
   }, [userBookings, getBookingStatus]);
 
   const renderBookingList = () => {
@@ -234,7 +237,7 @@ export function DashboardRecentActivitySection({
       {renderBookingList()}
 
       <div className="pt-4 border-t border-gray-100 mt-6 flex items-center justify-between text-sm text-gray-600">
-        <p>Showing {bookingsShown} of {filteredBookings.length} booking{filteredBookings.length !== 1 ? 's' : ''}</p>
+        <p>Showing {bookingsShown} of {userBookings.length} booking{userBookings.length !== 1 ? 's' : ''}</p>
       </div>
     </div>
   );

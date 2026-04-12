@@ -175,6 +175,8 @@ export function BookingForm({
   selectedFacility,
   isAdmin = false,
 }: BookingFormProps) {
+  // Detect daily booking limit warning in validationWarnings
+  const hasDailyLimitError = validationWarnings.some(w => w.title === 'Daily Booking Limit Reached');
   const { PURPOSE_MAX, OTHERS_MAX } = FORM_LIMITS;
   const maxCapacity = selectedFacility ? getFacilityMaxCapacity(selectedFacility) : 8;
 
@@ -422,7 +424,7 @@ export function BookingForm({
 
         {/* Facility schedule */}
         {selectedCampus && facilityIdWatched ? (
-          <div className="border rounded-lg p-4 bg-gray-50">
+          <div className="border rounded-lg p-4 bg-gray-50 min-h-[140px] transition-all duration-200">
             <p className="text-[11px] font-semibold text-gray-800 uppercase tracking-wide mb-3">
               Current reservations{startTime ? ` on ${format(startTime, 'MMM d, yyyy')}` : ''}
             </p>
@@ -432,7 +434,7 @@ export function BookingForm({
             />
           </div>
         ) : (
-          <div className="border border-dashed border-gray-300 rounded-lg p-4 bg-gray-50/50">
+          <div className="border border-dashed border-gray-300 rounded-lg p-4 bg-gray-50/50 min-h-[80px] transition-all duration-200">
             <p className="text-xs text-gray-400 text-center">Select a campus, facility, and date to view current reservations.</p>
           </div>
         )}
@@ -516,7 +518,7 @@ export function BookingForm({
         </div>
 
         {/* Inline time validation errors — bullet list */}
-        {hasAnyTimeError && (
+        {(hasAnyTimeError || hasDailyLimitError) && (
           <ul className="text-xs text-red-600 space-y-0.5 mt-1">
             {hasStartInPast && <li>• Start time cannot be in the past. Please select a future time.</li>}
             {hasInvalidTimeOrder && <li>• Start time must be earlier than the end time.</li>}
@@ -524,6 +526,7 @@ export function BookingForm({
             {hasEndExceedsMax && <li>• Maximum booking duration is 2 hours.</li>}
             {hasBookingTooShort && <li>• Bookings must be at least 30 minutes long.</li>}
             {hasTimeConflict && <li>• Your selected time overlaps with an existing booking. Please choose a different time.</li>}
+            
           </ul>
         )}
 
@@ -610,19 +613,10 @@ export function BookingForm({
 
 
 
-        {/* Validation Warnings (excluding Purpose Required and Booking Conflict — handled inline/redundant) */}
-        {validationWarnings.filter(w => !['Purpose Required', 'Booking Conflict', 'Maximum Duration Exceeded', 'Booking Too Short', 'Invalid Start Time', 'Outside Operating Hours', 'Invalid Time Selection', 'Outside School Hours'].includes(w.title)).length > 0 && (
-          <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4">
-            {validationWarnings.filter(w => !['Purpose Required', 'Booking Conflict', 'Maximum Duration Exceeded', 'Booking Too Short', 'Invalid Start Time', 'Outside Operating Hours', 'Invalid Time Selection', 'Outside School Hours'].includes(w.title)).map((warning, idx) => (
-              <div key={idx} className="flex items-start gap-3 mb-2 last:mb-0">
-                <span className="text-yellow-600 text-xl">!</span>
-                <div>
-                  <p className="font-medium text-yellow-800">{warning.title}</p>
-                  <p className="text-sm text-yellow-700">{warning.description}</p>
-                </div>
-              </div>
-            ))}
-          </div>
+        {(hasAnyTimeError || hasDailyLimitError) && (
+          <ul className="text-xs text-red-600 space-y-0.5 mt-1">
+            {hasDailyLimitError && <li>• You have reached the maximum of 2 bookings per day. Please cancel an existing booking first or choose a different day.</li>}
+          </ul>
         )}
 
         {/* Footer Buttons */}
@@ -632,10 +626,13 @@ export function BookingForm({
           </Button>
           <Button
             type="submit"
-            disabled={isSubmitting || isPurposeEmpty || hasAnyTimeError || !selectedCampus}
+            disabled={isSubmitting || isPurposeEmpty || hasAnyTimeError || hasDailyLimitError || !selectedCampus}
+            className={hasDailyLimitError ? 'opacity-60 cursor-not-allowed' : ''}
           >
             {isSubmitting
               ? 'Creating...'
+              : hasDailyLimitError
+              ? 'Daily Limit Reached'
               : hasAnyTimeError
               ? 'Fix Time Errors'
               : 'Create Booking'}
