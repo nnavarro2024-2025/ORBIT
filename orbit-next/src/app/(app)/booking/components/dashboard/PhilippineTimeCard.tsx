@@ -11,7 +11,7 @@ type TimeApiResponse = {
 
 const TIMEZONE = "Asia/Manila";
 
-export function PhilippineTimeCard() {
+function usePhilippineTime() {
   const [timeOffsetMs, setTimeOffsetMs] = useState(0);
   const [tick, setTick] = useState(Date.now());
   const [sourceLabel, setSourceLabel] = useState("Syncing time...");
@@ -67,6 +67,7 @@ export function PhilippineTimeCard() {
   }, []);
 
   const nowMs = tick + timeOffsetMs;
+
   const manilaDate = useMemo(
     () =>
       new Intl.DateTimeFormat("en-PH", {
@@ -90,6 +91,31 @@ export function PhilippineTimeCard() {
       }).format(nowMs),
     [nowMs],
   );
+
+  return { manilaTime, manilaDate, sourceLabel };
+}
+
+export function PhilippineTimeInline() {
+  const { manilaTime, manilaDate } = usePhilippineTime();
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium text-black-600">Dashboard Time</p>
+          <p className="text-2xl sm:text-3xl font-bold text-pink-600 mt-1">{manilaTime}</p>
+          <p className="text-xs text-black-500 mt-1">{manilaDate}</p>
+        </div>
+        <div className="bg-pink-100 p-3 rounded-full">
+          <Clock3 className="h-6 w-6 text-pink-600" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function PhilippineTimeCard() {
+  const { manilaTime, manilaDate, sourceLabel } = usePhilippineTime();
 
   return (
     <div className="mb-6 rounded-2xl border border-emerald-200 bg-gradient-to-r from-emerald-50 via-white to-cyan-50 shadow-sm p-4 sm:p-5">

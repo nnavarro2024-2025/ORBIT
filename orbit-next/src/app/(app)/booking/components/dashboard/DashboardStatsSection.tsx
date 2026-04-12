@@ -1,6 +1,7 @@
-import { CheckCircle, Clock } from "lucide-react";
+import { CalendarCheck } from "lucide-react";
 
 import { SkeletonStatsCard } from "@/components/ui/skeleton-presets";
+import { PhilippineTimeInline } from "./PhilippineTimeCard";
 
 interface DashboardStatsSectionProps {
   stats: {
@@ -21,21 +22,7 @@ export function DashboardStatsSection({ stats, isLoading, onSelectMyBookings }: 
         </>
       ) : (
         <>
-          <button
-            onClick={onSelectMyBookings}
-            className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 hover:shadow-md transition-all duration-200 hover:border-pink-300 text-left group"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600 group-hover:text-pink-700">Active Bookings</p>
-                <p className="text-2xl sm:text-3xl font-bold text-pink-600 mt-1">{stats.active}</p>
-                <p className="text-xs text-gray-500 mt-1">Currently in progress</p>
-              </div>
-              <div className="bg-pink-100 p-3 rounded-full group-hover:bg-pink-200 transition-colors duration-200">
-                <CheckCircle className="h-6 w-6 text-pink-600" />
-              </div>
-            </div>
-          </button>
+          <PhilippineTimeInline />
 
           <button
             onClick={onSelectMyBookings}
@@ -43,12 +30,11 @@ export function DashboardStatsSection({ stats, isLoading, onSelectMyBookings }: 
           >
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600 group-hover:text-pink-700">Scheduled Bookings</p>
+                <p className="text-sm font-medium text-gray-900 group-hover:text-pink-700">Scheduled Bookings</p>
                 <p className="text-2xl sm:text-3xl font-bold text-pink-600 mt-1">{stats.upcoming}</p>
-                <p className="text-xs text-gray-500 mt-1">Approved and scheduled</p>
               </div>
               <div className="bg-pink-100 p-3 rounded-full group-hover:bg-pink-200 transition-colors duration-200">
-                <Clock className="h-6 w-6 text-pink-600" />
+                <CalendarCheck className="h-6 w-6 text-pink-600" />
               </div>
             </div>
           </button>

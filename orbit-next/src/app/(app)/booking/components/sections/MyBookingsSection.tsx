@@ -388,18 +388,19 @@ export function MyBookingsSection({
                     </div>
                   </div>
                   {/* Booked date - below the card content */}
-                  <p className="text-xs text-gray-400 mt-2">
+                  <p className="text-xs text-green-600 mt-2">
                     Booked on {format(new Date(booking.createdAt || booking.startTime), "MMM d, yyyy 'at' h:mm a")}
+                    {status.label === "Cancelled" && booking.updatedAt && (
+                      <span className="text-red-500">
+                        <span className="text-gray-900">{" | "}</span>
+                        {booking.arrivalConfirmationDeadline && !booking.arrivalConfirmed && new Date(booking.updatedAt) >= new Date(booking.arrivalConfirmationDeadline)
+                          ? `Auto Cancelled on ${format(new Date(booking.updatedAt), "MMM d, yyyy 'at' h:mm a")}`
+                          : booking.adminId
+                          ? `Cancelled by Admin on ${format(new Date(booking.updatedAt), "MMM d, yyyy 'at' h:mm a")}`
+                          : `Cancelled on ${format(new Date(booking.updatedAt), "MMM d, yyyy 'at' h:mm a")}`}
+                      </span>
+                    )}
                   </p>
-                  {status.label === "Cancelled" && booking.updatedAt && (
-                    <p className="text-xs text-orange-500 mt-0.5">
-                      {booking.arrivalConfirmationDeadline && !booking.arrivalConfirmed && new Date(booking.updatedAt) >= new Date(booking.arrivalConfirmationDeadline)
-                        ? `Auto Cancelled on ${format(new Date(booking.updatedAt), "MMM d, yyyy 'at' h:mm a")}`
-                        : booking.adminId
-                        ? `Cancelled by Admin on ${format(new Date(booking.updatedAt), "MMM d, yyyy 'at' h:mm a")}`
-                        : `Cancelled on ${format(new Date(booking.updatedAt), "MMM d, yyyy 'at' h:mm a")}`}
-                    </p>
-                  )}
                 </div>
 
                 {/* Expandable details section */}
