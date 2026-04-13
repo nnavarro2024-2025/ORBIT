@@ -69,8 +69,9 @@ export interface IStorage {
   // Facility operations
   getAllFacilities(): Promise<Facility[]>;
   getFacility(id: number): Promise<Facility | undefined>;
-  createFacility(facility: { name: string; description?: string; capacity: number; image?: string }): Promise<Facility>;
+  createFacility(facility: { name: string; description?: string; capacity: number; image?: string; campusId?: number }): Promise<Facility>;
   updateFacility(facilityId: number, updates: Partial<Facility>): Promise<void>;
+  deleteFacility(id: number): Promise<void>;
   
   // Facility booking operations
   createFacilityBooking(booking: InsertFacilityBooking): Promise<FacilityBooking>;
@@ -128,6 +129,7 @@ export interface IStorage {
   getCampus(id: number): Promise<Campus | undefined>;
   createCampus(campus: { name: string; sortOrder?: number }): Promise<Campus>;
   updateCampus(id: number, updates: Partial<Campus>): Promise<Campus | null>;
+  deleteCampus(id: number): Promise<void>;
 
   // Statistics
   getOrzUsageStats(): Promise<any>; // returns empty data now that ORZ is removed
@@ -286,7 +288,7 @@ export class DatabaseStorage implements IStorage {
     return facility;
   }
 
-  async createFacility(facility: { name: string; description?: string; capacity: number; image?: string }): Promise<Facility> {
+  async createFacility(facility: { name: string; description?: string; capacity: number; image?: string; campusId?: number }): Promise<Facility> {
     const [newFacility] = await db.insert(facilities).values(facility as any).returning();
     return newFacility;
   }
@@ -1119,6 +1121,14 @@ export class DatabaseStorage implements IStorage {
   async updateCampus(id: number, updates: Partial<Campus>): Promise<Campus | null> {
     const [updated] = await db.update(campuses).set(updates).where(eq(campuses.id, id)).returning();
     return updated ?? null;
+  }
+
+  async deleteCampus(id: number): Promise<void> {
+    await db.delete(campuses).where(eq(campuses.id, id));
+  }
+
+  async deleteFacility(id: number): Promise<void> {
+    await db.delete(facilities).where(eq(facilities.id, id));
   }
 }
 

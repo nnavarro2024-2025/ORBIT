@@ -97,6 +97,7 @@ export const campuses = pgTable("campuses", {
   id: serial("id").primaryKey(),
   name: varchar("name").notNull().unique(),
   isActive: boolean("is_active").default(true).notNull(),
+  // disabledReason removed
   sortOrder: integer("sort_order").default(0).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });

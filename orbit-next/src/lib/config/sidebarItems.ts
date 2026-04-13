@@ -1,4 +1,4 @@
-import { BarChart3, Calendar, Users, Shield, Settings, Home, HelpCircle, CalendarClock } from "lucide-react";
+import { BarChart3, Calendar, Users, Shield, Home, HelpCircle, CalendarClock, Building2, Landmark } from "lucide-react";
 
 type RawItem = {
   id: string;
@@ -14,7 +14,7 @@ export function makeSidebar(isAdmin: boolean, lastItem?: RawItem, forPage: 'admi
     { id: 'booking-management', label: 'Booking Management', icon: Calendar },
     { id: 'user-management', label: 'User Management', icon: Users },
     { id: 'security', label: 'Security', icon: Shield },
-    { id: 'settings', label: 'Settings', icon: Settings },
+    // Removed System Settings from sidebar
   ];
 
   // For student/booking page we prefer a slightly different top set
@@ -39,13 +39,15 @@ export function makeSidebar(isAdmin: boolean, lastItem?: RawItem, forPage: 'admi
     const adminCore: RawItem[] = [
       { id: 'overview', label: 'Dashboard', icon: Home },
       { id: 'booking-management', label: 'Facility Booking Management', icon: Calendar },
+      { id: 'campus-management', label: 'Campus Management', icon: Landmark },
+      { id: 'facility-management', label: 'Facility Management', icon: Building2 },
       { id: 'report-schedules', label: 'Report Schedules', icon: CalendarClock },
       { id: 'user-management', label: 'User Management', icon: Users },
       { id: 'role-management', label: 'Role Management', icon: Shield },
       { id: 'security', label: 'Admin System Alerts', icon: Shield },
       { id: 'faq-management', label: 'FAQ Management', icon: HelpCircle },
       { id: 'admin-activity-logs', label: 'Admin Activity Logs', icon: BarChart3 },
-      { id: 'settings', label: 'System Settings', icon: Settings },
+      // Removed System Settings from sidebar
     ];
     if (isAdmin && lastItem) {
       return adminCore.concat([{ id: 'divider-1', type: 'divider' }, lastItem]);

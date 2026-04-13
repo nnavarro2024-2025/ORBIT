@@ -45,6 +45,7 @@ function setupJSONBParser() {
 setupJSONBParser();
 
 function getPool() {
+  console.log("[DEBUG] DATABASE_URL at runtime:", process.env.DATABASE_URL);
   if (_pool) return _pool;
 
   let raw = process.env.DATABASE_URL || "postgresql://localhost:5432/postgres";

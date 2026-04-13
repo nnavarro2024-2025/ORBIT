@@ -31,6 +31,12 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const parsed = createCampusSchema.parse(body);
+    // Auto-assign sortOrder: next after the highest existing
+    if (parsed.sortOrder === undefined) {
+      const all = await storage.getAllCampuses();
+      const maxOrder = all.reduce((max, c) => Math.max(max, (c as any).sortOrder ?? 0), 0);
+      parsed.sortOrder = maxOrder + 1;
+    }
     const campus = await storage.createCampus(parsed);
     return NextResponse.json(campus, { status: 201 });
   } catch (error) {

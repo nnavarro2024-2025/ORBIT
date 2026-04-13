@@ -127,6 +127,18 @@ export function AdminContent(props: AdminContentProps) {
           />
         </div>
       );
+    case "campus-management":
+      return (
+        <div className="p-3 sm:p-4 md:p-6">
+          <Sections.CampusManagementSection {...props as any} />
+        </div>
+      );
+    case "facility-management":
+      return (
+        <div className="p-3 sm:p-4 md:p-6">
+          <Sections.FacilityManagementSection {...props as any} />
+        </div>
+      );
     case "user-management":
       return (
         <div className="p-3 sm:p-4 md:p-6">
@@ -184,12 +196,6 @@ export function AdminContent(props: AdminContentProps) {
             {...props as any}
             allBookings={(props as any).allBookings ?? (props as any).adminBookingsData ?? []}
           />
-        </div>
-      );
-    case "settings":
-      return (
-        <div className="p-3 sm:p-4 md:p-6">
-          <Sections.SettingsSection {...props as any} />
         </div>
       );
     default:
