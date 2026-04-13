@@ -115,12 +115,15 @@ export async function POST(request: NextRequest) {
       // Log bookings for debugging
       console.log('[Booking Debug] User bookings after cancellation:', allUserBookings.map((b: any) => ({ id: b.id, status: b.status, startTime: b.startTime, endTime: b.endTime })));
 
-      // Filter only active bookings (approved or pending)
+
+      // Filter only active bookings (approved or pending), ignore cancelled/denied
       allUserBookings = allUserBookings.filter((b: any) => b.status === 'approved' || b.status === 'pending');
 
+
+      // Only count bookings that are not cancelled or denied
       const bookingsTodayCount = allUserBookings.filter((b: any) => {
         const bookingStart = new Date(b.startTime);
-        return bookingStart >= startOfDay && bookingStart <= endOfDay;
+        return (b.status === 'approved' || b.status === 'pending') && bookingStart >= startOfDay && bookingStart <= endOfDay;
       }).length;
 
       console.log(`[Booking Debug] Bookings today count: ${bookingsTodayCount}`);
@@ -152,7 +155,7 @@ export async function POST(request: NextRequest) {
         for (const item of requestedItems) {
           const key = String(item).toLowerCase().replace(/\s+/g, '_');
           const inv = availability.find(a => a.key === key);
-          if (inv && inv.available <= 0) {
+          if (inv && (inv.totalCount - inv.bookedCount) <= 0) {
             unavailableItems.push(inv.label);
           }
         }
