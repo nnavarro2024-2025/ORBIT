@@ -110,16 +110,20 @@ export async function POST(request: NextRequest) {
       const endOfDay = new Date(parsed.startTime);
       endOfDay.setHours(23, 59, 59, 999);
 
-      const allUserBookings = await storage.getFacilityBookingsByUser(authResult.user.id);
+      // Force refresh bookings after possible cancellation
+      let allUserBookings = await storage.getFacilityBookingsByUser(authResult.user.id);
+      // Log bookings for debugging
+      console.log('[Booking Debug] User bookings after cancellation:', allUserBookings.map((b: any) => ({ id: b.id, status: b.status, startTime: b.startTime, endTime: b.endTime })));
+
+      // Filter only active bookings (approved or pending)
+      allUserBookings = allUserBookings.filter((b: any) => b.status === 'approved' || b.status === 'pending');
+
       const bookingsTodayCount = allUserBookings.filter((b: any) => {
         const bookingStart = new Date(b.startTime);
-        return (
-          (b.status === 'approved' || b.status === 'pending') &&
-          bookingStart >= startOfDay &&
-          bookingStart <= endOfDay
-        );
+        return bookingStart >= startOfDay && bookingStart <= endOfDay;
       }).length;
 
+      console.log(`[Booking Debug] Bookings today count: ${bookingsTodayCount}`);
       if (bookingsTodayCount >= 2) {
         return NextResponse.json(
           { message: 'You have reached the maximum of 2 bookings per day. Please cancel an existing booking or try a different day.' },
