@@ -114,6 +114,7 @@ export const facilities = pgTable("facilities", {
   unavailableDates: jsonb("unavailable_dates").$type<Array<{ startDate: string; endDate: string; reason?: string }>>(),
   campusId: integer("campus_id").references(() => campuses.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  allowedRoles: varchar("allowed_roles").array().notNull().default(['student','faculty']),
 });
 
 // Facility bookings

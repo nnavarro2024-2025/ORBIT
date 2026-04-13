@@ -14,6 +14,7 @@ const updateFacilitySchema = z.object({
   campusId: z.number().int().optional().nullable(),
   isActive: z.boolean().optional(),
   unavailableReason: z.string().max(500).optional().nullable(),
+  allowedRoles: z.array(z.string()).min(1).optional(),
 });
 
 export async function PUT(

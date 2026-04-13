@@ -135,6 +135,8 @@ export interface IStorage {
   getOrzUsageStats(): Promise<any>; // returns empty data now that ORZ is removed
   getFacilityUsageStats(): Promise<any>;
   getAdminDashboardStats(): Promise<any>;
+  getFacilitiesByCampusId(campusId: number): Promise<Facility[]>;
+  deleteFacilitiesByCampusId(campusId: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1129,6 +1131,14 @@ export class DatabaseStorage implements IStorage {
 
   async deleteFacility(id: number): Promise<void> {
     await db.delete(facilities).where(eq(facilities.id, id));
+  }
+
+  async getFacilitiesByCampusId(campusId: number): Promise<Facility[]> {
+    return db.select().from(facilities).where(eq(facilities.campusId, campusId));
+  }
+
+  async deleteFacilitiesByCampusId(campusId: number): Promise<void> {
+    await db.delete(facilities).where(eq(facilities.campusId, campusId));
   }
 }
 

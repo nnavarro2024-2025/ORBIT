@@ -17,8 +17,10 @@ export async function DELETE(
       return NextResponse.json({ message: "Campus not found" }, { status: 404 });
     }
 
+    // Cascade delete all facilities under this campus before deleting the campus
+    await storage.deleteFacilitiesByCampusId(id);
     await storage.deleteCampus(id);
-    return NextResponse.json({ message: "Campus deleted" }, { status: 200 });
+    return NextResponse.json({ message: "Campus and all facilities deleted" }, { status: 200 });
   } catch (error) {
     console.error("[admin/campuses] Failed to delete campus:", error);
     return NextResponse.json({ message: "Failed to delete campus" }, { status: 500 });

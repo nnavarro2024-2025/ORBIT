@@ -42,10 +42,14 @@ const FacilityStatusBadge = ({
   bookingStatus,
 }: {
   facility: any;
-  bookingStatus: { status: string; label: string };
+  bookingStatus: { status: string; label: string; booking?: any };
 }) => {
   if (!facility.isActive) {
-    return <span className="px-2 py-0.5 sm:px-3 sm:py-1 rounded-full text-xs sm:text-sm font-medium bg-red-500 text-white">Not Available</span>;
+    return <span className="px-2 py-0.5 sm:px-3 sm:py-1 rounded-full text-xs sm:text-sm font-medium bg-red-500 text-white">Temporarily Unavailable</span>;
+  }
+  // Show Pending if booking exists and is not yet confirmed
+  if (bookingStatus.booking?.status === "pending") {
+    return <span className="px-2 py-0.5 sm:px-3 sm:py-1 rounded-full text-xs sm:text-sm font-medium bg-amber-500 text-white">Pending</span>;
   }
   if (bookingStatus.status === "booked") {
     return <span className="px-2 py-0.5 sm:px-3 sm:py-1 rounded-full text-xs sm:text-sm font-medium bg-red-500 text-white">In Use</span>;
@@ -101,16 +105,16 @@ export function AvailableRoomsSection({
 
   const roleFilteredFacilities = useMemo(() => {
     const userRole = user?.role || "student";
-
     return facilities.filter((facility) => {
-      const restricted = isRestrictedFacility(facility);
-
       if (userRole === "admin") return true;
-      if (userRole === "faculty") return restricted;
-
-      return !restricted;
+      // allowedRoles: string[]
+      if (Array.isArray(facility.allowedRoles)) {
+        return facility.allowedRoles.includes(userRole);
+      }
+      // fallback: show to all
+      return true;
     });
-  }, [facilities, isRestrictedFacility, user?.role]);
+  }, [facilities, user?.role]);
 
   const filteredFacilities = useMemo(() => {
     if (selectedCampusId === null) return roleFilteredFacilities;
@@ -130,16 +134,7 @@ export function AvailableRoomsSection({
     return counts;
   }, [roleFilteredFacilities, campusList]);
 
-  useEffect(() => {
-    if (selectedCampusId === null || campusList.length === 0) return;
-    // If current campus has facilities, stay
-    if ((campusCounts[selectedCampusId] ?? 0) > 0) return;
-    // Switch to first campus that has facilities
-    const firstWithFacilities = campusList.find((c) => (campusCounts[c.id] ?? 0) > 0);
-    if (firstWithFacilities) {
-      setSelectedCampusId(firstWithFacilities.id);
-    }
-  }, [campusCounts, campusList, selectedCampusId]);
+  // Removed effect that auto-switches campus if none available, so user can see empty state
 
   const handleOpenBooking = (facility: any, start?: Date, end?: Date) => {
     const restricted = isRestrictedFacility(facility);
@@ -162,6 +157,9 @@ export function AvailableRoomsSection({
     openBookingModal(facility.id, start, end);
   };
 
+  // Track loading state for booking button
+  const [loadingFacilityId, setLoadingFacilityId] = useState<number | null>(null);
+
   const renderFacilityCard = (facility: any) => {
     const bookingStatus = getFacilityBookingStatus(facility.id);
     const isAvailableForBooking = facility.isActive && (bookingStatus.status === "available" || bookingStatus.status === "closed");
@@ -170,32 +168,57 @@ export function AvailableRoomsSection({
 
     // Check if it's within library hours
     const isLibraryClosed = isLibraryClosedNow();
-    const showBadge = !facility.isActive || bookingStatus.status === "booked" || bookingStatus.status === "pending";
+    // Show badge if not active, or if there is a booking (pending or booked)
+    const showBadge = !facility.isActive || bookingStatus.booking;
+
+    // Only allow click if available for booking or library is closed (for request)
+    const isCardClickable = isAvailableForBooking || isLibraryClosed;
+
+    // Button loading handler
+    const handleBookingClick = (event: any) => {
+      event.stopPropagation();
+      if (!canRequestBooking) return;
+      setLoadingFacilityId(facility.id);
+      // Simulate async modal open (if openBookingModal is async, handle promise)
+      Promise.resolve(openBookingModal(facility.id)).finally(() => {
+        setLoadingFacilityId(null);
+      });
+    };
 
     return (
       <div
         key={facility.id}
         className={`group bg-white border rounded-xl overflow-hidden transition-all duration-300 flex flex-col h-full max-w-sm w-full mx-auto sm:max-w-none ${
-          isAvailableForBooking 
-            ? "border-gray-200 hover:shadow-lg cursor-pointer hover:border-pink-200" 
-            : isLibraryClosed 
+          isAvailableForBooking
+            ? "border-gray-200 hover:shadow-lg cursor-pointer hover:border-pink-200"
+            : isLibraryClosed
               ? "border-amber-200 hover:shadow-md cursor-pointer hover:border-amber-300 bg-amber-50/30"
-              : "border-gray-200 hover:shadow-lg cursor-pointer hover:border-pink-200"
+              : "border-gray-200 hover:shadow-lg cursor-not-allowed hover:border-pink-200"
         }`}
-        onClick={() => {
-          if (!isAvailableForBooking && !isLibraryClosed) return;
-          handleOpenBooking(facility);
-        }}
       >
+
         <div className="aspect-video bg-gradient-to-br from-pink-100 to-rose-100 flex items-center justify-center relative max-h-[140px] sm:max-h-[200px]">
           {showBadge && (
             <div className="absolute inset-0 bg-black/40 flex items-center justify-center z-10">
               <FacilityStatusBadge facility={facility} bookingStatus={bookingStatus} />
+
             </div>
           )}
-
           {(() => {
-            const image = facility.image ? `/images/${facility.image}` : facility.imageUrl || getFacilityImageByName(facility.name);
+            let image = "";
+            if (facility.image) {
+              if (/^https?:\/\//.test(facility.image)) {
+                image = facility.image;
+              } else if (facility.image.startsWith("/images/")) {
+                image = facility.image;
+              } else {
+                image = `/images/${facility.image}`;
+              }
+            } else if (facility.imageUrl) {
+              image = facility.imageUrl;
+            } else {
+              image = getFacilityImageByName(facility.name);
+            }
 
             if (!image) {
               return (
@@ -227,7 +250,7 @@ export function AvailableRoomsSection({
           <div className="flex items-center justify-between gap-2 mb-1">
             <h3
               className={`font-bold text-sm sm:text-base leading-tight transition-colors truncate ${
-                isAvailableForBooking ? "text-gray-900 group-hover:text-pink-700" : "text-gray-500"
+                isAvailableForBooking ? "text-black-900 group-hover:text-pink-700" : "text-gray-500"
               }`}
             >
               {formatFacilityName(facility.name)}
@@ -241,7 +264,7 @@ export function AvailableRoomsSection({
                     : "bg-amber-100 text-amber-800"
               }`}>
                 {!facility.isActive
-                  ? "Not Available"
+                  ? "Temporarily unavailable"
                   : bookingStatus.status === "booked"
                     ? "In Use"
                     : "Pending"}
@@ -249,18 +272,21 @@ export function AvailableRoomsSection({
             )}
           </div>
 
-          {!facility.isActive && (
+
+
+          <p className={`text-xs sm:text-sm leading-relaxed mb-2 flex-grow line-clamp-2 ${isAvailableForBooking ? "text-black-600" : "text-gray-500"}`}>
+            {facility.description || "No description provided."}
+          </p>
+
+                    {!facility.isActive && (
             <div className="mb-2 p-2 rounded-md border bg-red-50 border-red-100">
-              <div className="text-[10px] sm:text-xs font-medium text-red-800">Not Available</div>
+
+              <div className="text-[11px] font-bold uppercase text-red-700 mb-1 tracking-wide">Admin Note</div>
               {facility.unavailableReason && (
                 <div className="text-xs sm:text-sm text-red-700">{facility.unavailableReason}</div>
               )}
             </div>
           )}
-
-          <p className={`text-xs sm:text-sm leading-relaxed mb-2 flex-grow line-clamp-2 ${isAvailableForBooking ? "text-gray-600" : "text-gray-500"}`}>
-            {getFacilityDescriptionByName(facility.name)}
-          </p>
 
           {bookingStatus.booking && (user?.role === "admin" || bookingStatus.booking?.userId === user?.id) && (
             <>
@@ -299,12 +325,8 @@ export function AvailableRoomsSection({
               </div>
 
               <button
-                onClick={(event) => {
-                  event.stopPropagation();
-                  if (!canRequestBooking) return;
-                  handleOpenBooking(facility);
-                }}
-                disabled={!canRequestBooking}
+                onClick={handleBookingClick}
+                disabled={!canRequestBooking || loadingFacilityId === facility.id}
                 className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg font-medium text-xs sm:text-sm transition-colors duration-200 shadow-sm flex-shrink-0 ${
                   !facility.isActive
                     ? "bg-gray-300 text-gray-500 cursor-not-allowed"
@@ -315,7 +337,17 @@ export function AvailableRoomsSection({
                         : "bg-pink-50 hover:bg-pink-100 text-pink-700 border border-pink-200"
                 }`}
               >
-                {!facility.isActive ? "Unavailable" : isAvailableForBooking ? "Book Now" : isLibraryClosed ? "Request" : "Book Now"}
+                {loadingFacilityId === facility.id ? (
+                  <span className="flex items-center gap-1 justify-center">
+                    <svg className="animate-spin h-4 w-4 mr-1 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+                    </svg>
+                    Loading...
+                  </span>
+                ) : (
+                  !facility.isActive ? "Unavailable" : isAvailableForBooking ? "Book Now" : isLibraryClosed ? "Request" : "Book Now"
+                )}
               </button>
             </div>
           </div>
@@ -353,7 +385,7 @@ export function AvailableRoomsSection({
             </div>
           </div>
 
-          {variant === "full" && (
+          {/* {variant === "full" && (
             <div className="flex flex-col items-start sm:items-end gap-2 w-full sm:w-auto">
               {process.env.NODE_ENV !== "production" && (
                 <div className="flex flex-wrap items-center gap-2 w-full sm:justify-end">
@@ -367,7 +399,7 @@ export function AvailableRoomsSection({
                 </div>
               )}
             </div>
-          )}
+          )} */}
         </div>
 
                 {!isFacilitiesLoading && !isFacilitiesFetching && filteredFacilities.length > 0 && availableRooms.length === 0 && (

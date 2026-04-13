@@ -55,16 +55,18 @@ export function UserProfileDropdown({ user, onLogout }: UserProfileDropdownProps
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-[16rem] max-w-[22rem] p-2">
           <DropdownMenuLabel className="font-normal p-3">
-            <div className="text-sm text-gray-600">Signed in as</div>
+<div className="text-sm text-gray-600">Signed in as</div>
             <div className="font-semibold text-gray-900 truncate">
-              {user.firstName && user.lastName
-                ? `${user.firstName} ${user.lastName}`
+              {user.firstName
+                ? user.lastName
+                  ? `${user.firstName} ${user.lastName}`
+                  : user.firstName
                 : user.email}
             </div>
-            {user.firstName && user.lastName && (
+            {user.firstName && (
               <div className="text-sm text-gray-600 break-all whitespace-normal" title={user.email}>{user.email}</div>
             )}
-            <div className="mt-3 space-y-1">
+            <div className="mt-2 space-y-1">
               <div className="flex items-center text-xs">
                 <span className="font-semibold text-black-500 w-30">Role:</span>
                 <span className="ml-2 text-pink-700 px-2 py-0.5 font-medium">{user.role || 'N/A'}</span>

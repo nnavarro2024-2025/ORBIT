@@ -1,5 +1,5 @@
-
 import React, { useState } from "react";
+import { useQuery as useRQ, useMutation as useMut, useQueryClient as useQC } from "@tanstack/react-query";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/api";
 import CampusModal from "@/components/modals/campus/CampusModal";
@@ -10,6 +10,10 @@ type Campus = {
   isActive: boolean;
   sortOrder?: number;
 };
+type Facility = {
+  id: number;
+  name: string;
+};
 
 export default function CampusManagementSection() {
   const queryClient = useQueryClient();
@@ -17,6 +21,8 @@ export default function CampusManagementSection() {
   const [modalInitial, setModalInitial] = useState<Partial<Campus> | undefined>(undefined);
   const [modalMode, setModalMode] = useState<"add" | "edit">("add");
   const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [deleteFacilities, setDeleteFacilities] = useState<Facility[] | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const { data: campuses = [], isLoading } = useQuery<Campus[]>({
@@ -59,6 +65,7 @@ export default function CampusManagementSection() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/campuses"] });
       setDeleteId(null);
+      setDeleteFacilities(null);
     },
     onError: (e: any) => setError(e.message || "Failed to delete campus"),
   });
@@ -105,7 +112,10 @@ export default function CampusManagementSection() {
 
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
         {isLoading ? (
-          <div className="p-8 text-center text-gray-500">Loading campuses...</div>
+          <div className="p-8 text-center text-gray-500 flex flex-col items-center justify-center">
+            <svg className="animate-spin h-6 w-6 mb-2 text-blue-500" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+            Loading campuses...
+          </div>
         ) : campuses.length === 0 ? (
           <div className="p-8 text-center text-gray-400">
             <p className="text-lg mb-2">No campuses yet</p>
@@ -160,9 +170,25 @@ export default function CampusManagementSection() {
                           ) : "Enable"}</button>
                       )}
                       <button
-                        className="px-3 py-1.5 text-xs font-medium bg-red-50 border border-red-300 hover:bg-red-100 text-red-700 rounded-md shadow-sm transition-colors"
-                        onClick={() => setDeleteId(campus.id)}
-                      >Delete</button>
+                        className="px-3 py-1.5 text-xs font-medium bg-red-50 border border-red-300 hover:bg-red-100 text-red-700 rounded-md shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={async () => {
+                          setDeleteLoading(true);
+                          setDeleteId(campus.id);
+                          setDeleteFacilities(null);
+                          try {
+                            const res = await apiRequest("GET", `/api/admin/facilities?campusId=${campus.id}`);
+                            const facilities: Facility[] = await res.json();
+                            setDeleteFacilities(facilities);
+                          } catch (e) {
+                            setDeleteFacilities([]);
+                          } finally {
+                            setDeleteLoading(false);
+                          }
+                        }}
+                        disabled={deleteMutation.isPending}
+                      >{deleteMutation.isPending && deleteMutation.variables === campus.id ? (
+                          <span className="inline-flex items-center gap-1"><svg className="animate-spin h-3 w-3" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Deleting…</span>
+                        ) : "Delete"}</button>
                     </div>
                   </td>
                 </tr>
@@ -172,22 +198,43 @@ export default function CampusManagementSection() {
         )}
       </div>
 
-      {/* Delete Confirmation Dialog */}
+      {/* Delete Confirmation Dialog with Facilities List */}
       {deleteId !== null && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-lg shadow-xl max-w-sm w-full mx-4">
+          <div className="bg-white p-6 rounded-lg shadow-xl max-w-md w-full mx-4">
             <h3 className="text-lg font-semibold text-gray-800 mb-2">Delete Campus</h3>
-            <p className="text-sm text-gray-600 mb-5">Are you sure you want to delete this campus? This action cannot be undone. All facilities under this campus will be unlinked.</p>
-            <div className="flex gap-3 justify-end">
-              <button
-                className="px-4 py-2 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium transition-colors"
-                onClick={() => setDeleteId(null)}
-              >Cancel</button>
-              <button
-                className="px-4 py-2 rounded-md bg-red-600 hover:bg-red-700 text-white text-sm font-medium transition-colors"
-                onClick={() => deleteMutation.mutate(deleteId)}
-              >Delete</button>
-            </div>
+            {deleteLoading ? (
+              <div className="flex items-center gap-2 text-gray-500"><svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Loading facilities…</div>
+            ) : (
+              <>
+                {deleteFacilities && deleteFacilities.length > 0 ? (
+                  <>
+                    <p className="text-sm text-gray-600 mb-3">This campus has the following facilities. <span className="font-semibold text-red-600">Deleting the campus will also delete all these facilities and their bookings.</span></p>
+                    <ul className="mb-3 max-h-40 overflow-y-auto border border-gray-100 rounded bg-gray-50 px-3 py-2">
+                      {deleteFacilities.map(f => (
+                        <li key={f.id} className="py-1 text-gray-800">{f.name}</li>
+                      ))}
+                    </ul>
+                  </>
+                ) : (
+                  <p className="text-sm text-gray-600 mb-5">Are you sure you want to delete this campus? This action cannot be undone.</p>
+                )}
+                <div className="flex gap-3 justify-end mt-2">
+                  <button
+                    className="px-4 py-2 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium transition-colors"
+                    onClick={() => { setDeleteId(null); setDeleteFacilities(null); }}
+                    disabled={deleteMutation.isPending}
+                  >Cancel</button>
+                  <button
+                    className="px-4 py-2 rounded-md bg-red-600 hover:bg-red-700 text-white text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={() => deleteMutation.mutate(deleteId)}
+                    disabled={deleteMutation.isPending}
+                  >{deleteMutation.isPending ? (
+                      <span className="inline-flex items-center gap-1"><svg className="animate-spin h-3 w-3" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Deleting…</span>
+                    ) : "Delete"}</button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

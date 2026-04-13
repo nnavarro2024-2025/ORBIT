@@ -226,20 +226,11 @@ export function BookingForm({
   // Sync endTime whenever startTime changes
   useEffect(() => {
     if (!startTime) return;
-    if (!isAdmin) {
-      // Always reset to start + 2h, capped at 7:00 PM
-      const defaultEnd = new Date(startTime.getTime() + MAX_BOOKING_MS);
-      const opLimit = new Date(startTime); opLimit.setHours(19, 0, 0, 0);
-      form.setValue('endTime', defaultEnd > opLimit ? opLimit : defaultEnd);
-    } else {
-      // Admin: preserve chosen time but re-anchor date to startTime's date
-      const current = form.getValues('endTime') as Date | undefined;
-      if (current) {
-        const newEnd = new Date(startTime);
-        newEnd.setHours(current.getHours(), current.getMinutes(), 0, 0);
-        if (newEnd.getTime() !== current.getTime()) form.setValue('endTime', newEnd);
-      }
-    }
+    // Always reset to start + 2h, capped at 7:00 PM
+    const defaultEnd = new Date(startTime.getTime() + MAX_BOOKING_MS);
+    const opLimit = new Date(startTime); opLimit.setHours(19, 0, 0, 0);
+    const newEnd = defaultEnd > opLimit ? opLimit : defaultEnd;
+    form.setValue('endTime', newEnd);
   }, [startTime?.getTime()]);
 
   // Reset participants to 1 when facility changes
@@ -275,43 +266,44 @@ export function BookingForm({
     enabled: !!selectedCampus && !!facilityIdWatched && !!conflictDateStr,
   });
   const hasTimeConflict = useMemo(() => {
-    if (isAdmin || !startTime || !endTime || !facilityIdWatched || !conflictAvailData) return false;
+    if (!startTime || !endTime || !facilityIdWatched || !conflictAvailData) return false;
     const fd = (conflictAvailData as any).data?.find((item: any) => item.facility?.id === parseInt(facilityIdWatched));
     if (!fd) return false;
     return mergeBookedSlots(fd.slots ?? []).some(b => startTime < b.end && endTime > b.start);
-  }, [conflictAvailData, startTime?.getTime(), endTime?.getTime(), facilityIdWatched, isAdmin]);
+  }, [conflictAvailData, startTime?.getTime(), endTime?.getTime(), facilityIdWatched]);
 
-  // Operating hours / duration enforcement (non-admin only)
+
+  // Admin and user validation
   const hasEndAfterHours = useMemo(() => {
-    if (isAdmin || !endTime) return false;
+    if (!endTime) return false;
     return endTime.getHours() > 19 || (endTime.getHours() === 19 && endTime.getMinutes() > 0);
-  }, [endTime?.getTime(), isAdmin]);
+  }, [endTime?.getTime()]);
 
   const hasEndExceedsMax = useMemo(() => {
-    if (isAdmin || !startTime || !endTime) return false;
+    if (!startTime || !endTime) return false;
     return endTime.getTime() > startTime.getTime() + MAX_BOOKING_MS;
-  }, [startTime?.getTime(), endTime?.getTime(), isAdmin]);
+  }, [startTime?.getTime(), endTime?.getTime()]);
 
   const hasBookingTooShort = useMemo(() => {
-    if (isAdmin || !startTime || !endTime) return false;
+    if (!startTime || !endTime) return false;
     const durationMs = endTime.getTime() - startTime.getTime();
     return durationMs > 0 && durationMs < 30 * 60 * 1000;
-  }, [startTime?.getTime(), endTime?.getTime(), isAdmin]);
+  }, [startTime?.getTime(), endTime?.getTime()]);
 
   const hasStartInPast = useMemo(() => {
-    if (isAdmin || !startTime) return false;
+    if (!startTime) return false;
     return startTime.getTime() < Date.now();
-  }, [startTime?.getTime(), isAdmin]);
+  }, [startTime?.getTime()]);
 
   const hasStartBeforeHours = useMemo(() => {
-    if (isAdmin || !startTime) return false;
+    if (!startTime) return false;
     return startTime.getHours() < 7 || (startTime.getHours() === 7 && startTime.getMinutes() < 30);
-  }, [startTime?.getTime(), isAdmin]);
+  }, [startTime?.getTime()]);
 
   const hasInvalidTimeOrder = useMemo(() => {
-    if (isAdmin || !startTime || !endTime) return false;
+    if (!startTime || !endTime) return false;
     return endTime.getTime() <= startTime.getTime();
-  }, [startTime?.getTime(), endTime?.getTime(), isAdmin]);
+  }, [startTime?.getTime(), endTime?.getTime()]);
 
   // Granular red flags per input box
   const startDateHasError = !isAdmin && hasStartInPast;
@@ -319,6 +311,14 @@ export function BookingForm({
   const endTimeHasError = !isAdmin && (hasEndAfterHours || hasEndExceedsMax || hasBookingTooShort || hasInvalidTimeOrder || hasTimeConflict);
 
   const hasAnyTimeError = !isAdmin && (hasTimeConflict || hasEndAfterHours || hasEndExceedsMax || hasBookingTooShort || hasStartInPast || hasStartBeforeHours || hasInvalidTimeOrder);
+
+  // Admin warnings (do not block submit)
+  const adminWarnings: string[] = [];
+  if (isAdmin) {
+    if (hasStartInPast) adminWarnings.push('Start time is in the past.');
+    if (hasInvalidTimeOrder) adminWarnings.push('Start time must be earlier than the end time.');
+    if (hasTimeConflict) adminWarnings.push('Overlaps with an existing booking. You must cancel the other booking if you want to override.');
+  }
 
   const purposeValue = form.watch('purpose');
   const isPurposeEmpty = !purposeValue || purposeValue.trim().length === 0;
@@ -526,7 +526,15 @@ export function BookingForm({
             {hasEndExceedsMax && <li>• Maximum booking duration is 2 hours.</li>}
             {hasBookingTooShort && <li>• Bookings must be at least 30 minutes long.</li>}
             {hasTimeConflict && <li>• Your selected time overlaps with an existing booking. Please choose a different time.</li>}
-            
+          </ul>
+        )}
+
+        {/* Admin warnings (non-blocking) */}
+        {isAdmin && adminWarnings.length > 0 && (
+          <ul className="text-xs text-amber-700 space-y-0.5 mt-1">
+            {adminWarnings.map((msg, idx) => (
+              <li key={idx}>• {msg}</li>
+            ))}
           </ul>
         )}
 
@@ -626,14 +634,14 @@ export function BookingForm({
           </Button>
           <Button
             type="submit"
-            disabled={isSubmitting || isPurposeEmpty || hasAnyTimeError || hasDailyLimitError || !selectedCampus}
+            disabled={isSubmitting || isPurposeEmpty || hasDailyLimitError || !selectedCampus}
             className={hasDailyLimitError ? 'opacity-60 cursor-not-allowed' : ''}
           >
             {isSubmitting
               ? 'Creating...'
               : hasDailyLimitError
               ? 'Daily Limit Reached'
-              : hasAnyTimeError
+              : hasAnyTimeError && !isAdmin
               ? 'Fix Time Errors'
               : 'Create Booking'}
           </Button>

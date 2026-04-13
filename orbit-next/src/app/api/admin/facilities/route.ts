@@ -12,6 +12,7 @@ const createFacilitySchema = z.object({
   capacity: z.number().int().min(1),
   image: z.string().max(255).optional(),
   campusId: z.number().int().optional(),
+  allowedRoles: z.array(z.string()).min(1).optional(),
 });
 
 export async function GET(request: NextRequest) {
@@ -19,6 +20,18 @@ export async function GET(request: NextRequest) {
   if (!authResult.ok) return authResult.response;
 
   try {
+    const { searchParams } = new URL(request.url);
+    const campusIdParam = searchParams.get("campusId");
+    if (campusIdParam) {
+      const campusId = parseInt(campusIdParam, 10);
+      if (isNaN(campusId)) {
+        return NextResponse.json({ message: "Invalid campusId" }, { status: 400 });
+      }
+      const facilities = await storage.getFacilitiesByCampusId(campusId);
+      // Only return id and name for modal
+      return NextResponse.json(facilities.map(f => ({ id: f.id, name: f.name })), { status: 200 });
+    }
+
     const [allFacilities, allCampuses] = await Promise.all([
       storage.getAllFacilities(),
       storage.getAllCampuses(),

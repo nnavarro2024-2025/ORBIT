@@ -7,6 +7,7 @@ import { useToast } from "@/hooks/ui";
 import { Settings, User as UserIcon, ArrowLeft, Check, Eye, EyeOff } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getPasswordChecks, isStrongPassword } from "@/lib/utils";
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import {
   AlertDialog,
   AlertDialogTrigger,
@@ -180,24 +181,33 @@ export default function ProfileModal({ isOpen, onClose, startInSettings }: Profi
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-lg w-full">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            {showSettings ? (
-              <button 
-                onClick={handleToggleSettings} 
-                className="p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200"
-              >
-                <ArrowLeft className="h-5 w-5" />
-              </button>
-            ) : (
-              <UserIcon className="h-5 w-5" />
-            )}
-            {showSettings ? "User Settings" : "User Profile"}
-          </DialogTitle>
-        </DialogHeader>
-        <DialogDescription>
-          {showSettings ? "Manage your preferences and account settings." : "View your personal information."}
-        </DialogDescription>
+<VisuallyHidden asChild>
+  <DialogTitle>User Profile Settings</DialogTitle>
+</VisuallyHidden>
+
+{!showSettings && (
+  <DialogHeader>
+    <DialogTitle className="flex items-center gap-2">
+      <UserIcon className="h-5 w-5" />
+      User Profile
+    </DialogTitle>
+    <DialogDescription>
+      View your personal information.
+    </DialogDescription>
+  </DialogHeader>
+)}
+
+{showSettings && (
+  <div className="flex items-center gap-2 mb-4">
+    <button 
+      onClick={onClose}
+      className="p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200"
+    >
+      <ArrowLeft className="h-5 w-5" />
+    </button>
+    <h2 className="text-lg font-semibold">User Settings</h2>
+  </div>
+)}
         <div className="flex-1 overflow-y-auto">
           {user ? (
             <>
@@ -247,13 +257,14 @@ export default function ProfileModal({ isOpen, onClose, startInSettings }: Profi
               <span className="font-semibold text-black-500 ">Name:</span>
               <span className="ml-2 text-black-800 font-medium">{user.firstName && user.lastName
                 ? `${user.firstName} ${user.lastName}`
-                : user.email}</span>
+                : user.firstName || user.lastName || 'N/A'}
+              </span>
             </div>
 
             <div className=" text-sm font-semibold text-gray-900 truncate">
 
             <span className="font-semibold text-black-500 ">Email:</span>
-            {user.firstName && user.lastName && (
+            {user.email && (
               <>
                 <span className="ml-2 text-sm text-pink-700 break-all font-medium whitespace-normal" title={user.email}>{user.email}</span>
               </>

@@ -14,6 +14,7 @@ interface Facility {
   description: string;
   capacity: number;
   isActive: boolean;
+  allowedRoles?: string[];
 }
 
 interface EditFacilityModalProps {
@@ -57,6 +58,7 @@ function EditFacilityModalContent({ facility, onClose, onSave }: EditFacilityMod
   const [description, setDescription] = useState(facility?.description ?? "");
   const [capacity, setCapacity] = useState(facility?.capacity ?? 0);
   const [isActive, setIsActive] = useState(facility?.isActive ?? false);
+  const [allowedRoles, setAllowedRoles] = useState<string[]>(facility?.allowedRoles ?? ["student", "faculty"]);
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -91,12 +93,20 @@ function EditFacilityModalContent({ facility, onClose, onSave }: EditFacilityMod
       });
       return;
     }
-
+    if (allowedRoles.length === 0) {
+      toast({
+        title: "Validation Error",
+        description: "Please select at least one allowed role.",
+        variant: "destructive",
+      });
+      return;
+    }
     updateFacilityMutation.mutate({
       name,
       description,
       capacity,
       isActive,
+      allowedRoles,
     });
   };
 
@@ -150,6 +160,39 @@ function EditFacilityModalContent({ facility, onClose, onSave }: EditFacilityMod
             onCheckedChange={setIsActive}
             className="col-span-3"
           />
+        </div>
+      </div>
+      <div className="grid grid-cols-4 items-center gap-4">
+        <Label className="text-right">Who can book</Label>
+        <div className="col-span-3 flex flex-col gap-2">
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={allowedRoles.includes("student")}
+              onChange={(e) => {
+                setAllowedRoles((prev) =>
+                  e.target.checked
+                    ? Array.from(new Set([...prev, "student"]))
+                    : prev.filter((r) => r !== "student")
+                );
+              }}
+            />
+            Student
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={allowedRoles.includes("faculty")}
+              onChange={(e) => {
+                setAllowedRoles((prev) =>
+                  e.target.checked
+                    ? Array.from(new Set([...prev, "faculty"]))
+                    : prev.filter((r) => r !== "faculty")
+                );
+              }}
+            />
+            Faculty
+          </label>
         </div>
       </div>
       <DialogFooter>
